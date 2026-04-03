@@ -6,6 +6,9 @@ settings:
 
 catalogs:
   default:
+    '@napi-rs/canvas':
+      specifier: ^0.1.97
+      version: 0.1.97
     '@types/node':
       specifier: ^25
       version: 25.5.1
@@ -123,7 +126,7 @@ importers:
         version: 0.1.15(@types/node@25.5.1)(esbuild@0.27.7)(jiti@2.6.1)(typescript@6.0.2)(vite@8.0.3(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@types/node@25.5.1)(esbuild@0.27.7)(jiti@2.6.1)(yaml@2.8.3))(yaml@2.8.3)
     optionalDependencies:
       '@napi-rs/canvas':
-        specifier: ^0.1.97
+        specifier: 'catalog:'
         version: 0.1.97
 
   packages/parser:

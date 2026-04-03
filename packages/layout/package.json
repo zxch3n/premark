@@ -28,6 +28,6 @@
     "vite-plus": "catalog:"
   },
   "optionalDependencies": {
-    "@napi-rs/canvas": "^0.1.97"
+    "@napi-rs/canvas": "catalog:"
   }
 }
