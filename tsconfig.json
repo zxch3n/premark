@@ -3,6 +3,7 @@
     "target": "ES2023",
     "module": "nodenext",
     "moduleResolution": "nodenext",
+    "types": ["node"],
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "esModuleInterop": true,
@@ -11,5 +12,5 @@
     "skipLibCheck": true,
     "ignoreDeprecations": "6.0"
   },
-  "include": ["apps", "packages", "stories", ".storybook", "vitest.setup.ts"]
+  "include": ["apps", "packages", "scripts", "stories", ".storybook", "vitest.setup.ts"]
 }
