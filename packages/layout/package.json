@@ -1,0 +1,22 @@
+{
+  "name": "@pretext-md/layout",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": {
+      "import": "./src/index.ts",
+      "types": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@chenglou/pretext": "^0.0.4",
+    "@pretext-md/parser": "workspace:*",
+    "@pretext-md/highlight": "workspace:*",
+    "markdown-parser": "^0.1.1"
+  }
+}

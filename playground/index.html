@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>@pretext-md Playground</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+    }
+    .panel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid #d0d7de;
+    }
+    .panel:last-child { border-right: none; }
+    .panel-header {
+      padding: 8px 16px;
+      background: #f6f8fa;
+      border-bottom: 1px solid #d0d7de;
+      font-weight: 700;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .panel-header .info { font-weight: 400; color: #57606a; font-size: 12px; }
+    textarea {
+      flex: 1;
+      padding: 16px;
+      border: none;
+      outline: none;
+      resize: none;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    .output {
+      flex: 1;
+      overflow: auto;
+      padding: 16px;
+    }
+    .output-raw {
+      flex: 1;
+      overflow: auto;
+      padding: 16px;
+      font-family: monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+      background: #1e1e1e;
+      color: #d4d4d4;
+    }
+    #controls {
+      padding: 8px 16px;
+      background: #f6f8fa;
+      border-bottom: 1px solid #d0d7de;
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      font-size: 13px;
+    }
+    #controls label { display: flex; align-items: center; gap: 4px; }
+    #controls input[type="number"] { width: 60px; }
+    .tabs {
+      display: flex;
+      gap: 0;
+    }
+    .tab {
+      padding: 4px 12px;
+      cursor: pointer;
+      border: 1px solid #d0d7de;
+      background: #fff;
+      font-size: 12px;
+    }
+    .tab:first-child { border-radius: 4px 0 0 4px; }
+    .tab:last-child { border-radius: 0 4px 4px 0; }
+    .tab.active { background: #0969da; color: #fff; border-color: #0969da; }
+  </style>
+</head>
+<body>
+  <div class="panel">
+    <div class="panel-header">Markdown Input</div>
+    <textarea id="input"># Hello World
+
+This is a **bold** and *italic* paragraph with `inline code`.
+
+## Code Block
+
+```typescript
+function greet(name: string): string {
+  return `Hello, ${name}!`
+}
+
+const result = greet("World")
+console.log(result)
+```
+
+## Table
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Headings | ✅ | h1-h6 |
+| Bold/Italic | ✅ | Mixed fonts |
+| Code blocks | ✅ | Prism.js |
+| Tables | ✅ | GFM |
+| Lists | ✅ | Nested |
+
+## Lists
+
+- First item
+- Second item with **bold**
+  - Nested item
+  - Another nested
+- Third item
+
+1. Ordered first
+2. Ordered second
+3. Ordered third
+
+> This is a blockquote.
+> It can span multiple lines.
+
+---
+
+After the thematic break.</textarea>
+  </div>
+
+  <div class="panel">
+    <div class="panel-header">
+      <span>Output</span>
+      <div class="tabs">
+        <div class="tab active" data-tab="rendered">Rendered</div>
+        <div class="tab" data-tab="layout">Layout IR</div>
+      </div>
+      <span class="info" id="stats"></span>
+    </div>
+    <div id="controls">
+      <label>Width: <input type="number" id="width" value="600" min="200" max="1200" step="10" /></label>
+      <label>
+        <input type="checkbox" id="streaming" /> Streaming mode
+      </label>
+    </div>
+    <div class="output" id="rendered-output"></div>
+    <div class="output-raw" id="layout-output" style="display:none"></div>
+  </div>
+
+  <script type="module">
+    import { createLayoutEngine } from '../packages/layout/src/index.ts'
+    import { renderToHtml } from '../packages/html-renderer/src/index.ts'
+    import { createHighlighter } from '../packages/highlight/src/index.ts'
+
+    const input = document.getElementById('input')
+    const renderedOutput = document.getElementById('rendered-output')
+    const layoutOutput = document.getElementById('layout-output')
+    const widthInput = document.getElementById('width')
+    const streamingCheck = document.getElementById('streaming')
+    const stats = document.getElementById('stats')
+
+    // Tab switching
+    document.querySelectorAll('.tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'))
+        tab.classList.add('active')
+        const tabName = tab.dataset.tab
+        renderedOutput.style.display = tabName === 'rendered' ? 'block' : 'none'
+        layoutOutput.style.display = tabName === 'layout' ? 'block' : 'none'
+      })
+    })
+
+    // Wait for fonts
+    await document.fonts.ready
+
+    const highlighter = createHighlighter()
+    const engine = createLayoutEngine({
+      fontTheme: 'github',
+      highlighter,
+    })
+
+    function update() {
+      const md = input.value
+      const width = parseInt(widthInput.value, 10) || 600
+
+      const t0 = performance.now()
+
+      if (streamingCheck.checked) {
+        // Simulate streaming: feed 50 chars at a time
+        const stream = engine.createStream(width)
+        const chunkSize = 50
+        for (let i = 0; i < md.length; i += chunkSize) {
+          stream.push(md.slice(i, i + chunkSize))
+        }
+        stream.finish()
+        const layout = stream.getLayout()
+        const t1 = performance.now()
+
+        const { html, css } = renderToHtml(layout)
+        renderedOutput.innerHTML = `<style>${css}</style>${html}`
+        layoutOutput.textContent = JSON.stringify(layout, null, 2)
+        stats.textContent = `${layout.blocks.length} blocks, ${layout.lines.length} lines, ${layout.totalHeight.toFixed(1)}px, ${(t1 - t0).toFixed(2)}ms (streaming)`
+      } else {
+        const layout = engine.layout(md, width)
+        const t1 = performance.now()
+
+        const { html, css } = renderToHtml(layout)
+        renderedOutput.innerHTML = `<style>${css}</style>${html}`
+        layoutOutput.textContent = JSON.stringify(layout, null, 2)
+        stats.textContent = `${layout.blocks.length} blocks, ${layout.lines.length} lines, ${layout.totalHeight.toFixed(1)}px, ${(t1 - t0).toFixed(2)}ms`
+      }
+    }
+
+    input.addEventListener('input', update)
+    widthInput.addEventListener('input', update)
+    streamingCheck.addEventListener('change', update)
+
+    // Initial render
+    update()
+  </script>
+</body>
+</html>

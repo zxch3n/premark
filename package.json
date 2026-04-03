@@ -1,0 +1,19 @@
+{
+  "name": "pretext-md",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --config playground/vite.config.ts",
+    "build": "pnpm -r run build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "oxlint ."
+  },
+  "devDependencies": {
+    "@napi-rs/canvas": "^0.1.97",
+    "oxlint": "^0.16.10",
+    "typescript": "^5.8.3",
+    "vite": "^8.0.3",
+    "vitest": "^3.1.1"
+  }
+}
