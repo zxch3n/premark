@@ -12,6 +12,9 @@ catalogs:
     '@types/node':
       specifier: ^25
       version: 25.5.1
+    jiti:
+      specifier: ^2.6.1
+      version: 2.6.1
     typescript:
       specifier: ^6
       version: 6.0.2
@@ -27,6 +30,9 @@ importers:
 
   .:
     devDependencies:
+      '@napi-rs/canvas':
+        specifier: 'catalog:'
+        version: 0.1.97
       '@storybook/html':
         specifier: ^10.3.4
         version: 10.3.4(storybook@10.3.4(@testing-library/dom@10.4.1)(react-dom@19.2.4(react@19.2.4))(react@19.2.4))
@@ -39,6 +45,9 @@ importers:
       '@types/prismjs':
         specifier: ^1.26.6
         version: 1.26.6
+      jiti:
+        specifier: 'catalog:'
+        version: 2.6.1
       storybook:
         specifier: ^10.3.4
         version: 10.3.4(@testing-library/dom@10.4.1)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
@@ -1720,7 +1729,6 @@ snapshots:
       '@napi-rs/canvas-linux-x64-musl': 0.1.97
       '@napi-rs/canvas-win32-arm64-msvc': 0.1.97
       '@napi-rs/canvas-win32-x64-msvc': 0.1.97
-    optional: true
 
   '@napi-rs/wasm-runtime@1.1.2(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)':
     dependencies:
@@ -2265,8 +2273,7 @@ snapshots:
 
   isexe@2.0.0: {}
 
-  jiti@2.6.1:
-    optional: true
+  jiti@2.6.1: {}
 
   js-tokens@4.0.0: {}
 

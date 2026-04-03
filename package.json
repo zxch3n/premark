@@ -7,6 +7,8 @@
     "ready": "vp check && vp test && vp run build",
     "dev": "vp run playground#dev",
     "build": "vp run @pretext-md/parser#build && vp run @pretext-md/layout#build && vp run @pretext-md/highlight#build && vp run @pretext-md/html-renderer#build && vp run playground#build",
+    "render:markdown": "jiti scripts/render-markdown.ts",
+    "render:examples": "jiti scripts/render-markdown.ts examples/markdown --output examples/rendered --width 920 --scale 2",
     "test": "vp test",
     "typecheck": "vp exec tsc --noEmit -p tsconfig.json",
     "storybook": "vp exec storybook dev -p 6006",
@@ -14,10 +16,12 @@
     "prepare": "vp config"
   },
   "devDependencies": {
+    "@napi-rs/canvas": "catalog:",
     "@storybook/html": "^10.3.4",
     "@storybook/html-vite": "^10.3.4",
     "@types/node": "catalog:",
     "@types/prismjs": "^1.26.6",
+    "jiti": "catalog:",
     "storybook": "^10.3.4",
     "typescript": "catalog:",
     "vite-plus": "catalog:"
