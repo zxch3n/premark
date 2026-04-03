@@ -10,7 +10,7 @@ export interface NormalizedBlock {
   indent: number;
   marginTop: number;
   marginBottom: number;
-  inline?: MarkdownInline[];
+  inline?: readonly MarkdownInline[];
   code?: string;
   lang?: string;
   html?: string;
@@ -39,7 +39,7 @@ interface WalkState {
   listMarker?: string;
 }
 
-function extractInlineText(nodes: MarkdownInline[]): string {
+function extractInlineText(nodes: readonly MarkdownInline[]): string {
   return nodes
     .map((node) => {
       switch (node.type) {
@@ -269,7 +269,7 @@ function pushLeafBlock(
 
 function walkBlocks(
   output: NormalizedBlock[],
-  blocks: MarkdownBlock[],
+  blocks: readonly MarkdownBlock[],
   sourceBlockIndex: number,
   state: WalkState,
   spacing: SpacingConfig,
@@ -337,7 +337,7 @@ function normalizeSourceBlock(
 }
 
 export function normalizeDocument(
-  blocks: MarkdownBlock[],
+  blocks: readonly MarkdownBlock[],
   spacing: SpacingConfig,
   sourceBlockIndexOffset = 0,
 ): NormalizedDocument {
@@ -360,13 +360,13 @@ export function normalizeDocument(
 }
 
 export function normalizeBlocks(
-  blocks: MarkdownBlock[],
+  blocks: readonly MarkdownBlock[],
   spacing: SpacingConfig,
 ): NormalizedBlock[] {
   return normalizeDocument(blocks, spacing).blocks;
 }
 
-export function inlineIsPlainText(nodes: MarkdownInline[] | undefined): boolean {
+export function inlineIsPlainText(nodes: readonly MarkdownInline[] | undefined): boolean {
   if (nodes === undefined) {
     return false;
   }

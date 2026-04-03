@@ -154,7 +154,7 @@ export class LayoutEngineImpl implements LayoutEngine {
 
   private lastParseState: IncrementalParseState = createIncrementalParseState();
 
-  private lastBlocks: MarkdownBlock[] = [];
+  private lastBlocks: readonly MarkdownBlock[] = [];
 
   private lastNormalizedDocument: NormalizedDocument = emptyNormalizedDocument();
 
@@ -203,7 +203,7 @@ export class LayoutEngineImpl implements LayoutEngine {
   }
 
   layoutFromBlocks(
-    blocks: MarkdownBlock[],
+    blocks: readonly MarkdownBlock[],
     containerWidth: number,
     markdown = this.lastMarkdown,
   ): DocumentLayout {
@@ -243,7 +243,7 @@ export class LayoutEngineImpl implements LayoutEngine {
     this.lastDirtyFromLayoutBlock = 0;
   }
 
-  getLastBlocks(): MarkdownBlock[] {
+  getLastBlocks(): readonly MarkdownBlock[] {
     return this.lastBlocks;
   }
 

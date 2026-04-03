@@ -23,148 +23,148 @@ export type MarkdownInline =
   | HtmlNode;
 
 export interface HeadingNode {
-  type: "heading";
-  level: 1 | 2 | 3 | 4 | 5 | 6;
-  children: MarkdownInline[];
+  readonly type: "heading";
+  readonly level: 1 | 2 | 3 | 4 | 5 | 6;
+  readonly children: readonly MarkdownInline[];
 }
 
 export interface ParagraphNode {
-  type: "paragraph";
-  children: MarkdownInline[];
+  readonly type: "paragraph";
+  readonly children: readonly MarkdownInline[];
 }
 
 export interface CodeBlockNode {
-  type: "code-block";
-  content: string;
-  info?: string;
+  readonly type: "code-block";
+  readonly content: string;
+  readonly info?: string;
 }
 
 export interface ListNode {
-  type: "list";
-  kind: "ordered" | "unordered";
-  start: number;
-  marker: string;
-  items: ListItemNode[];
+  readonly type: "list";
+  readonly kind: "ordered" | "unordered";
+  readonly start: number;
+  readonly marker: string;
+  readonly items: readonly ListItemNode[];
 }
 
 export interface ListItemNode {
-  type: "list-item";
-  checked?: boolean;
-  children: MarkdownBlock[];
+  readonly type: "list-item";
+  readonly checked?: boolean;
+  readonly children: readonly MarkdownBlock[];
 }
 
 export interface BlockquoteNode {
-  type: "blockquote";
-  children: MarkdownBlock[];
+  readonly type: "blockquote";
+  readonly children: readonly MarkdownBlock[];
 }
 
 export interface TableNode {
-  type: "table";
-  head: {
-    cells: TableCellNode[];
+  readonly type: "table";
+  readonly head: {
+    readonly cells: readonly TableCellNode[];
   };
-  body: {
-    rows: TableRowNode[];
+  readonly body: {
+    readonly rows: readonly TableRowNode[];
   };
 }
 
 export interface TableRowNode {
-  cells: TableCellNode[];
+  readonly cells: readonly TableCellNode[];
 }
 
 export interface TableCellNode {
-  align: "left" | "center" | "right" | null;
-  children: MarkdownInline[];
+  readonly align: "left" | "center" | "right" | null;
+  readonly children: readonly MarkdownInline[];
 }
 
 export interface HtmlBlockNode {
-  type: "html-block";
-  content: string;
+  readonly type: "html-block";
+  readonly content: string;
 }
 
 export interface ThematicBreakNode {
-  type: "thematic-break";
+  readonly type: "thematic-break";
 }
 
 export interface TextNode {
-  type: "text";
-  text: string;
+  readonly type: "text";
+  readonly text: string;
 }
 
 export interface SoftBreakNode {
-  type: "softbreak";
+  readonly type: "softbreak";
 }
 
 export interface HardBreakNode {
-  type: "hardbreak";
+  readonly type: "hardbreak";
 }
 
 export interface StrongNode {
-  type: "strong";
-  children: MarkdownInline[];
+  readonly type: "strong";
+  readonly children: readonly MarkdownInline[];
 }
 
 export interface EmphasisNode {
-  type: "emphasis";
-  children: MarkdownInline[];
+  readonly type: "emphasis";
+  readonly children: readonly MarkdownInline[];
 }
 
 export interface StrikethroughNode {
-  type: "strikethrough";
-  children: MarkdownInline[];
+  readonly type: "strikethrough";
+  readonly children: readonly MarkdownInline[];
 }
 
 export interface CodeSpanNode {
-  type: "code-span";
-  text: string;
+  readonly type: "code-span";
+  readonly text: string;
 }
 
 export interface LinkNode {
-  type: "link";
-  href: string;
-  title?: string;
-  children: MarkdownInline[];
+  readonly type: "link";
+  readonly href: string;
+  readonly title?: string;
+  readonly children: readonly MarkdownInline[];
 }
 
 export interface ImageNode {
-  type: "image";
-  href: string;
-  title?: string;
-  children: MarkdownInline[];
+  readonly type: "image";
+  readonly href: string;
+  readonly title?: string;
+  readonly children: readonly MarkdownInline[];
 }
 
 export interface HtmlNode {
-  type: "html";
-  content: string;
+  readonly type: "html";
+  readonly content: string;
 }
 
 export interface BlockSpan {
-  from: number;
-  to: number;
-  type: string;
-  signature: number;
+  readonly from: number;
+  readonly to: number;
+  readonly type: string;
+  readonly signature: number;
 }
 
 export interface TextChange {
-  fromA: number;
-  toA: number;
-  fromB: number;
-  toB: number;
-  changedChars: number;
-  changedRatio: number;
-  changedLines: number;
+  readonly fromA: number;
+  readonly toA: number;
+  readonly fromB: number;
+  readonly toB: number;
+  readonly changedChars: number;
+  readonly changedRatio: number;
+  readonly changedLines: number;
 }
 
 export interface IncrementalParseState {
-  text: string;
-  tree: Tree;
-  fragments: readonly TreeFragment[];
-  blocks: MarkdownBlock[];
-  blockSpans: BlockSpan[];
-  closedBlocks: MarkdownBlock[];
-  partialBlocks: MarkdownBlock[];
-  sourceLength: number;
-  version: number;
+  readonly text: string;
+  readonly tree: Tree;
+  readonly fragments: readonly TreeFragment[];
+  readonly blocks: readonly MarkdownBlock[];
+  readonly blockSpans: readonly BlockSpan[];
+  readonly closedBlocks: readonly MarkdownBlock[];
+  readonly partialBlocks: readonly MarkdownBlock[];
+  readonly sourceLength: number;
+  readonly version: number;
 }
 
 export interface IncrementalParseOptions {
@@ -174,36 +174,36 @@ export interface IncrementalParseOptions {
 }
 
 export interface IncrementalParseResult extends StreamParseSnapshot {
-  state: IncrementalParseState;
-  mode: "full" | "incremental";
-  change: TextChange | null;
-  dirtyFromBlock: number;
-  dirtyToBlock: number;
-  reusedPrefixCount: number;
-  reusedSuffixCount: number;
-  removedCount: number;
+  readonly state: IncrementalParseState;
+  readonly mode: "full" | "incremental";
+  readonly change: TextChange | null;
+  readonly dirtyFromBlock: number;
+  readonly dirtyToBlock: number;
+  readonly reusedPrefixCount: number;
+  readonly reusedSuffixCount: number;
+  readonly removedCount: number;
 }
 
 export interface StreamParseSnapshot {
-  allBlocks: MarkdownBlock[];
-  closedBlocks: MarkdownBlock[];
-  partialBlocks: MarkdownBlock[];
-  sourceLength: number;
+  readonly allBlocks: readonly MarkdownBlock[];
+  readonly closedBlocks: readonly MarkdownBlock[];
+  readonly partialBlocks: readonly MarkdownBlock[];
+  readonly sourceLength: number;
 }
 
 export interface StreamParseResult extends StreamParseSnapshot {
-  emittedBlocks: MarkdownBlock[];
+  readonly emittedBlocks: readonly MarkdownBlock[];
 }
 
 export interface BlockDiffEntry<T> {
-  index: number;
-  previous?: T;
-  next?: T;
+  readonly index: number;
+  readonly previous?: T;
+  readonly next?: T;
 }
 
 export interface BlockDiffResult<T> {
-  dirtyFromBlock: number;
-  appendedBlocks: T[];
-  modifiedBlocks: BlockDiffEntry<T>[];
-  removedCount: number;
+  readonly dirtyFromBlock: number;
+  readonly appendedBlocks: readonly T[];
+  readonly modifiedBlocks: readonly BlockDiffEntry<T>[];
+  readonly removedCount: number;
 }

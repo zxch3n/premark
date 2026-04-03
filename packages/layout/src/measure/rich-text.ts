@@ -41,7 +41,7 @@ export interface PreparedRichText {
 }
 
 export interface PrepareRichTextOptions {
-  nodes: MarkdownInline[];
+  nodes: readonly MarkdownInline[];
   fonts: ResolvedFonts;
   baseFont: string;
   lineHeight: number;
@@ -147,7 +147,7 @@ function pushPreparedText(
 
 function flattenInlineNodes(
   target: PreparedToken[],
-  nodes: MarkdownInline[],
+  nodes: readonly MarkdownInline[],
   fonts: ResolvedFonts,
   baseFont: string,
   state: StyleState,
