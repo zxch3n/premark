@@ -31,8 +31,12 @@ function px(value: number): string {
   return `${value}px`;
 }
 
+function normalizeWeight(weight: number): number {
+  return Math.min(900, Math.max(100, Math.floor(weight / 100) * 100));
+}
+
 function font(style: string, weight: number, size: number, family: string): string {
-  return `${style} ${weight} ${px(size)} ${family}`;
+  return `${style} ${normalizeWeight(weight)} ${px(size)} ${family}`;
 }
 
 export function resolveFonts(
