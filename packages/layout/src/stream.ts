@@ -1,4 +1,4 @@
-import { diffBlocks, StreamParser } from "@pretext-md/parser";
+import { StreamParser } from "@pretext-md/parser";
 
 import type { DocumentLayout, LayoutDelta, LayoutStream } from "./types.ts";
 
@@ -44,25 +44,25 @@ class LayoutStreamImpl implements LayoutStream {
   }
 
   push(chunk: string): LayoutDelta {
-    const previousBlocks = this.blocks;
     const previousLayout = this.layout;
     const snapshot = this.parser.push(chunk);
     this.blocks = snapshot.allBlocks;
-    const blockDiff = diffBlocks(previousBlocks, this.blocks);
-    const nextLayout = this.engine.layoutFromBlocks(this.blocks, this.containerWidth);
+    const parseResult = this.parser.getLastResult();
+    const nextLayout =
+      parseResult === null
+        ? this.engine.layoutFromBlocks(this.blocks, this.containerWidth)
+        : this.engine.applyParseResult(parseResult, this.containerWidth);
     this.layout = nextLayout;
-    return createDelta(previousLayout, nextLayout, blockDiff.dirtyFromBlock);
+    return createDelta(previousLayout, nextLayout, this.engine.getLastDirtyFromLayoutBlock());
   }
 
   finish(): LayoutDelta {
-    const previousBlocks = this.blocks;
     const previousLayout = this.layout;
     const snapshot = this.parser.finish();
     this.blocks = snapshot.allBlocks;
-    const blockDiff = diffBlocks(previousBlocks, this.blocks);
-    const nextLayout = this.engine.layoutFromBlocks(this.blocks, this.containerWidth);
+    const nextLayout = previousLayout;
     this.layout = nextLayout;
-    return createDelta(previousLayout, nextLayout, blockDiff.dirtyFromBlock);
+    return createDelta(previousLayout, nextLayout, nextLayout.blocks.length);
   }
 
   getLayout() {

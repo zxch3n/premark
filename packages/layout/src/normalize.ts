@@ -3,6 +3,7 @@ import type { MarkdownBlock, MarkdownInline } from "@pretext-md/parser";
 import type { BlockContext, BlockMeta, BlockType, SpacingConfig } from "./types.ts";
 
 export interface NormalizedBlock {
+  sourceBlockIndex: number;
   type: BlockType;
   meta: BlockMeta;
   context: BlockContext;
@@ -18,6 +19,16 @@ export interface NormalizedBlock {
     alt: string;
   };
   table?: Extract<MarkdownBlock, { type: "table" }>;
+}
+
+export interface SourceBlockRange {
+  from: number;
+  to: number;
+}
+
+export interface NormalizedDocument {
+  blocks: NormalizedBlock[];
+  sourceBlockRanges: SourceBlockRange[];
 }
 
 interface WalkState {
@@ -102,6 +113,7 @@ function pushBlock(
 function pushLeafBlock(
   output: NormalizedBlock[],
   block: MarkdownBlock,
+  sourceBlockIndex: number,
   state: WalkState,
   spacing: SpacingConfig,
 ): void {
@@ -111,6 +123,7 @@ function pushLeafBlock(
       pushBlock(
         output,
         {
+          sourceBlockIndex,
           type: "image",
           meta: {
             type: "image",
@@ -132,6 +145,7 @@ function pushLeafBlock(
     pushBlock(
       output,
       {
+        sourceBlockIndex,
         type: "paragraph",
         meta:
           state.listMarker !== undefined
@@ -161,6 +175,7 @@ function pushLeafBlock(
     pushBlock(
       output,
       {
+        sourceBlockIndex,
         type: "heading",
         meta: {
           type: "heading",
@@ -180,6 +195,7 @@ function pushLeafBlock(
     pushBlock(
       output,
       {
+        sourceBlockIndex,
         type: "code_block",
         meta: {
           type: "code_block",
@@ -200,6 +216,7 @@ function pushLeafBlock(
     pushBlock(
       output,
       {
+        sourceBlockIndex,
         type: "table",
         meta: {
           type: "table",
@@ -219,6 +236,7 @@ function pushLeafBlock(
     pushBlock(
       output,
       {
+        sourceBlockIndex,
         type: "html_block",
         meta: {
           type: "html_block",
@@ -236,6 +254,7 @@ function pushLeafBlock(
     pushBlock(
       output,
       {
+        sourceBlockIndex,
         type: "thematic_break",
         meta: {
           type: "thematic_break",
@@ -251,6 +270,7 @@ function pushLeafBlock(
 function walkBlocks(
   output: NormalizedBlock[],
   blocks: MarkdownBlock[],
+  sourceBlockIndex: number,
   state: WalkState,
   spacing: SpacingConfig,
 ): void {
@@ -259,6 +279,7 @@ function walkBlocks(
       walkBlocks(
         output,
         block.children,
+        sourceBlockIndex,
         {
           ...state,
           quoteDepth: state.quoteDepth + 1,
@@ -276,6 +297,7 @@ function walkBlocks(
           walkBlocks(
             output,
             [child],
+            sourceBlockIndex,
             {
               ...state,
               indent: state.indent + spacing.listIndent,
@@ -290,18 +312,20 @@ function walkBlocks(
       continue;
     }
 
-    pushLeafBlock(output, block, state, spacing);
+    pushLeafBlock(output, block, sourceBlockIndex, state, spacing);
   }
 }
 
-export function normalizeBlocks(
-  blocks: MarkdownBlock[],
+function normalizeSourceBlock(
+  block: MarkdownBlock,
+  sourceBlockIndex: number,
   spacing: SpacingConfig,
 ): NormalizedBlock[] {
   const output: NormalizedBlock[] = [];
   walkBlocks(
     output,
-    blocks,
+    [block],
+    sourceBlockIndex,
     {
       indent: 0,
       quoteDepth: 0,
@@ -310,6 +334,36 @@ export function normalizeBlocks(
     spacing,
   );
   return output;
+}
+
+export function normalizeDocument(
+  blocks: MarkdownBlock[],
+  spacing: SpacingConfig,
+  sourceBlockIndexOffset = 0,
+): NormalizedDocument {
+  const output: NormalizedBlock[] = [];
+  const sourceBlockRanges: SourceBlockRange[] = [];
+
+  blocks.forEach((block, sourceBlockIndex) => {
+    const from = output.length;
+    output.push(...normalizeSourceBlock(block, sourceBlockIndex + sourceBlockIndexOffset, spacing));
+    sourceBlockRanges.push({
+      from,
+      to: output.length,
+    });
+  });
+
+  return {
+    blocks: output,
+    sourceBlockRanges,
+  };
+}
+
+export function normalizeBlocks(
+  blocks: MarkdownBlock[],
+  spacing: SpacingConfig,
+): NormalizedBlock[] {
+  return normalizeDocument(blocks, spacing).blocks;
 }
 
 export function inlineIsPlainText(nodes: MarkdownInline[] | undefined): boolean {

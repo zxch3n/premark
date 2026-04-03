@@ -6,6 +6,12 @@ settings:
 
 catalogs:
   default:
+    '@lezer/common':
+      specifier: ^1.5.1
+      version: 1.5.1
+    '@lezer/markdown':
+      specifier: ^1.6.3
+      version: 1.6.3
     '@napi-rs/canvas':
       specifier: ^0.1.97
       version: 0.1.97
@@ -15,9 +21,6 @@ catalogs:
     jiti:
       specifier: ^2.6.1
       version: 2.6.1
-    marked:
-      specifier: ^17.0.5
-      version: 17.0.5
     typescript:
       specifier: ^6
       version: 6.0.2
@@ -143,9 +146,12 @@ importers:
 
   packages/parser:
     dependencies:
-      marked:
+      '@lezer/common':
         specifier: 'catalog:'
-        version: 17.0.5
+        version: 1.5.1
+      '@lezer/markdown':
+        specifier: 'catalog:'
+        version: 1.6.3
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -357,6 +363,15 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
+
+  '@lezer/common@1.5.1':
+    resolution: {integrity: sha512-6YRVG9vBkaY7p1IVxL4s44n5nUnaNnGM2/AckNgYOnxTG2kWh1vR8BMxPseWPjRNpb5VtXnMpeYAEAADoRV1Iw==}
+
+  '@lezer/highlight@1.2.3':
+    resolution: {integrity: sha512-qXdH7UqTvGfdVBINrgKhDsVTJTxactNNxLk7+UMwZhU13lMHaOBlJe9Vqp907ya56Y3+ed2tlqzys7jDkTmW0g==}
+
+  '@lezer/markdown@1.6.3':
+    resolution: {integrity: sha512-jpGm5Ps+XErS+xA4urw7ogEGkeZOahVQF21Z6oECF0sj+2liwZopd2+I8uH5I/vZsRuuze3OxBREIANLf6KKUw==}
 
   '@napi-rs/canvas-android-arm64@0.1.97':
     resolution: {integrity: sha512-V1c/WVw+NzH8vk7ZK/O8/nyBSCQimU8sfMsB/9qeSvdkGKNU7+mxy/bIF0gTgeBFmHpj30S4E9WHMSrxXGQuVQ==}
@@ -1271,11 +1286,6 @@ packages:
     resolution: {integrity: sha512-h5bgJWpxJNswbU7qCrV0tIKQCaS3blPDrqKWx+QxzuzL1zGUzij9XCWLrSLsJPu5t+eWA/ycetzYAO5IOMcWAQ==}
     hasBin: true
 
-  marked@17.0.5:
-    resolution: {integrity: sha512-6hLvc0/JEbRjRgzI6wnT2P1XuM1/RrrDEX0kPt0N7jGm1133g6X7DlxFasUIx+72aKAr904GTxhSLDrd5DIlZg==}
-    engines: {node: '>= 20'}
-    hasBin: true
-
   min-indent@1.0.1:
     resolution: {integrity: sha512-I9jwMn07Sy/IwOj3zVkVik2JTvgpaykDZEigL6Rx6N9LbMywwUSMtxET+7lVoDLLd3O3IXwJwvuuns8UB/HeAg==}
     engines: {node: '>=4'}
@@ -1682,6 +1692,17 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
+
+  '@lezer/common@1.5.1': {}
+
+  '@lezer/highlight@1.2.3':
+    dependencies:
+      '@lezer/common': 1.5.1
+
+  '@lezer/markdown@1.6.3':
+    dependencies:
+      '@lezer/common': 1.5.1
+      '@lezer/highlight': 1.2.3
 
   '@napi-rs/canvas-android-arm64@0.1.97':
     optional: true
@@ -2329,8 +2350,6 @@ snapshots:
   loupe@3.2.1: {}
 
   lz-string@1.5.0: {}
-
-  marked@17.0.5: {}
 
   min-indent@1.0.1: {}
 

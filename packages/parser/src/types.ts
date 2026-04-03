@@ -1,3 +1,5 @@
+import type { Tree, TreeFragment } from "@lezer/common";
+
 export type MarkdownBlock =
   | HeadingNode
   | ParagraphNode
@@ -134,6 +136,52 @@ export interface ImageNode {
 export interface HtmlNode {
   type: "html";
   content: string;
+}
+
+export interface BlockSpan {
+  from: number;
+  to: number;
+  type: string;
+  signature: number;
+}
+
+export interface TextChange {
+  fromA: number;
+  toA: number;
+  fromB: number;
+  toB: number;
+  changedChars: number;
+  changedRatio: number;
+  changedLines: number;
+}
+
+export interface IncrementalParseState {
+  text: string;
+  tree: Tree;
+  fragments: readonly TreeFragment[];
+  blocks: MarkdownBlock[];
+  blockSpans: BlockSpan[];
+  closedBlocks: MarkdownBlock[];
+  partialBlocks: MarkdownBlock[];
+  sourceLength: number;
+  version: number;
+}
+
+export interface IncrementalParseOptions {
+  maxChangedChars?: number;
+  maxChangedRatio?: number;
+  maxChangedLines?: number;
+}
+
+export interface IncrementalParseResult extends StreamParseSnapshot {
+  state: IncrementalParseState;
+  mode: "full" | "incremental";
+  change: TextChange | null;
+  dirtyFromBlock: number;
+  dirtyToBlock: number;
+  reusedPrefixCount: number;
+  reusedSuffixCount: number;
+  removedCount: number;
 }
 
 export interface StreamParseSnapshot {

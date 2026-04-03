@@ -1,4 +1,10 @@
-import { parseMarkdown, type MarkdownBlock } from "@pretext-md/parser";
+import {
+  createIncrementalParseState,
+  incrementalParse,
+  type IncrementalParseResult,
+  type IncrementalParseState,
+  type MarkdownBlock,
+} from "@pretext-md/parser";
 
 import { hashContent, type BlockCache } from "./cache.ts";
 import { createDefaultSpacing, resolveFonts } from "./font-theme.ts";
@@ -7,7 +13,12 @@ import { createListPrefix } from "./measure/list.ts";
 import { layoutRichText, prepareRichText, type PreparedRichText } from "./measure/rich-text.ts";
 import { layoutTableBlock, prepareTableBlock, type PreparedTableBlock } from "./measure/table.ts";
 import { layoutTextBlock, prepareTextBlock, type PreparedTextBlock } from "./measure/text-block.ts";
-import { normalizeBlocks, inlineIsPlainText, type NormalizedBlock } from "./normalize.ts";
+import {
+  inlineIsPlainText,
+  normalizeDocument,
+  type NormalizedBlock,
+  type NormalizedDocument,
+} from "./normalize.ts";
 import { createStream } from "./stream.ts";
 import type {
   BlockLayout,
@@ -54,6 +65,13 @@ function emptyLayout(version: number, containerWidth: number): DocumentLayout {
     totalHeight: 0,
     containerWidth,
     version,
+  };
+}
+
+function emptyNormalizedDocument(): NormalizedDocument {
+  return {
+    blocks: [],
+    sourceBlockRanges: [],
   };
 }
 
@@ -134,11 +152,15 @@ export class LayoutEngineImpl implements LayoutEngine {
 
   private lastMarkdown = "";
 
+  private lastParseState: IncrementalParseState = createIncrementalParseState();
+
   private lastBlocks: MarkdownBlock[] = [];
 
-  private lastNormalized: NormalizedBlock[] = [];
+  private lastNormalizedDocument: NormalizedDocument = emptyNormalizedDocument();
 
   private lastLayout = emptyLayout(0, 0);
+
+  private lastDirtyFromLayoutBlock = 0;
 
   constructor(private config: StyleConfig) {
     this.spacing = {
@@ -150,8 +172,34 @@ export class LayoutEngineImpl implements LayoutEngine {
   }
 
   layout(markdown: string, containerWidth: number): DocumentLayout {
-    const blocks = parseMarkdown(markdown);
-    return this.layoutFromBlocks(blocks, containerWidth, markdown);
+    const parseResult =
+      this.lastMarkdown.length === 0 && this.lastParseState.text.length === 0
+        ? (() => {
+            const state = createIncrementalParseState(markdown);
+            return {
+              state,
+              mode: "full",
+              change: null,
+              dirtyFromBlock: 0,
+              dirtyToBlock: state.blocks.length,
+              reusedPrefixCount: 0,
+              reusedSuffixCount: 0,
+              removedCount: 0,
+            } satisfies Pick<
+              IncrementalParseResult,
+              | "state"
+              | "mode"
+              | "change"
+              | "dirtyFromBlock"
+              | "dirtyToBlock"
+              | "reusedPrefixCount"
+              | "reusedSuffixCount"
+              | "removedCount"
+            >;
+          })()
+        : incrementalParse(this.lastParseState, markdown);
+
+    return this.applyParseResult(parseResult as IncrementalParseResult, containerWidth);
   }
 
   layoutFromBlocks(
@@ -159,18 +207,21 @@ export class LayoutEngineImpl implements LayoutEngine {
     containerWidth: number,
     markdown = this.lastMarkdown,
   ): DocumentLayout {
-    const normalized = normalizeBlocks(blocks, this.spacing);
-    const layout = this.layoutNormalizedBlocks(normalized, containerWidth);
+    const normalizedDocument = normalizeDocument(blocks, this.spacing);
+    const layout = this.layoutNormalizedBlocks(normalizedDocument.blocks, containerWidth);
     this.lastMarkdown = markdown;
+    this.lastParseState = createIncrementalParseState(markdown);
     this.lastBlocks = blocks;
-    this.lastNormalized = normalized;
+    this.lastNormalizedDocument = normalizedDocument;
     this.lastLayout = layout;
+    this.lastDirtyFromLayoutBlock = 0;
     return layout;
   }
 
   resize(_prevLayout: DocumentLayout, newWidth: number): DocumentLayout {
-    const layout = this.layoutNormalizedBlocks(this.lastNormalized, newWidth);
+    const layout = this.layoutNormalizedBlocks(this.lastNormalizedDocument.blocks, newWidth);
     this.lastLayout = layout;
+    this.lastDirtyFromLayoutBlock = 0;
     return layout;
   }
 
@@ -186,12 +237,18 @@ export class LayoutEngineImpl implements LayoutEngine {
   dispose(): void {
     this.blockCaches = [];
     this.lastBlocks = [];
-    this.lastNormalized = [];
+    this.lastParseState = createIncrementalParseState();
+    this.lastNormalizedDocument = emptyNormalizedDocument();
     this.lastLayout = emptyLayout(this.version, 0);
+    this.lastDirtyFromLayoutBlock = 0;
   }
 
   getLastBlocks(): MarkdownBlock[] {
     return this.lastBlocks;
+  }
+
+  getLastDirtyFromLayoutBlock(): number {
+    return this.lastDirtyFromLayoutBlock;
   }
 
   getLastLayout(): DocumentLayout {
@@ -451,6 +508,236 @@ export class LayoutEngineImpl implements LayoutEngine {
     return {
       block: createBlock(this.spacing.thematicBreakHeight, maxWidth, [ruleLine]),
       lines: [ruleLine],
+    };
+  }
+
+  applyParseResult(parseResult: IncrementalParseResult, containerWidth: number): DocumentLayout {
+    const forceFullLayout =
+      parseResult.mode === "full" ||
+      this.lastLayout.containerWidth !== containerWidth ||
+      this.lastNormalizedDocument.blocks.length === 0;
+    const normalizedDocument = forceFullLayout
+      ? normalizeDocument(parseResult.state.blocks, this.spacing)
+      : this.normalizeIncrementally(parseResult);
+    const dirtyFromLayoutBlock = forceFullLayout
+      ? 0
+      : this.getNormalizedPrefixCount(parseResult.reusedPrefixCount);
+    const dirtyToLayoutBlock = forceFullLayout
+      ? normalizedDocument.blocks.length
+      : normalizedDocument.blocks.length -
+        this.getNormalizedSuffixCount(parseResult.reusedSuffixCount);
+    const layout = forceFullLayout
+      ? this.layoutNormalizedBlocks(normalizedDocument.blocks, containerWidth)
+      : this.layoutNormalizedBlocksIncrementally(
+          normalizedDocument,
+          containerWidth,
+          dirtyFromLayoutBlock,
+          dirtyToLayoutBlock,
+        );
+
+    this.lastMarkdown = parseResult.state.text;
+    this.lastParseState = parseResult.state;
+    this.lastBlocks = parseResult.state.blocks;
+    this.lastNormalizedDocument = normalizedDocument;
+    this.lastLayout = layout;
+    this.lastDirtyFromLayoutBlock = dirtyFromLayoutBlock;
+    return layout;
+  }
+
+  private normalizeIncrementally(parseResult: IncrementalParseResult): NormalizedDocument {
+    const nextBlocks = parseResult.state.blocks;
+    const output: NormalizedBlock[] = [];
+    const ranges = Array.from({ length: nextBlocks.length }, () => ({ from: 0, to: 0 }));
+    const prefixSourceCount = parseResult.reusedPrefixCount;
+    const suffixSourceCount = parseResult.reusedSuffixCount;
+
+    for (let index = 0; index < prefixSourceCount; index += 1) {
+      const range = this.lastNormalizedDocument.sourceBlockRanges[index];
+      const slice = this.lastNormalizedDocument.blocks.slice(range.from, range.to);
+      ranges[index] = {
+        from: output.length,
+        to: output.length + slice.length,
+      };
+      output.push(...slice);
+    }
+
+    const middleDocument = normalizeDocument(
+      nextBlocks.slice(parseResult.dirtyFromBlock, parseResult.dirtyToBlock),
+      this.spacing,
+      parseResult.dirtyFromBlock,
+    );
+    middleDocument.sourceBlockRanges.forEach((range, index) => {
+      ranges[parseResult.dirtyFromBlock + index] = {
+        from: output.length + range.from,
+        to: output.length + range.to,
+      };
+    });
+    output.push(...middleDocument.blocks);
+
+    const oldSuffixStart = this.lastBlocks.length - suffixSourceCount;
+    const newSuffixStart = nextBlocks.length - suffixSourceCount;
+    for (let offset = 0; offset < suffixSourceCount; offset += 1) {
+      const oldIndex = oldSuffixStart + offset;
+      const newIndex = newSuffixStart + offset;
+      const range = this.lastNormalizedDocument.sourceBlockRanges[oldIndex];
+      const slice = this.lastNormalizedDocument.blocks.slice(range.from, range.to);
+      ranges[newIndex] = {
+        from: output.length,
+        to: output.length + slice.length,
+      };
+      output.push(...slice);
+    }
+
+    return {
+      blocks: output,
+      sourceBlockRanges: ranges,
+    };
+  }
+
+  private getNormalizedPrefixCount(reusedPrefixCount: number): number {
+    if (reusedPrefixCount <= 0) {
+      return 0;
+    }
+
+    return this.lastNormalizedDocument.sourceBlockRanges[reusedPrefixCount - 1]?.to ?? 0;
+  }
+
+  private getNormalizedSuffixCount(reusedSuffixCount: number): number {
+    if (reusedSuffixCount <= 0) {
+      return 0;
+    }
+
+    const startIndex = this.lastBlocks.length - reusedSuffixCount;
+    const range = this.lastNormalizedDocument.sourceBlockRanges[startIndex];
+    return (
+      this.lastNormalizedDocument.blocks.length -
+      (range?.from ?? this.lastNormalizedDocument.blocks.length)
+    );
+  }
+
+  private layoutNormalizedBlocksIncrementally(
+    normalizedDocument: NormalizedDocument,
+    containerWidth: number,
+    dirtyFromBlock: number,
+    dirtyToBlock: number,
+  ): DocumentLayout {
+    if (normalizedDocument.blocks.length === 0) {
+      this.version += 1;
+      this.blockCaches = [];
+      return emptyLayout(this.version, containerWidth);
+    }
+
+    const nextCaches: InternalBlockCache[] = [];
+    const lines: LayoutLine[] = [];
+    const blocks: BlockLayout[] = [];
+    let cursorY = 0;
+    let previousMarginBottom = 0;
+
+    for (let blockIndex = 0; blockIndex < dirtyFromBlock; blockIndex += 1) {
+      const block = this.lastLayout.blocks[blockIndex];
+      const cachedLines = this.lastLayout.lines.slice(
+        block.firstLineIndex,
+        block.firstLineIndex + block.lineCount,
+      );
+      blocks.push(block);
+      lines.push(...cachedLines);
+      nextCaches.push(this.blockCaches[blockIndex]);
+      cursorY = block.y + block.height;
+      previousMarginBottom =
+        normalizedDocument.blocks[blockIndex]?.marginBottom ?? previousMarginBottom;
+    }
+
+    for (let blockIndex = dirtyFromBlock; blockIndex < dirtyToBlock; blockIndex += 1) {
+      const normalized = normalizedDocument.blocks[blockIndex];
+      cursorY +=
+        blockIndex === 0
+          ? normalized.marginTop
+          : Math.max(previousMarginBottom, normalized.marginTop);
+      const width = Math.max(1, containerWidth - normalized.indent);
+      const contentHash = hashContent(normalized);
+      const cache = this.blockCaches[blockIndex];
+      const preparedBlock =
+        cache !== undefined && cache.contentHash === contentHash
+          ? cache.preparedBlock
+          : this.prepareBlock(normalized);
+      const measured = this.layoutPreparedBlock(
+        normalized,
+        preparedBlock,
+        blockIndex,
+        lines.length,
+        normalized.indent,
+        cursorY,
+        width,
+      );
+
+      lines.push(...measured.lines);
+      blocks.push(measured.block);
+      nextCaches.push({
+        contentHash,
+        prepared: preparedBlock,
+        preparedBlock,
+        lines: measured.lines,
+        layoutWidth: width,
+        block: measured.block,
+      });
+      cursorY += measured.block.height;
+      previousMarginBottom = normalized.marginBottom;
+    }
+
+    const suffixCount = normalizedDocument.blocks.length - dirtyToBlock;
+    if (suffixCount > 0) {
+      const oldSuffixStart = this.lastLayout.blocks.length - suffixCount;
+      const firstOldSuffix = this.lastLayout.blocks[oldSuffixStart];
+      const firstNewNormalized = normalizedDocument.blocks[dirtyToBlock];
+      const firstNewY =
+        cursorY +
+        (dirtyToBlock === 0
+          ? firstNewNormalized.marginTop
+          : Math.max(previousMarginBottom, firstNewNormalized.marginTop));
+      const yOffset = firstNewY - firstOldSuffix.y;
+
+      for (let offset = 0; offset < suffixCount; offset += 1) {
+        const oldIndex = oldSuffixStart + offset;
+        const newIndex = dirtyToBlock + offset;
+        const oldBlock = this.lastLayout.blocks[oldIndex];
+        const oldLines = this.lastLayout.lines.slice(
+          oldBlock.firstLineIndex,
+          oldBlock.firstLineIndex + oldBlock.lineCount,
+        );
+        const translatedLines = oldLines.map((line) =>
+          translateLine(line, newIndex, lines.length, yOffset),
+        );
+        const translatedBlock: BlockLayout = {
+          ...oldBlock,
+          index: newIndex,
+          firstLineIndex: lines.length,
+          y: oldBlock.y + yOffset,
+          contentBox: {
+            ...oldBlock.contentBox,
+            y: oldBlock.contentBox.y + yOffset,
+          },
+        };
+        lines.push(...translatedLines);
+        blocks.push(translatedBlock);
+        nextCaches.push({
+          ...this.blockCaches[oldIndex],
+          lines: translatedLines,
+          block: translatedBlock,
+        });
+        cursorY = translatedBlock.y + translatedBlock.height;
+        previousMarginBottom = normalizedDocument.blocks[newIndex].marginBottom;
+      }
+    }
+
+    this.blockCaches = nextCaches;
+    this.version += 1;
+
+    return {
+      lines,
+      blocks,
+      totalHeight: cursorY + previousMarginBottom,
+      containerWidth,
+      version: this.version,
     };
   }
 

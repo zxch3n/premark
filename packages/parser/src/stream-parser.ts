@@ -1,43 +1,40 @@
-import { diffBlocks } from "./block-differ.ts";
-import { parseMarkdown, parseMarkdownStream } from "./marked-adapter.ts";
+import {
+  createIncrementalParseState,
+  finalizeIncrementalParseState,
+  incrementalParse,
+} from "./incremental-parser.ts";
 
-import type { MarkdownBlock, StreamParseResult, StreamParseSnapshot } from "./types.ts";
+import type {
+  IncrementalParseResult,
+  IncrementalParseState,
+  StreamParseResult,
+  StreamParseSnapshot,
+} from "./types.ts";
 
 export class StreamParser {
-  private source = "";
+  private state: IncrementalParseState = createIncrementalParseState();
 
-  private closedBlocks: MarkdownBlock[] = [];
-
-  private partialBlocks: MarkdownBlock[] = [];
-
-  private allBlocks: MarkdownBlock[] = [];
-
-  private sourceLength = 0;
+  private lastResult: IncrementalParseResult | null = null;
 
   push(chunk: string): StreamParseResult {
-    this.source += chunk;
-    this.sourceLength = this.source.length;
-    const previousClosedBlocks = this.closedBlocks;
-    const snapshot = parseMarkdownStream(this.source);
-    this.allBlocks = snapshot.allBlocks;
-    this.closedBlocks = snapshot.closedBlocks;
-    this.partialBlocks = snapshot.partialBlocks;
-    const diff = diffBlocks(previousClosedBlocks, this.closedBlocks);
-    const emittedBlocks = this.closedBlocks.slice(diff.dirtyFromBlock);
+    const previousClosedCount = this.state.closedBlocks.length;
+    const result = incrementalParse(this.state, this.state.text + chunk);
+    this.state = result.state;
+    this.lastResult = result;
+    const emittedBlocks = this.state.closedBlocks.slice(previousClosedCount);
 
     return {
+      ...result,
       emittedBlocks,
       ...this.snapshot(),
     };
   }
 
   finish(): StreamParseResult {
-    const previousClosedBlocks = this.closedBlocks;
-    this.allBlocks = parseMarkdown(this.source);
-    this.closedBlocks = [...this.allBlocks];
-    this.partialBlocks = [];
-    const diff = diffBlocks(previousClosedBlocks, this.closedBlocks);
-    const emittedBlocks = this.closedBlocks.slice(diff.dirtyFromBlock);
+    const previousClosedCount = this.state.closedBlocks.length;
+    this.state = finalizeIncrementalParseState(this.state);
+    this.lastResult = null;
+    const emittedBlocks = this.state.closedBlocks.slice(previousClosedCount);
 
     return {
       emittedBlocks,
@@ -47,10 +44,18 @@ export class StreamParser {
 
   snapshot(): StreamParseSnapshot {
     return {
-      allBlocks: [...this.allBlocks],
-      closedBlocks: [...this.closedBlocks],
-      partialBlocks: [...this.partialBlocks],
-      sourceLength: this.sourceLength,
+      allBlocks: [...this.state.blocks],
+      closedBlocks: [...this.state.closedBlocks],
+      partialBlocks: [...this.state.partialBlocks],
+      sourceLength: this.state.sourceLength,
     };
+  }
+
+  getState(): IncrementalParseState {
+    return this.state;
+  }
+
+  getLastResult(): IncrementalParseResult | null {
+    return this.lastResult;
   }
 }
