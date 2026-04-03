@@ -3,7 +3,7 @@ import { mkdir, readdir, readFile, stat, writeFile } from "fs/promises";
 import { basename, dirname, extname, join, resolve } from "path";
 import process from "process";
 
-import { createCanvas, loadImage, type SKRSContext2D } from "@napi-rs/canvas";
+import { GlobalFonts, createCanvas, loadImage, type SKRSContext2D } from "@napi-rs/canvas";
 
 import { createHighlighter } from "../packages/highlight/src/index.ts";
 import {
@@ -38,6 +38,11 @@ interface RenderResult {
   output: string;
   width: number;
   height: number;
+}
+
+interface ResolvedCliFonts {
+  sansFamily: string;
+  monoFamily: string;
 }
 
 interface ThemePalette {
@@ -115,6 +120,43 @@ const cardPadding = 28;
 const inlineCodePaddingX = 6;
 const inlineCodePaddingY = 4;
 type Canvas2D = SKRSContext2D;
+let resolvedCliFonts: ResolvedCliFonts | null = null;
+
+const fontCandidates = {
+  sans: [
+    {
+      path: "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+      family: "DejaVu Sans",
+      alias: "Pretext Sans",
+    },
+    {
+      path: "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+      family: "Liberation Sans",
+      alias: "Pretext Sans Alt",
+    },
+  ],
+  mono: [
+    {
+      path: "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+      family: "DejaVu Sans Mono",
+      alias: "Pretext Mono",
+    },
+  ],
+  cjk: [
+    {
+      path: "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+      family: "WenQuanYi Zen Hei",
+      alias: "Pretext CJK",
+    },
+  ],
+  emoji: [
+    {
+      path: "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
+      family: "Noto Color Emoji",
+      alias: "Pretext Emoji",
+    },
+  ],
+} as const;
 
 function printHelp(): void {
   console.log(`Usage: jiti scripts/render-markdown.ts <file-or-dir> [...more] [--output dir] [--width px] [--scale n] [--theme light|dark]
@@ -197,6 +239,74 @@ async function collectMarkdownFiles(entryPath: string): Promise<string[]> {
       .map((item: Dirent) => collectMarkdownFiles(join(absolutePath, item.name))),
   );
   return nested.flat().sort();
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function registerFontByPath(
+  path: string,
+  alias: string,
+  fallbackFamily: string,
+): Promise<string | null> {
+  if (!(await pathExists(path))) {
+    return null;
+  }
+
+  try {
+    GlobalFonts.registerFromPath(path, alias);
+    return alias;
+  } catch {
+    return fallbackFamily;
+  }
+}
+
+async function resolveCliFonts(): Promise<ResolvedCliFonts> {
+  if (resolvedCliFonts !== null) {
+    return resolvedCliFonts;
+  }
+
+  const [sansBase, monoBase, cjk, emoji] = await Promise.all([
+    registerFontByPath(
+      fontCandidates.sans[0].path,
+      fontCandidates.sans[0].alias,
+      fontCandidates.sans[0].family,
+    ),
+    registerFontByPath(
+      fontCandidates.mono[0].path,
+      fontCandidates.mono[0].alias,
+      fontCandidates.mono[0].family,
+    ),
+    registerFontByPath(
+      fontCandidates.cjk[0].path,
+      fontCandidates.cjk[0].alias,
+      fontCandidates.cjk[0].family,
+    ),
+    registerFontByPath(
+      fontCandidates.emoji[0].path,
+      fontCandidates.emoji[0].alias,
+      fontCandidates.emoji[0].family,
+    ),
+  ]);
+
+  const quoteFamily = (family: string): string =>
+    family === "sans-serif" || family === "monospace" ? family : `"${family}"`;
+  const isFontFamily = (family: string | null): family is string => family !== null;
+  const sansStack = [sansBase, cjk, emoji, "sans-serif"].filter(isFontFamily).map(quoteFamily);
+  const monoStack = [monoBase, cjk, emoji, "monospace"].filter(isFontFamily).map(quoteFamily);
+
+  resolvedCliFonts = {
+    sansFamily: sansStack.join(", "),
+    monoFamily: monoStack.join(", "),
+  };
+
+  return resolvedCliFonts;
 }
 
 function roundedRect(
@@ -782,10 +892,11 @@ async function renderMarkdownFile(
   scale: number,
 ): Promise<RenderResult> {
   const markdown = await readFile(filePath, "utf8");
+  const fonts = await resolveCliFonts();
   const engine = createLayoutEngine({
     fontTheme: {
-      sansFamily: '"DejaVu Sans", "Noto Sans", sans-serif',
-      monoFamily: '"DejaVu Sans Mono", "Liberation Mono", monospace',
+      sansFamily: fonts.sansFamily,
+      monoFamily: fonts.monoFamily,
       baseFontSize: 16,
     },
     highlighter: createHighlighter({ theme }),
