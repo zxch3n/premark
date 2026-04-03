@@ -51,6 +51,12 @@
   text-decoration-color: rgba(11, 98, 255, 0.35);
 }
 
+.pmd-fragment--strikethrough,
+.pmd-cell-fragment--strikethrough {
+  text-decoration: line-through;
+  text-decoration-color: currentColor;
+}
+
 .pmd-rule {
   position: absolute;
   inset: 50% 0 auto;

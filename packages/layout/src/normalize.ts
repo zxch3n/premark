@@ -41,6 +41,7 @@ function extractInlineText(nodes: MarkdownInline[]): string {
           return " ";
         case "strong":
         case "emphasis":
+        case "strikethrough":
         case "link":
         case "image":
           return extractInlineText(node.children);

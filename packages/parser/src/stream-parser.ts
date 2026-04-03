@@ -1,21 +1,29 @@
-import { MarkdownParser } from "markdown-parser";
+import { diffBlocks } from "./block-differ.ts";
+import { parseMarkdown, parseMarkdownStream } from "./marked-adapter.ts";
 
 import type { MarkdownBlock, StreamParseResult, StreamParseSnapshot } from "./types.ts";
 
 export class StreamParser {
-  private readonly parser = new MarkdownParser();
+  private source = "";
 
-  private readonly closedBlocks: MarkdownBlock[] = [];
+  private closedBlocks: MarkdownBlock[] = [];
 
   private partialBlocks: MarkdownBlock[] = [];
+
+  private allBlocks: MarkdownBlock[] = [];
 
   private sourceLength = 0;
 
   push(chunk: string): StreamParseResult {
-    const emittedBlocks = this.parser.parse(chunk, { stream: true });
-    this.sourceLength += chunk.length;
-    this.closedBlocks.push(...emittedBlocks);
-    this.partialBlocks = [...this.parser.experimental_partialNodes];
+    this.source += chunk;
+    this.sourceLength = this.source.length;
+    const previousClosedBlocks = this.closedBlocks;
+    const snapshot = parseMarkdownStream(this.source);
+    this.allBlocks = snapshot.allBlocks;
+    this.closedBlocks = snapshot.closedBlocks;
+    this.partialBlocks = snapshot.partialBlocks;
+    const diff = diffBlocks(previousClosedBlocks, this.closedBlocks);
+    const emittedBlocks = this.closedBlocks.slice(diff.dirtyFromBlock);
 
     return {
       emittedBlocks,
@@ -24,9 +32,12 @@ export class StreamParser {
   }
 
   finish(): StreamParseResult {
-    const emittedBlocks = this.parser.parse("", { stream: false });
-    this.closedBlocks.push(...emittedBlocks);
+    const previousClosedBlocks = this.closedBlocks;
+    this.allBlocks = parseMarkdown(this.source);
+    this.closedBlocks = [...this.allBlocks];
     this.partialBlocks = [];
+    const diff = diffBlocks(previousClosedBlocks, this.closedBlocks);
+    const emittedBlocks = this.closedBlocks.slice(diff.dirtyFromBlock);
 
     return {
       emittedBlocks,
@@ -36,7 +47,7 @@ export class StreamParser {
 
   snapshot(): StreamParseSnapshot {
     return {
-      allBlocks: [...this.closedBlocks, ...this.partialBlocks],
+      allBlocks: [...this.allBlocks],
       closedBlocks: [...this.closedBlocks],
       partialBlocks: [...this.partialBlocks],
       sourceLength: this.sourceLength,

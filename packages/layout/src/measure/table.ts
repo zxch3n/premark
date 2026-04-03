@@ -30,6 +30,7 @@ function intrinsicWidth(nodes: MarkdownInline[], font: string): number {
         return total + measureTextWidth(" ", font);
       case "strong":
       case "emphasis":
+      case "strikethrough":
       case "link":
       case "image":
         return total + intrinsicWidth(node.children, font);
