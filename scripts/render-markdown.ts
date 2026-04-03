@@ -119,6 +119,8 @@ const pagePadding = 36;
 const cardPadding = 28;
 const inlineCodePaddingX = 6;
 const inlineCodePaddingY = 4;
+const quoteBarWidth = 4;
+const quoteBarGap = 12;
 type Canvas2D = SKRSContext2D;
 let resolvedCliFonts: ResolvedCliFonts | null = null;
 
@@ -699,6 +701,9 @@ async function drawImageBlock(
   roundedRect(ctx, x, y, line.width, line.height, 18);
   ctx.fillStyle = palette.imageBg;
   ctx.fill();
+  ctx.strokeStyle = palette.cardStroke;
+  ctx.lineWidth = 1;
+  ctx.stroke();
 
   try {
     const source = content.src.startsWith("data:")
@@ -754,11 +759,27 @@ function drawHtmlBlock(
   const labelFont = '700 13px "DejaVu Sans", sans-serif';
   drawText(ctx, "HTML BLOCK", x + 16, y + 14, 18, labelFont, palette.htmlLabel);
 
-  const bodyFont = '400 15px "DejaVu Sans Mono", monospace';
+  const bodyFont = `400 14px ${resolvedCliFonts?.sansFamily ?? '"DejaVu Sans", sans-serif'}`;
   const bodyLines = wrapPlainText(ctx, stripHtmlTags(content.html), line.width - 32, bodyFont);
-  bodyLines.slice(0, Math.max(1, Math.floor((line.height - 40) / 20))).forEach((entry, index) => {
-    drawText(ctx, entry, x + 16, y + 38 + index * 20, 20, bodyFont, palette.text);
+  const bodyTop = y + 26;
+  const bodyLineHeight = 18;
+  const bodyMaxLines = Math.max(1, Math.floor((line.height - 34) / bodyLineHeight));
+
+  ctx.save();
+  roundedRect(ctx, x, y, line.width, line.height, 18);
+  ctx.clip();
+  bodyLines.slice(0, bodyMaxLines).forEach((entry, index) => {
+    drawText(
+      ctx,
+      entry,
+      x + 16,
+      bodyTop + index * bodyLineHeight,
+      bodyLineHeight,
+      bodyFont,
+      palette.text,
+    );
   });
+  ctx.restore();
 }
 
 async function drawOpaqueLine(
@@ -795,7 +816,8 @@ async function drawBlock(
   palette: ThemePalette,
 ): Promise<void> {
   if (block.context.quoteDepth > 0) {
-    roundedRect(ctx, originX + block.contentBox.x, originY + block.y + 2, 4, block.height - 4, 999);
+    const barX = Math.max(originX + 6, originX + block.contentBox.x - quoteBarGap - quoteBarWidth);
+    roundedRect(ctx, barX, originY + block.y + 2, quoteBarWidth, block.height - 4, 999);
     ctx.fillStyle = palette.quoteBar;
     ctx.fill();
   }
