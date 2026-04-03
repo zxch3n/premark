@@ -1,0 +1,18 @@
+.pmd-code {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(16, 20, 26, 0.94), rgba(28, 34, 42, 0.94)),
+    linear-gradient(135deg, rgba(86, 114, 255, 0.2), transparent 48%);
+  color: #e8ecf3;
+}
+
+.pmd-code > code {
+  display: block;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

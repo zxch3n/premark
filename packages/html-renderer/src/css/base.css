@@ -1,0 +1,99 @@
+.pmd-doc {
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.pmd-surface {
+  position: relative;
+}
+
+.pmd-block {
+  position: absolute;
+  box-sizing: border-box;
+}
+
+.pmd-block--blockquote {
+  padding-left: 14px;
+}
+
+.pmd-block--blockquote::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: rgba(125, 125, 140, 0.35);
+  border-radius: 999px;
+}
+
+.pmd-line {
+  position: absolute;
+  white-space: pre;
+}
+
+.pmd-fragment {
+  position: absolute;
+  top: 0;
+  box-sizing: border-box;
+  white-space: pre;
+}
+
+.pmd-fragment--inline_code {
+  padding-inline: 6px;
+  border-radius: 6px;
+  background: rgba(125, 125, 140, 0.14);
+}
+
+.pmd-fragment--link {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: rgba(11, 98, 255, 0.35);
+}
+
+.pmd-rule {
+  position: absolute;
+  inset: 50% 0 auto;
+  border-top: 1px solid rgba(125, 125, 140, 0.35);
+}
+
+.pmd-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(255, 210, 180, 0.3), transparent 45%),
+    linear-gradient(135deg, rgba(246, 239, 228, 0.92), rgba(234, 240, 246, 0.92));
+}
+
+.pmd-html {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.pmd-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font: inherit;
+}
+
+.pmd-table th,
+.pmd-table td {
+  border: 1px solid rgba(125, 125, 140, 0.24);
+  vertical-align: top;
+  padding: 10px 12px;
+}
+
+.pmd-cell-line {
+  position: relative;
+  white-space: pre-wrap;
+}
+
+.pmd-cell-fragment {
+  display: inline;
+  white-space: pre-wrap;
+}
