@@ -19,6 +19,7 @@ describe("parseMarkdown", () => {
     expect(blocks[1]).toMatchObject({ type: "paragraph" });
     expect(blocks[2]).toMatchObject({ type: "list", kind: "unordered" });
     expect(blocks[3]).toMatchObject({ type: "code-block", info: "ts" });
+    expectFrozenBlockTree(blocks);
   });
 
   it("parses GFM table, blockquote, html block, image and inline styles", () => {
@@ -225,6 +226,7 @@ describe("incrementalParse", () => {
     expect(result.state.blocks.at(-1)).toBe(oldState.blocks.at(-1));
     expect(result.reusedPrefixCount).toBeGreaterThan(0);
     expect(result.reusedSuffixCount).toBeGreaterThan(0);
+    expectFrozenBlockTree(result.state.blocks);
   });
 
   it("falls back to full parse for large edits", () => {
@@ -527,4 +529,67 @@ function findLinkHref(blocks: readonly MarkdownBlock[], href: string): boolean {
         return false;
     }
   });
+}
+
+function expectFrozenBlockTree(blocks: readonly MarkdownBlock[]): void {
+  expect(Object.isFrozen(blocks)).toBe(true);
+
+  const visitInline = (nodes: readonly MarkdownInline[]) => {
+    expect(Object.isFrozen(nodes)).toBe(true);
+
+    for (const node of nodes) {
+      expect(Object.isFrozen(node)).toBe(true);
+      switch (node.type) {
+        case "strong":
+        case "emphasis":
+        case "strikethrough":
+        case "link":
+        case "image":
+          visitInline(node.children);
+          break;
+        default:
+          break;
+      }
+    }
+  };
+
+  for (const block of blocks) {
+    expect(Object.isFrozen(block)).toBe(true);
+    switch (block.type) {
+      case "heading":
+      case "paragraph":
+        visitInline(block.children);
+        break;
+      case "list":
+        expect(Object.isFrozen(block.items)).toBe(true);
+        for (const item of block.items) {
+          expect(Object.isFrozen(item)).toBe(true);
+          expectFrozenBlockTree(item.children);
+        }
+        break;
+      case "blockquote":
+        expectFrozenBlockTree(block.children);
+        break;
+      case "table":
+        expect(Object.isFrozen(block.head)).toBe(true);
+        expect(Object.isFrozen(block.body)).toBe(true);
+        expect(Object.isFrozen(block.head.cells)).toBe(true);
+        for (const cell of block.head.cells) {
+          expect(Object.isFrozen(cell)).toBe(true);
+          visitInline(cell.children);
+        }
+        expect(Object.isFrozen(block.body.rows)).toBe(true);
+        for (const row of block.body.rows) {
+          expect(Object.isFrozen(row)).toBe(true);
+          expect(Object.isFrozen(row.cells)).toBe(true);
+          for (const cell of row.cells) {
+            expect(Object.isFrozen(cell)).toBe(true);
+            visitInline(cell.children);
+          }
+        }
+        break;
+      default:
+        break;
+    }
+  }
 }

@@ -1,6 +1,7 @@
 import { type SyntaxNode, type Tree } from "@lezer/common";
 import { GFM, parser as baseParser } from "@lezer/markdown";
 
+import { freezeBlockSpans, freezeMarkdownBlocks } from "./immutable.ts";
 import type {
   BlockSpan,
   CodeBlockNode,
@@ -22,13 +23,13 @@ interface TopLevelBlockEntry {
 
 export interface ParsedMarkdownDocument {
   tree: Tree;
-  blocks: MarkdownBlock[];
-  blockSpans: BlockSpan[];
+  blocks: readonly MarkdownBlock[];
+  blockSpans: readonly BlockSpan[];
 }
 
 const markdownParser = baseParser.configure(GFM);
 
-export function parseMarkdown(markdown: string): MarkdownBlock[] {
+export function parseMarkdown(markdown: string): readonly MarkdownBlock[] {
   return parseMarkdownDocument(markdown).blocks;
 }
 
@@ -38,7 +39,7 @@ export function parseMarkdownDocument(markdown: string): ParsedMarkdownDocument 
   return {
     tree,
     blocks: materializeBlocks(entries, markdown, definitions),
-    blockSpans: entries.map((entry) => entry.span),
+    blockSpans: freezeBlockSpans(entries.map((entry) => entry.span)),
   };
 }
 
@@ -88,8 +89,10 @@ export function materializeBlocks(
   entries: readonly TopLevelBlockEntry[],
   markdown: string,
   definitions: Map<string, ReferenceDefinition>,
-): MarkdownBlock[] {
-  return entries.map((entry) => convertBlockNode(entry.node, markdown, definitions));
+): readonly MarkdownBlock[] {
+  return freezeMarkdownBlocks(
+    entries.map((entry) => convertBlockNode(entry.node, markdown, definitions)),
+  );
 }
 
 function convertBlockNode(

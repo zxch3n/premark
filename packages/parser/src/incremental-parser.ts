@@ -1,6 +1,7 @@
 import { TreeFragment } from "@lezer/common";
 
 import { simpleDiff, shouldFullReparse } from "./diff-text.ts";
+import { freezeBlockSpans, freezeMarkdownBlockArray, freezeMarkdownBlocks } from "./immutable.ts";
 import {
   extractTopLevelBlockEntries,
   getMarkdownParser,
@@ -39,9 +40,9 @@ export function incrementalParse(
       reusedPrefixCount: previousState.blocks.length,
       reusedSuffixCount: 0,
       removedCount: 0,
-      allBlocks: [...previousState.blocks],
-      closedBlocks: [...previousState.closedBlocks],
-      partialBlocks: [...previousState.partialBlocks],
+      allBlocks: previousState.blocks,
+      closedBlocks: previousState.closedBlocks,
+      partialBlocks: previousState.partialBlocks,
       sourceLength: previousState.sourceLength,
     };
   }
@@ -69,7 +70,7 @@ export function incrementalParse(
   );
   const middleStart = reusedPrefixCount;
   const middleEnd = nextSpans.length - reusedSuffixCount;
-  const nextBlocks = [
+  const nextBlocks = freezeMarkdownBlocks([
     ...previousState.blocks.slice(0, reusedPrefixCount),
     ...materializeBlocks(
       extracted.entries.slice(middleStart, middleEnd),
@@ -77,8 +78,14 @@ export function incrementalParse(
       extracted.definitions,
     ),
     ...previousState.blocks.slice(previousState.blocks.length - reusedSuffixCount),
-  ];
-  const nextState = createState(newText, tree, nextBlocks, nextSpans, previousState.version + 1);
+  ]);
+  const nextState = createState(
+    newText,
+    tree,
+    nextBlocks,
+    freezeBlockSpans(nextSpans),
+    previousState.version + 1,
+  );
 
   return {
     state: nextState,
@@ -89,9 +96,9 @@ export function incrementalParse(
     reusedPrefixCount,
     reusedSuffixCount,
     removedCount: Math.max(0, previousState.blocks.length - nextBlocks.length),
-    allBlocks: [...nextState.blocks],
-    closedBlocks: [...nextState.closedBlocks],
-    partialBlocks: [...nextState.partialBlocks],
+    allBlocks: nextState.blocks,
+    closedBlocks: nextState.closedBlocks,
+    partialBlocks: nextState.partialBlocks,
     sourceLength: nextState.sourceLength,
   };
 }
@@ -99,9 +106,9 @@ export function incrementalParse(
 export function parseMarkdownStream(markdown: string): StreamParseSnapshot {
   const state = createIncrementalParseState(markdown);
   return {
-    allBlocks: [...state.blocks],
-    closedBlocks: [...state.closedBlocks],
-    partialBlocks: [...state.partialBlocks],
+    allBlocks: state.blocks,
+    closedBlocks: state.closedBlocks,
+    partialBlocks: state.partialBlocks,
     sourceLength: state.sourceLength,
   };
 }
@@ -110,8 +117,8 @@ export function finalizeIncrementalParseState(state: IncrementalParseState): Inc
   return {
     ...state,
     fragments: TreeFragment.addTree(state.tree),
-    closedBlocks: [...state.blocks],
-    partialBlocks: [],
+    closedBlocks: state.blocks,
+    partialBlocks: freezeMarkdownBlockArray([]),
     version: state.version + 1,
   };
 }
@@ -139,9 +146,9 @@ function fullParseResult(
     reusedPrefixCount: 0,
     reusedSuffixCount: 0,
     removedCount: Math.max(0, previousState.blocks.length - nextState.blocks.length),
-    allBlocks: [...nextState.blocks],
-    closedBlocks: [...nextState.closedBlocks],
-    partialBlocks: [...nextState.partialBlocks],
+    allBlocks: nextState.blocks,
+    closedBlocks: nextState.closedBlocks,
+    partialBlocks: nextState.partialBlocks,
     sourceLength: nextState.sourceLength,
   };
 }
@@ -149,13 +156,13 @@ function fullParseResult(
 function createState(
   text: string,
   tree: import("@lezer/common").Tree,
-  blocks: MarkdownBlock[],
-  blockSpans: BlockSpan[],
+  blocks: readonly MarkdownBlock[],
+  blockSpans: readonly BlockSpan[],
   version: number,
 ): IncrementalParseState {
   const split = splitClosedAndPartialBlocks(text, blocks, blockSpans);
 
-  return {
+  return Object.freeze({
     text,
     tree,
     fragments: TreeFragment.addTree(tree),
@@ -165,28 +172,28 @@ function createState(
     partialBlocks: split.partialBlocks,
     sourceLength: text.length,
     version,
-  };
+  });
 }
 
 function splitClosedAndPartialBlocks(
   text: string,
-  blocks: MarkdownBlock[],
-  blockSpans: BlockSpan[],
+  blocks: readonly MarkdownBlock[],
+  blockSpans: readonly BlockSpan[],
 ): {
-  closedBlocks: MarkdownBlock[];
-  partialBlocks: MarkdownBlock[];
+  closedBlocks: readonly MarkdownBlock[];
+  partialBlocks: readonly MarkdownBlock[];
 } {
   if (blocks.length === 0) {
     return {
-      closedBlocks: [],
-      partialBlocks: [],
+      closedBlocks: freezeMarkdownBlockArray([]),
+      partialBlocks: freezeMarkdownBlockArray([]),
     };
   }
 
   if (text.length === 0 || /\n[ \t]*\n[ \t]*$/u.test(text)) {
     return {
-      closedBlocks: [...blocks],
-      partialBlocks: [],
+      closedBlocks: blocks,
+      partialBlocks: freezeMarkdownBlockArray([]),
     };
   }
 
@@ -194,14 +201,14 @@ function splitClosedAndPartialBlocks(
   const lastSpan = blockSpans.at(-1)!;
   if (isDefinitelyClosed(lastBlock, text.slice(lastSpan.from, lastSpan.to))) {
     return {
-      closedBlocks: [...blocks],
-      partialBlocks: [],
+      closedBlocks: blocks,
+      partialBlocks: freezeMarkdownBlockArray([]),
     };
   }
 
   return {
-    closedBlocks: blocks.slice(0, -1),
-    partialBlocks: [lastBlock],
+    closedBlocks: freezeMarkdownBlockArray(blocks.slice(0, -1)),
+    partialBlocks: freezeMarkdownBlockArray([lastBlock]),
   };
 }
 

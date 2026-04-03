@@ -19,7 +19,7 @@ export interface PreparedTableBlock {
   spacing: SpacingConfig;
 }
 
-function intrinsicWidth(nodes: MarkdownInline[], font: string): number {
+function intrinsicWidth(nodes: readonly MarkdownInline[], font: string): number {
   return nodes.reduce((total, node) => {
     switch (node.type) {
       case "text":
@@ -40,7 +40,7 @@ function intrinsicWidth(nodes: MarkdownInline[], font: string): number {
   }, 0);
 }
 
-function prepareCell(nodes: MarkdownInline[], fonts: ResolvedFonts): PreparedCell {
+function prepareCell(nodes: readonly MarkdownInline[], fonts: ResolvedFonts): PreparedCell {
   return {
     prepared: prepareRichText({
       nodes,

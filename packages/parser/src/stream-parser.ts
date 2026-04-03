@@ -3,6 +3,7 @@ import {
   finalizeIncrementalParseState,
   incrementalParse,
 } from "./incremental-parser.ts";
+import { freezeMarkdownBlockArray } from "./immutable.ts";
 
 import type {
   IncrementalParseResult,
@@ -21,7 +22,9 @@ export class StreamParser {
     const result = incrementalParse(this.state, this.state.text + chunk);
     this.state = result.state;
     this.lastResult = result;
-    const emittedBlocks = this.state.closedBlocks.slice(previousClosedCount);
+    const emittedBlocks = freezeMarkdownBlockArray(
+      this.state.closedBlocks.slice(previousClosedCount),
+    );
 
     return {
       ...result,
@@ -34,7 +37,9 @@ export class StreamParser {
     const previousClosedCount = this.state.closedBlocks.length;
     this.state = finalizeIncrementalParseState(this.state);
     this.lastResult = null;
-    const emittedBlocks = this.state.closedBlocks.slice(previousClosedCount);
+    const emittedBlocks = freezeMarkdownBlockArray(
+      this.state.closedBlocks.slice(previousClosedCount),
+    );
 
     return {
       emittedBlocks,
@@ -44,9 +49,9 @@ export class StreamParser {
 
   snapshot(): StreamParseSnapshot {
     return {
-      allBlocks: [...this.state.blocks],
-      closedBlocks: [...this.state.closedBlocks],
-      partialBlocks: [...this.state.partialBlocks],
+      allBlocks: this.state.blocks,
+      closedBlocks: this.state.closedBlocks,
+      partialBlocks: this.state.partialBlocks,
       sourceLength: this.state.sourceLength,
     };
   }
