@@ -1,0 +1,29 @@
+{
+  "name": "pretext-md",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "ready": "vp check && vp test && vp run build",
+    "dev": "vp run playground#dev",
+    "build": "vp run @pretext-md/parser#build && vp run @pretext-md/layout#build && vp run @pretext-md/highlight#build && vp run @pretext-md/html-renderer#build && vp run playground#build",
+    "test": "vp test",
+    "typecheck": "vp exec tsc --noEmit -p tsconfig.json",
+    "storybook": "vp exec storybook dev -p 6006",
+    "storybook:build": "vp exec storybook build",
+    "prepare": "vp config"
+  },
+  "devDependencies": {
+    "@storybook/html": "^10.3.4",
+    "@storybook/html-vite": "^10.3.4",
+    "@types/node": "catalog:",
+    "@types/prismjs": "^1.26.6",
+    "storybook": "^10.3.4",
+    "typescript": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "packageManager": "pnpm@10.33.0"
+}

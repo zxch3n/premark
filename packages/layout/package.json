@@ -1,0 +1,33 @@
+{
+  "name": "@pretext-md/layout",
+  "version": "0.1.0",
+  "description": "Headless layout engine for pretext-md.",
+  "license": "MIT",
+  "files": [
+    "dist",
+    "src"
+  ],
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.mjs",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "vp pack",
+    "dev": "vp pack --watch",
+    "test": "vp test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@chenglou/pretext": "^0.0.4",
+    "@pretext-md/parser": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "optionalDependencies": {
+    "@napi-rs/canvas": "^0.1.97"
+  }
+}
