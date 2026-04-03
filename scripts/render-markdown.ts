@@ -58,6 +58,9 @@ interface ThemePalette {
   inlineCodeText: string;
   quoteBar: string;
   rule: string;
+  tableBg: string;
+  tableHeaderBg: string;
+  tableAltRowBg: string;
   tableStroke: string;
   codeBg: string;
   codeStroke: string;
@@ -82,6 +85,9 @@ const palettes: Record<ThemeName, ThemePalette> = {
     inlineCodeText: "#5f2414",
     quoteBar: "#d96c42",
     rule: "#d4c3b4",
+    tableBg: "#fffaf2",
+    tableHeaderBg: "#f2e5d6",
+    tableAltRowBg: "rgba(233, 221, 205, 0.22)",
     tableStroke: "#d5c3b2",
     codeBg: "#10151d",
     codeStroke: "#2c3948",
@@ -104,6 +110,9 @@ const palettes: Record<ThemeName, ThemePalette> = {
     inlineCodeText: "#ffc7aa",
     quoteBar: "#ff8b61",
     rule: "#43505f",
+    tableBg: "#202934",
+    tableHeaderBg: "#2b3542",
+    tableAltRowBg: "rgba(255, 255, 255, 0.04)",
     tableStroke: "#415060",
     codeBg: "#0e1319",
     codeStroke: "#2a3440",
@@ -612,7 +621,11 @@ function cellLineWidth(line: NonNullable<TableCell["lines"]>[number]): number {
   return line.fragments.reduce((total, fragment) => total + fragment.width, 0);
 }
 
-function drawTableCell(
+function cellContentHeight(cell: TableCell): number {
+  return cell.lines?.reduce((total, line) => total + line.height, 0) ?? 0;
+}
+
+function drawTableCellContent(
   ctx: Canvas2D,
   cell: TableCell,
   x: number,
@@ -622,28 +635,24 @@ function drawTableCell(
   align: "left" | "center" | "right" | null,
   palette: ThemePalette,
 ): void {
-  roundedRect(ctx, x, y, width, height, 10);
-  ctx.fillStyle = "transparent";
-  ctx.fill();
-  ctx.strokeStyle = palette.tableStroke;
-  ctx.lineWidth = 1;
-  ctx.stroke();
-
   if (cell.lines === undefined) {
     return;
   }
 
-  let cursorY = y + 10;
-  const contentWidth = width - 24;
+  const paddingX = 14;
+  const paddingY = 10;
+  const contentWidth = Math.max(0, width - paddingX * 2);
+  const totalHeight = cellContentHeight(cell);
+  let cursorY = y + Math.max(paddingY, (height - totalHeight) / 2);
 
   for (const line of cell.lines) {
     const lineWidth = cellLineWidth(line);
     const startX =
       align === "right"
-        ? x + width - 12 - lineWidth
+        ? x + width - paddingX - lineWidth
         : align === "center"
-          ? x + 12 + (contentWidth - lineWidth) / 2
-          : x + 12;
+          ? x + paddingX + (contentWidth - lineWidth) / 2
+          : x + paddingX;
 
     let cursorX = startX;
     for (const fragment of line.fragments) {
@@ -664,14 +673,69 @@ function drawTable(
 ): void {
   const x = originX + line.x;
   const y = originY + line.y;
-  let cursorY = y;
+  const radius = 16;
+  const rowCount = content.rows.length + 1;
+  const tableWidth = content.columnWidths.reduce((sum, width) => sum + width, 0);
+  const tableHeight =
+    content.rowHeights.reduce((sum, value) => sum + value, 0) + Math.max(0, rowCount - 1);
 
+  roundedRect(ctx, x, y, tableWidth, tableHeight, radius);
+  ctx.fillStyle = palette.tableBg;
+  ctx.fill();
+  ctx.strokeStyle = palette.tableStroke;
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  ctx.save();
+  roundedRect(ctx, x, y, tableWidth, tableHeight, radius);
+  ctx.clip();
+
+  const headerHeight = content.rowHeights[0] ?? 0;
+  ctx.fillStyle = palette.tableHeaderBg;
+  ctx.fillRect(x, y, tableWidth, headerHeight);
+
+  let stripeY = y + headerHeight + 1;
+  for (let rowIndex = 1; rowIndex < rowCount; rowIndex += 1) {
+    const rowHeight = content.rowHeights[rowIndex] ?? 0;
+    if (rowIndex % 2 === 0) {
+      ctx.fillStyle = palette.tableAltRowBg;
+      ctx.fillRect(x, stripeY, tableWidth, rowHeight);
+    }
+    stripeY += rowHeight + 1;
+  }
+
+  let gridX = x;
+  for (let columnIndex = 0; columnIndex < content.columnWidths.length - 1; columnIndex += 1) {
+    gridX += content.columnWidths[columnIndex];
+    ctx.strokeStyle = palette.tableStroke;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(gridX, y);
+    ctx.lineTo(gridX, y + tableHeight);
+    ctx.stroke();
+  }
+
+  let gridY = y;
+  for (let rowIndex = 0; rowIndex < rowCount - 1; rowIndex += 1) {
+    gridY += content.rowHeights[rowIndex] ?? 0;
+    ctx.strokeStyle = palette.tableStroke;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x, gridY);
+    ctx.lineTo(x + tableWidth, gridY);
+    ctx.stroke();
+    gridY += 1;
+  }
+
+  ctx.restore();
+
+  let cursorY = y;
   const rows = [content.header, ...content.rows];
   rows.forEach((row, rowIndex) => {
     let cursorX = x;
     const rowHeight = content.rowHeights[rowIndex] ?? 0;
     row.forEach((cell, columnIndex) => {
-      drawTableCell(
+      drawTableCellContent(
         ctx,
         cell,
         cursorX,
