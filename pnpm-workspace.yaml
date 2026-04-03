@@ -7,6 +7,7 @@ catalog:
   "@napi-rs/canvas": ^0.1.97
   "@types/node": ^25
   jiti: ^2.6.1
+  marked: ^17.0.5
   typescript: ^6
   vite: npm:@voidzero-dev/vite-plus-core@latest
   vite-plus: latest

@@ -15,6 +15,7 @@ import type { ListPrefix } from "./list.ts";
 interface StyleState {
   strong: boolean;
   emphasis: boolean;
+  strikethrough: boolean;
   link?: {
     href: string;
     title?: string;
@@ -72,6 +73,20 @@ function getFontForStyle(
         href: style.link.href,
         title: style.link.title,
       },
+    };
+  }
+
+  if (style.strikethrough) {
+    return {
+      font:
+        style.strong && style.emphasis
+          ? fonts.bodyBoldItalic
+          : style.strong
+            ? fonts.bodyBold
+            : style.emphasis
+              ? fonts.bodyItalic
+              : baseFont,
+      type: "strikethrough",
     };
   }
 
@@ -183,6 +198,12 @@ function flattenInlineNodes(
           emphasis: true,
         });
         break;
+      case "strikethrough":
+        flattenInlineNodes(target, node.children, fonts, baseFont, {
+          ...state,
+          strikethrough: true,
+        });
+        break;
       case "link":
         flattenInlineNodes(target, node.children, fonts, baseFont, {
           ...state,
@@ -269,6 +290,7 @@ export function prepareRichText(options: PrepareRichTextOptions): PreparedRichTe
   flattenInlineNodes(tokens, options.nodes, options.fonts, options.baseFont, {
     strong: false,
     emphasis: false,
+    strikethrough: false,
   });
 
   return {

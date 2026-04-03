@@ -493,6 +493,15 @@ function drawFragment(
     ctx.lineTo(x + fragment.width, top + lineHeight - 3);
     ctx.stroke();
   }
+
+  if (fragment.type === "strikethrough") {
+    ctx.strokeStyle = fragmentColor(fragment, palette);
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(x, top + lineHeight * 0.52);
+    ctx.lineTo(x + fragment.width, top + lineHeight * 0.52);
+    ctx.stroke();
+  }
 }
 
 function drawTextLine(
