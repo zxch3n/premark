@@ -1,3 +1,10 @@
+import {
+  layoutNextLine,
+  prepareWithSegments,
+  walkLineRanges,
+  type LayoutCursor,
+  type PreparedTextWithSegments,
+} from "@chenglou/pretext";
 import type { MarkdownInline } from "@pretext-md/parser";
 
 import type {
@@ -8,9 +15,14 @@ import type {
   TextLine,
 } from "../types.ts";
 
-import { measureTextWidth, splitGraphemes } from "../measurement-context.ts";
-
 import type { ListPrefix } from "./list.ts";
+
+const LINE_START_CURSOR: LayoutCursor = {
+  segmentIndex: 0,
+  graphemeIndex: 0,
+};
+const UNBOUNDED_WIDTH = 100_000;
+const collapsedSpaceWidthCache = new Map<string, number>();
 
 interface StyleState {
   strong: boolean;
@@ -22,20 +34,44 @@ interface StyleState {
   };
 }
 
-interface PreparedToken {
+interface TextSpec {
+  kind: "text";
   text: string;
   font: string;
   type: FragmentType;
   meta?: FragmentMeta;
-  width: number;
-  whitespace: boolean;
-  forceBreak: boolean;
-  paddingX: number;
+  chromeWidth: number;
+  collapseOuterWhitespace: boolean;
 }
+
+interface BreakSpec {
+  kind: "break";
+}
+
+type InlineSpec = TextSpec | BreakSpec;
+
+interface PreparedTextItem {
+  kind: "text";
+  prepared: PreparedTextWithSegments;
+  endCursor: LayoutCursor;
+  fullText: string;
+  fullWidth: number;
+  leadingGap: number;
+  chromeWidth: number;
+  font: string;
+  type: FragmentType;
+  meta?: FragmentMeta;
+}
+
+interface PreparedBreakItem {
+  kind: "break";
+}
+
+type PreparedInlineItem = PreparedTextItem | PreparedBreakItem;
 
 export interface PreparedRichText {
   lineHeight: number;
-  tokens: PreparedToken[];
+  items: PreparedInlineItem[];
   prefix?: ListPrefix;
   hangingIndent: number;
 }
@@ -117,36 +153,67 @@ function getFontForStyle(
   };
 }
 
-function tokenizeText(text: string): string[] {
-  const parts = text.split(/(\s+)/u);
-  return parts.filter((part) => part.length > 0);
+function measureSingleLineWidth(prepared: PreparedTextWithSegments): number {
+  let maxWidth = 0;
+  walkLineRanges(prepared, UNBOUNDED_WIDTH, (line) => {
+    if (line.width > maxWidth) {
+      maxWidth = line.width;
+    }
+  });
+  return maxWidth;
 }
 
-function pushPreparedText(
-  target: PreparedToken[],
-  text: string,
-  font: string,
-  type: FragmentType,
-  meta: FragmentMeta,
-  paddingX = 0,
-): void {
-  const tokens = tokenizeText(text);
-  for (const token of tokens) {
-    target.push({
-      text: token,
-      font,
-      type,
-      meta,
-      width: measureTextWidth(token, font) + paddingX * 2,
-      whitespace: /^\s+$/u.test(token),
-      forceBreak: false,
-      paddingX,
-    });
+function measureCollapsedSpaceWidth(font: string): number {
+  const cached = collapsedSpaceWidthCache.get(font);
+  if (cached !== undefined) {
+    return cached;
   }
+
+  const joinedWidth = measureSingleLineWidth(prepareWithSegments("A A", font));
+  const compactWidth = measureSingleLineWidth(prepareWithSegments("AA", font));
+  const collapsedWidth = Math.max(0, joinedWidth - compactWidth);
+  collapsedSpaceWidthCache.set(font, collapsedWidth);
+  return collapsedWidth;
 }
 
-function flattenInlineNodes(
-  target: PreparedToken[],
+function metasEqual(left: FragmentMeta | undefined, right: FragmentMeta | undefined): boolean {
+  if (left === right) {
+    return true;
+  }
+
+  if (left === undefined || right === undefined) {
+    return false;
+  }
+
+  return left.type === right.type && left.href === right.href && left.title === right.title;
+}
+
+function pushTextSpec(target: InlineSpec[], spec: Omit<TextSpec, "kind">): void {
+  if (spec.text.length === 0) {
+    return;
+  }
+
+  const previous = target.at(-1);
+  if (
+    previous?.kind === "text" &&
+    previous.font === spec.font &&
+    previous.type === spec.type &&
+    previous.chromeWidth === spec.chromeWidth &&
+    previous.collapseOuterWhitespace === spec.collapseOuterWhitespace &&
+    metasEqual(previous.meta, spec.meta)
+  ) {
+    previous.text += spec.text;
+    return;
+  }
+
+  target.push({
+    kind: "text",
+    ...spec,
+  });
+}
+
+function collectInlineSpecs(
+  target: InlineSpec[],
   nodes: readonly MarkdownInline[],
   fonts: ResolvedFonts,
   baseFont: string,
@@ -156,56 +223,60 @@ function flattenInlineNodes(
     switch (node.type) {
       case "text": {
         const style = getFontForStyle(state, fonts, baseFont);
-        pushPreparedText(target, node.text, style.font, style.type, style.meta);
+        pushTextSpec(target, {
+          text: node.text,
+          font: style.font,
+          type: style.type,
+          meta: style.meta,
+          chromeWidth: 0,
+          collapseOuterWhitespace: true,
+        });
         break;
       }
       case "code-span":
-        target.push({
+        pushTextSpec(target, {
           text: node.text,
           font: fonts.inlineCode,
           type: "inline_code",
-          width: measureTextWidth(node.text, fonts.inlineCode) + 12,
-          whitespace: false,
-          forceBreak: false,
-          paddingX: 6,
+          chromeWidth: 12,
+          collapseOuterWhitespace: false,
         });
         break;
       case "softbreak": {
         const style = getFontForStyle(state, fonts, baseFont);
-        pushPreparedText(target, " ", style.font, style.type, style.meta);
+        pushTextSpec(target, {
+          text: " ",
+          font: style.font,
+          type: style.type,
+          meta: style.meta,
+          chromeWidth: 0,
+          collapseOuterWhitespace: true,
+        });
         break;
       }
       case "hardbreak":
-        target.push({
-          text: "",
-          font: baseFont,
-          type: "text",
-          width: 0,
-          whitespace: false,
-          forceBreak: true,
-          paddingX: 0,
-        });
+        target.push({ kind: "break" });
         break;
       case "strong":
-        flattenInlineNodes(target, node.children, fonts, baseFont, {
+        collectInlineSpecs(target, node.children, fonts, baseFont, {
           ...state,
           strong: true,
         });
         break;
       case "emphasis":
-        flattenInlineNodes(target, node.children, fonts, baseFont, {
+        collectInlineSpecs(target, node.children, fonts, baseFont, {
           ...state,
           emphasis: true,
         });
         break;
       case "strikethrough":
-        flattenInlineNodes(target, node.children, fonts, baseFont, {
+        collectInlineSpecs(target, node.children, fonts, baseFont, {
           ...state,
           strikethrough: true,
         });
         break;
       case "link":
-        flattenInlineNodes(target, node.children, fonts, baseFont, {
+        collectInlineSpecs(target, node.children, fonts, baseFont, {
           ...state,
           link: {
             href: node.href,
@@ -215,61 +286,96 @@ function flattenInlineNodes(
         break;
       case "image": {
         const style = getFontForStyle(state, fonts, baseFont);
-        pushPreparedText(target, `[${node.href}]`, style.font, style.type, style.meta);
+        pushTextSpec(target, {
+          text: `[${node.href}]`,
+          font: style.font,
+          type: style.type,
+          meta: style.meta,
+          chromeWidth: 0,
+          collapseOuterWhitespace: false,
+        });
         break;
       }
       case "html": {
         const style = getFontForStyle(state, fonts, baseFont);
-        pushPreparedText(target, node.content, style.font, style.type, style.meta);
+        pushTextSpec(target, {
+          text: node.content,
+          font: style.font,
+          type: style.type,
+          meta: style.meta,
+          chromeWidth: 0,
+          collapseOuterWhitespace: true,
+        });
         break;
       }
     }
   }
 }
 
-function cloneToken(token: PreparedToken, text: string, width: number): PreparedToken {
-  return {
-    ...token,
-    text,
-    width,
-  };
+function prepareInlineItems(specs: readonly InlineSpec[]): PreparedInlineItem[] {
+  const items: PreparedInlineItem[] = [];
+  let pendingGap = 0;
+
+  for (const spec of specs) {
+    if (spec.kind === "break") {
+      if (items.at(-1)?.kind !== "break") {
+        items.push({ kind: "break" });
+      }
+      pendingGap = 0;
+      continue;
+    }
+
+    let text = spec.text;
+    let leadingGap = pendingGap;
+
+    if (spec.collapseOuterWhitespace) {
+      const hasLeadingWhitespace = /^\s/u.test(text);
+      const hasTrailingWhitespace = /\s$/u.test(text);
+      const collapsedWidth = measureCollapsedSpaceWidth(spec.font);
+      const trimmed = text.trim();
+
+      if (leadingGap === 0 && hasLeadingWhitespace) {
+        leadingGap = collapsedWidth;
+      }
+      pendingGap = hasTrailingWhitespace ? collapsedWidth : 0;
+      text = trimmed;
+    } else {
+      pendingGap = 0;
+    }
+
+    if (text.length === 0) {
+      continue;
+    }
+
+    const prepared = prepareWithSegments(
+      text,
+      spec.font,
+      spec.chromeWidth > 0 ? { whiteSpace: "pre-wrap" } : undefined,
+    );
+    const fullLine = layoutNextLine(prepared, LINE_START_CURSOR, UNBOUNDED_WIDTH);
+    if (fullLine === null) {
+      continue;
+    }
+
+    items.push({
+      kind: "text",
+      prepared,
+      endCursor: fullLine.end,
+      fullText: fullLine.text,
+      fullWidth: fullLine.width,
+      leadingGap,
+      chromeWidth: spec.chromeWidth,
+      font: spec.font,
+      type: spec.type,
+      meta: spec.meta,
+    });
+  }
+
+  return items;
 }
 
-function splitTokenToFit(
-  token: PreparedToken,
-  availableWidth: number,
-): [PreparedToken, PreparedToken | undefined] {
-  const graphemes = splitGraphemes(token.text);
-  let width = token.paddingX * 2;
-  let splitIndex = 0;
-
-  for (let index = 0; index < graphemes.length; index += 1) {
-    const nextWidth = width + measureTextWidth(graphemes[index], token.font);
-    if (nextWidth > availableWidth && index > 0) {
-      splitIndex = index;
-      break;
-    }
-    width = nextWidth;
-    splitIndex = index + 1;
-    if (nextWidth > availableWidth) {
-      break;
-    }
-  }
-
-  if (splitIndex <= 0) {
-    splitIndex = 1;
-    width = measureTextWidth(graphemes[0], token.font) + token.paddingX * 2;
-  }
-
-  const headText = graphemes.slice(0, splitIndex).join("");
-  const tailText = graphemes.slice(splitIndex).join("");
-
-  return [
-    cloneToken(token, headText, width),
-    tailText.length > 0
-      ? cloneToken(token, tailText, measureTextWidth(tailText, token.font) + token.paddingX * 2)
-      : undefined,
-  ];
+function cursorsMatch(left: LayoutCursor, right: LayoutCursor): boolean {
+  return left.segmentIndex === right.segmentIndex && left.graphemeIndex === right.graphemeIndex;
 }
 
 function canMergeFragments(previous: InlineFragment | undefined, next: InlineFragment): boolean {
@@ -280,14 +386,14 @@ function canMergeFragments(previous: InlineFragment | undefined, next: InlineFra
   return (
     previous.type === next.type &&
     previous.font === next.font &&
-    JSON.stringify(previous.meta) === JSON.stringify(next.meta) &&
+    metasEqual(previous.meta, next.meta) &&
     previous.x + previous.width === next.x
   );
 }
 
 export function prepareRichText(options: PrepareRichTextOptions): PreparedRichText {
-  const tokens: PreparedToken[] = [];
-  flattenInlineNodes(tokens, options.nodes, options.fonts, options.baseFont, {
+  const specs: InlineSpec[] = [];
+  collectInlineSpecs(specs, options.nodes, options.fonts, options.baseFont, {
     strong: false,
     emphasis: false,
     strikethrough: false,
@@ -295,7 +401,7 @@ export function prepareRichText(options: PrepareRichTextOptions): PreparedRichTe
 
   return {
     lineHeight: options.lineHeight,
-    tokens,
+    items: prepareInlineItems(specs),
     prefix: options.prefix,
     hangingIndent: options.prefix ? options.prefix.width + options.prefix.gap : 0,
   };
@@ -321,6 +427,8 @@ export function layoutRichText(
   let contentFragmentCount = 0;
   let lineIndex = 0;
   let maxRight = 0;
+  let itemIndex = 0;
+  let textCursor: LayoutCursor | null = null;
 
   function lineX(): number {
     return options.x + (lineIndex === 0 ? 0 : prepared.hangingIndent);
@@ -372,14 +480,19 @@ export function layoutRichText(
     contentFragmentCount = 0;
   }
 
-  function addFragment(token: PreparedToken): void {
+  function addFragment(
+    item: PreparedTextItem,
+    text: string,
+    width: number,
+    leadingGap: number,
+  ): void {
     const fragment: InlineFragment = {
-      text: token.text,
-      x: lineWidth,
-      width: token.width,
-      font: token.font,
-      type: token.type,
-      meta: token.meta,
+      text,
+      x: lineWidth + leadingGap,
+      width: width + item.chromeWidth,
+      font: item.font,
+      type: item.type,
+      meta: item.meta,
     };
     const previous = currentFragments.at(-1);
     if (canMergeFragments(previous, fragment)) {
@@ -390,59 +503,78 @@ export function layoutRichText(
     } else {
       currentFragments.push(fragment);
     }
-    lineWidth += token.width;
-    if (!token.whitespace) {
-      contentFragmentCount += 1;
-    }
-  }
-
-  function pushToken(token: PreparedToken): void {
-    if (token.forceBreak) {
-      commitLine(true);
-      seedLinePrefix();
-      return;
-    }
-
-    if (token.whitespace && contentFragmentCount === 0) {
-      return;
-    }
-
-    const availableWidth = lineLimit();
-    if (lineWidth + token.width <= availableWidth) {
-      addFragment(token);
-      return;
-    }
-
-    if (token.whitespace) {
-      commitLine(false);
-      seedLinePrefix();
-      return;
-    }
-
-    if (contentFragmentCount === 0) {
-      let remainder: PreparedToken | undefined = token;
-      while (remainder !== undefined) {
-        const currentLimit = Math.max(1, lineLimit() - lineWidth);
-        const [head, tail] = splitTokenToFit(remainder, currentLimit);
-        addFragment(head);
-        remainder = tail;
-        if (remainder !== undefined) {
-          commitLine(false);
-          seedLinePrefix();
-        }
-      }
-      return;
-    }
-
-    commitLine(false);
-    seedLinePrefix();
-    pushToken(token);
+    lineWidth += leadingGap + width + item.chromeWidth;
+    contentFragmentCount += 1;
   }
 
   seedLinePrefix();
 
-  for (const token of prepared.tokens) {
-    pushToken(token);
+  while (itemIndex < prepared.items.length) {
+    const item = prepared.items[itemIndex]!;
+
+    if (item.kind === "break") {
+      commitLine(contentFragmentCount === 0 && currentFragments.length === 0);
+      seedLinePrefix();
+      itemIndex += 1;
+      textCursor = null;
+      continue;
+    }
+
+    if (textCursor !== null && cursorsMatch(textCursor, item.endCursor)) {
+      itemIndex += 1;
+      textCursor = null;
+      continue;
+    }
+
+    const leadingGap = contentFragmentCount === 0 || textCursor !== null ? 0 : item.leadingGap;
+    const remainingWidth = lineLimit() - lineWidth;
+    const reservedWidth = leadingGap + item.chromeWidth;
+
+    if (contentFragmentCount > 0 && reservedWidth >= remainingWidth) {
+      commitLine(false);
+      seedLinePrefix();
+      continue;
+    }
+
+    if (textCursor === null) {
+      const fullWidth = leadingGap + item.fullWidth + item.chromeWidth;
+      if (fullWidth <= remainingWidth) {
+        addFragment(item, item.fullText, item.fullWidth, leadingGap);
+        itemIndex += 1;
+        continue;
+      }
+    }
+
+    const startCursor = textCursor ?? LINE_START_CURSOR;
+    const line = layoutNextLine(
+      item.prepared,
+      startCursor,
+      Math.max(1, remainingWidth - reservedWidth),
+    );
+
+    if (line === null || cursorsMatch(startCursor, line.end)) {
+      if (contentFragmentCount === 0) {
+        addFragment(item, item.fullText, item.fullWidth, leadingGap);
+        itemIndex += 1;
+        continue;
+      }
+
+      commitLine(false);
+      seedLinePrefix();
+      continue;
+    }
+
+    addFragment(item, line.text, line.width, leadingGap);
+
+    if (cursorsMatch(line.end, item.endCursor)) {
+      itemIndex += 1;
+      textCursor = null;
+      continue;
+    }
+
+    textCursor = line.end;
+    commitLine(false);
+    seedLinePrefix();
   }
 
   if (currentFragments.length > 0 || lines.length === 0) {
