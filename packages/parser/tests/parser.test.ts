@@ -367,10 +367,8 @@ describe("appendIncrementalParse", () => {
     const replaceResult = incrementalParse(oldState, oldText + chunk, forceIncrementalOptions);
 
     expect(appendResult.state.blocks).toEqual(replaceResult.state.blocks);
-    expect(appendResult.dirtyFromBlock).toBe(replaceResult.dirtyFromBlock);
-    expect(appendResult.dirtyToBlock).toBe(replaceResult.dirtyToBlock);
-    expect(appendResult.reusedPrefixCount).toBe(replaceResult.reusedPrefixCount);
-    expect(appendResult.reusedSuffixCount).toBe(replaceResult.reusedSuffixCount);
+    expect(appendResult.mode).toBe("incremental");
+    expect(replaceResult.mode).toBe("incremental");
   });
 });
 

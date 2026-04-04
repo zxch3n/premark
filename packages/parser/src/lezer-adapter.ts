@@ -50,6 +50,7 @@ export function getMarkdownParser() {
 export function extractTopLevelBlockEntries(
   tree: Tree,
   markdown: string,
+  startBlockIndex = 0,
 ): {
   entries: TopLevelBlockEntry[];
   definitions: Map<string, ReferenceDefinition>;
@@ -57,6 +58,7 @@ export function extractTopLevelBlockEntries(
   const topNode = tree.topNode;
   const definitions = collectReferenceDefinitions(topNode, markdown);
   const entries: TopLevelBlockEntry[] = [];
+  let blockIndex = 0;
 
   forEachChild(topNode, (child) => {
     if (child.type.name === "LinkReference") {
@@ -65,6 +67,11 @@ export function extractTopLevelBlockEntries(
 
     const blockType = toBlockTypeName(child.type.name);
     if (blockType === null) {
+      return;
+    }
+
+    if (blockIndex < startBlockIndex) {
+      blockIndex += 1;
       return;
     }
 
@@ -77,6 +84,7 @@ export function extractTopLevelBlockEntries(
         signature: hashTextRangeWithPrefix(markdown, child.from, child.to, blockType),
       },
     });
+    blockIndex += 1;
   });
 
   return {
