@@ -2,8 +2,6 @@ import type { MarkdownInline } from "@pretext-md/parser";
 
 import type { OpaqueLine, ResolvedFonts, SpacingConfig, TableCell } from "../types.ts";
 
-import { measureTextWidth } from "../measurement-context.ts";
-
 import { layoutRichText, prepareRichText } from "./rich-text.ts";
 
 interface PreparedCell {
@@ -19,36 +17,17 @@ export interface PreparedTableBlock {
   spacing: SpacingConfig;
 }
 
-function intrinsicWidth(nodes: readonly MarkdownInline[], font: string): number {
-  return nodes.reduce((total, node) => {
-    switch (node.type) {
-      case "text":
-      case "code-span":
-        return total + measureTextWidth(node.text, font);
-      case "softbreak":
-      case "hardbreak":
-        return total + measureTextWidth(" ", font);
-      case "strong":
-      case "emphasis":
-      case "strikethrough":
-      case "link":
-      case "image":
-        return total + intrinsicWidth(node.children, font);
-      case "html":
-        return total + measureTextWidth(node.content, font);
-    }
-  }, 0);
-}
-
 function prepareCell(nodes: readonly MarkdownInline[], fonts: ResolvedFonts): PreparedCell {
+  const prepared = prepareRichText({
+    nodes,
+    fonts,
+    baseFont: fonts.body,
+    lineHeight: fonts.lineHeights.body,
+  });
+
   return {
-    prepared: prepareRichText({
-      nodes,
-      fonts,
-      baseFont: fonts.body,
-      lineHeight: fonts.lineHeights.body,
-    }),
-    plainTextWidth: intrinsicWidth(nodes, fonts.body),
+    prepared,
+    plainTextWidth: prepared.intrinsicWidth,
   };
 }
 

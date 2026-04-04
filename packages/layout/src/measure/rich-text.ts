@@ -72,6 +72,7 @@ type PreparedInlineItem = PreparedTextItem | PreparedBreakItem;
 export interface PreparedRichText {
   lineHeight: number;
   items: PreparedInlineItem[];
+  intrinsicWidth: number;
   prefix?: ListPrefix;
   hangingIndent: number;
 }
@@ -391,6 +392,26 @@ function canMergeFragments(previous: InlineFragment | undefined, next: InlineFra
   );
 }
 
+function measureIntrinsicWidth(items: readonly PreparedInlineItem[]): number {
+  let maxWidth = 0;
+  let lineWidth = 0;
+  let hasContent = false;
+
+  for (const item of items) {
+    if (item.kind === "break") {
+      maxWidth = Math.max(maxWidth, lineWidth);
+      lineWidth = 0;
+      hasContent = false;
+      continue;
+    }
+
+    lineWidth += (hasContent ? item.leadingGap : 0) + item.fullWidth + item.chromeWidth;
+    hasContent = true;
+  }
+
+  return Math.max(maxWidth, lineWidth);
+}
+
 export function prepareRichText(options: PrepareRichTextOptions): PreparedRichText {
   const specs: InlineSpec[] = [];
   collectInlineSpecs(specs, options.nodes, options.fonts, options.baseFont, {
@@ -398,10 +419,12 @@ export function prepareRichText(options: PrepareRichTextOptions): PreparedRichTe
     emphasis: false,
     strikethrough: false,
   });
+  const items = prepareInlineItems(specs);
 
   return {
     lineHeight: options.lineHeight,
-    items: prepareInlineItems(specs),
+    items,
+    intrinsicWidth: measureIntrinsicWidth(items),
     prefix: options.prefix,
     hangingIndent: options.prefix ? options.prefix.width + options.prefix.gap : 0,
   };
