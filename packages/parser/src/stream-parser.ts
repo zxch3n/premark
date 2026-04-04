@@ -1,7 +1,7 @@
 import {
+  appendIncrementalParse,
   createIncrementalParseState,
   finalizeIncrementalParseState,
-  incrementalParse,
 } from "./incremental-parser.ts";
 import { freezeMarkdownBlockArray } from "./immutable.ts";
 
@@ -19,7 +19,7 @@ export class StreamParser {
 
   push(chunk: string): StreamParseResult {
     const previousClosedCount = this.state.closedBlocks.length;
-    const result = incrementalParse(this.state, this.state.text + chunk);
+    const result = appendIncrementalParse(this.state, chunk);
     this.state = result.state;
     this.lastResult = result;
     const emittedBlocks = freezeMarkdownBlockArray(

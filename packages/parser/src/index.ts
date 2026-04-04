@@ -1,6 +1,7 @@
 export { diffBlocks } from "./block-differ.ts";
 export { simpleDiff, shouldFullReparse } from "./diff-text.ts";
 export {
+  appendIncrementalParse,
   createIncrementalParseState,
   incrementalParse,
   parseMarkdownStream,

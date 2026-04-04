@@ -1,12 +1,19 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  appendIncrementalParse,
   createIncrementalParseState,
   incrementalParse,
   parseMarkdown,
   StreamParser,
 } from "../src/index.ts";
 import type { MarkdownBlock, MarkdownInline } from "../src/types.ts";
+
+const forceIncrementalOptions = {
+  maxChangedChars: 100_000,
+  maxChangedRatio: 1,
+  maxChangedLines: 10_000,
+} as const;
 
 describe("parseMarkdown", () => {
   it("parses headings, paragraphs, lists and code blocks", () => {
@@ -206,12 +213,6 @@ describe("StreamParser", () => {
 });
 
 describe("incrementalParse", () => {
-  const forceIncrementalOptions = {
-    maxChangedChars: 100_000,
-    maxChangedRatio: 1,
-    maxChangedLines: 10_000,
-  } as const;
-
   it("reuses unchanged prefix and suffix blocks for a middle edit", () => {
     const oldText = "# Title\n\nAlpha paragraph.\n\nBeta paragraph.\n\n```ts\nconst x = 1\n```";
     const newText =
@@ -341,6 +342,35 @@ describe("incrementalParse", () => {
       expect(result.mode, testCase.name).toBe("incremental");
       expect(result.state.blocks, testCase.name).toEqual(parseMarkdown(testCase.newText));
     }
+  });
+});
+
+describe("appendIncrementalParse", () => {
+  it("matches full parse for append-only updates while reusing the stable prefix", () => {
+    const oldText = "# Title\n\nAlpha paragraph.";
+    const chunk = " Extended with **bold** text.\n\n```ts\nconst x = 1\n```";
+    const oldState = createIncrementalParseState(oldText);
+    const result = appendIncrementalParse(oldState, chunk, forceIncrementalOptions);
+
+    expect(result.mode).toBe("incremental");
+    expect(result.state.blocks).toEqual(parseMarkdown(oldText + chunk));
+    expect(result.reusedPrefixCount).toBeGreaterThan(0);
+    expect(result.reusedSuffixCount).toBe(0);
+    expect(result.state.blocks[0]).toBe(oldState.blocks[0]);
+  });
+
+  it("keeps append and replace paths equivalent for the same appended text", () => {
+    const oldText = "# Title\n\nAlpha paragraph.";
+    const chunk = "\n\nAnother paragraph with `code`.";
+    const oldState = createIncrementalParseState(oldText);
+    const appendResult = appendIncrementalParse(oldState, chunk, forceIncrementalOptions);
+    const replaceResult = incrementalParse(oldState, oldText + chunk, forceIncrementalOptions);
+
+    expect(appendResult.state.blocks).toEqual(replaceResult.state.blocks);
+    expect(appendResult.dirtyFromBlock).toBe(replaceResult.dirtyFromBlock);
+    expect(appendResult.dirtyToBlock).toBe(replaceResult.dirtyToBlock);
+    expect(appendResult.reusedPrefixCount).toBe(replaceResult.reusedPrefixCount);
+    expect(appendResult.reusedSuffixCount).toBe(replaceResult.reusedSuffixCount);
   });
 });
 
