@@ -67,16 +67,20 @@
 
 ## Current Bottleneck Hypotheses
 
-1. Table preparation still does too much repeated intrinsic-width measurement work.
-2. Full layout still repeatedly prepares identical blocks across the same document.
-3. `hashContent` and allocation churn are contributing to GC-heavy cold renders.
+1. Cold full render is now dominated by parser + normalization rather than block preparation.
+2. Incremental update cost is now mostly parser-side (`simpleDiff` + `incrementalParse`) rather than layout-side.
+3. Further large wins likely require parser-side or normalization-side changes, not more renderer-side micro-optimization.
 
 ## Current Loop
 
-- Status: loop 1 completed, loop 2 starting
-- Step 1: optimize cross-index repeated block preparation
-- Step 2: validate tests, benchmark deltas, and render consistency
-- Step 3: decide whether further optimization is still worth the added complexity
+- Status: loop 2 completed
+- Current conclusion:
+  - Renderer-side cold-layout hot path has been reduced enough that parser + normalization are now the dominant cost centers.
+  - Further wins are possible, but they would be a new workstream rather than a continuation of the same renderer bottleneck.
+- Next candidates if optimization continues later:
+  - parser-side profiling / optimization
+  - normalization hashing / allocation reduction
+  - fixture diversification to measure non-repetitive corpora
 
 ## Loop History
 
@@ -113,6 +117,55 @@
     - Visual inspection: no meaningful visible layout regression
 - Decision:
   - Keep the change.
+
+### Loop 2
+
+- Hypothesis:
+  - Cross-index duplicate blocks in the same document were still being fully re-prepared.
+  - The first memoization attempt was incomplete because `sourceBlockIndex` polluted the content identity, preventing repeated blocks from sharing a memo entry.
+- Change:
+  - Added an engine-level bounded prepared-block LRU memo.
+  - Switched content identity serialization to ignore `sourceBlockIndex`, which is not render-relevant.
+  - Reused prepared blocks across different indices when their render-relevant normalized content matched exactly.
+- Files:
+  - `packages/layout/src/cache.ts`
+  - `packages/layout/src/engine.ts`
+- Validation:
+  - `vp check --fix`
+  - `vp test`
+  - `vp run build`
+- A/B against loop 1 commit `b28c685` using:
+  - `vp exec jiti scripts/benchmark-million.ts --json --iterations 3`
+- Benchmark result:
+  - Full render `totalEngineLayoutMs`: `5046.85 -> 1171.46` (`-76.8%`)
+  - Full render `layoutMeasureMs`: `4436.90 -> 502.81` (`-88.7%`)
+  - Full rerender after insert: `4263.00 -> 989.78` (`-76.8%`)
+  - Incremental `totalIncrementalLayoutMs`: `133.58 -> 126.18` (`-5.5%`)
+  - Incremental `applyParseResultMs`: `51.21 -> 57.71` (`+12.7%`)
+  - Incremental `layoutIncrementalMs`: `41.00 -> 46.45` (`+13.3%`)
+  - Interpretation:
+    - The incremental `apply/layout` delta is small compared with the cold-render win and stayed in the same rough band.
+    - The dominant incremental cost remains parser-side, not layout-side.
+- Current profile snapshot:
+  - `totalMs`: `990.79`
+  - `prepare.totalMs`: `2.06`
+  - `layout.totalMs`: `174.19`
+  - Only `8` unique blocks were actually prepared in the profiled million-char fixture, which confirms duplicate prepared-block reuse is working.
+- Render consistency:
+  - Compared loop 1 render output vs current render output for:
+    - `examples/markdown/*.md`
+    - `/tmp/pretext-md-million-previews-tight/*.md`
+  - Result:
+    - `7` PNGs compared
+    - `0` mismatches
+- Decision:
+  - Keep the change.
+
+## Stop Condition
+
+- Renderer-side preparation is no longer the limiting factor on the million-character benchmark.
+- The next biggest gains would require parser-side or normalization-side work, which is a distinct optimization track.
+- For the current renderer-focused loop, this is a reasonable stop point.
 
 ## Notes
 

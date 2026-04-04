@@ -6,7 +6,7 @@ import {
   type MarkdownBlock,
 } from "@pretext-md/parser";
 
-import { hashContent, type BlockCache } from "./cache.ts";
+import { hashContent, identifyContent, type BlockCache } from "./cache.ts";
 import { createDefaultSpacing, resolveFonts } from "./font-theme.ts";
 import { layoutCodeBlock, prepareCodeBlock, type PreparedCodeBlock } from "./measure/code-block.ts";
 import { createListPrefix } from "./measure/list.ts";
@@ -140,6 +140,8 @@ function compareLines(left: LayoutLine, right: LayoutLine): boolean {
 }
 
 export class LayoutEngineImpl implements LayoutEngine {
+  private static readonly maxPreparedMemoEntries = 2048;
+
   private fonts: ResolvedFonts;
 
   private spacing: SpacingConfig;
@@ -149,6 +151,8 @@ export class LayoutEngineImpl implements LayoutEngine {
   private version = 0;
 
   private blockCaches: InternalBlockCache[] = [];
+
+  private preparedBlockMemo = new Map<string, PreparedBlock>();
 
   private lastMarkdown = "";
 
@@ -228,6 +232,7 @@ export class LayoutEngineImpl implements LayoutEngine {
   updateFontTheme(theme: FontTheme): void {
     this.fonts = resolveFonts(theme, this.config.fontOverrides);
     this.blockCaches = [];
+    this.preparedBlockMemo.clear();
   }
 
   createStream(containerWidth: number) {
@@ -236,6 +241,7 @@ export class LayoutEngineImpl implements LayoutEngine {
 
   dispose(): void {
     this.blockCaches = [];
+    this.preparedBlockMemo.clear();
     this.lastBlocks = [];
     this.lastParseState = createIncrementalParseState();
     this.lastNormalizedDocument = emptyNormalizedDocument();
@@ -349,6 +355,33 @@ export class LayoutEngineImpl implements LayoutEngine {
     return {
       kind: "thematic_break",
     };
+  }
+
+  private getMemoizedPreparedBlock(contentKey: string): PreparedBlock | undefined {
+    const preparedBlock = this.preparedBlockMemo.get(contentKey);
+    if (preparedBlock === undefined) {
+      return undefined;
+    }
+
+    this.preparedBlockMemo.delete(contentKey);
+    this.preparedBlockMemo.set(contentKey, preparedBlock);
+    return preparedBlock;
+  }
+
+  private rememberPreparedBlock(contentKey: string, preparedBlock: PreparedBlock): void {
+    if (this.preparedBlockMemo.has(contentKey)) {
+      this.preparedBlockMemo.delete(contentKey);
+    }
+    this.preparedBlockMemo.set(contentKey, preparedBlock);
+
+    if (this.preparedBlockMemo.size <= LayoutEngineImpl.maxPreparedMemoEntries) {
+      return;
+    }
+
+    const oldestKey = this.preparedBlockMemo.keys().next().value;
+    if (typeof oldestKey === "string") {
+      this.preparedBlockMemo.delete(oldestKey);
+    }
   }
 
   private layoutPreparedBlock(
@@ -654,12 +687,13 @@ export class LayoutEngineImpl implements LayoutEngine {
           ? normalized.marginTop
           : Math.max(previousMarginBottom, normalized.marginTop);
       const width = Math.max(1, containerWidth - normalized.indent);
-      const contentHash = hashContent(normalized);
+      const contentIdentity = identifyContent(normalized);
+      const contentHash = contentIdentity.hash;
       const cache = this.blockCaches[blockIndex];
       const preparedBlock =
         cache !== undefined && cache.contentHash === contentHash
           ? cache.preparedBlock
-          : this.prepareBlock(normalized);
+          : (this.getMemoizedPreparedBlock(contentIdentity.text) ?? this.prepareBlock(normalized));
       const measured = this.layoutPreparedBlock(
         normalized,
         preparedBlock,
@@ -680,6 +714,7 @@ export class LayoutEngineImpl implements LayoutEngine {
         layoutWidth: width,
         block: measured.block,
       });
+      this.rememberPreparedBlock(contentIdentity.text, preparedBlock);
       cursorY += measured.block.height;
       previousMarginBottom = normalized.marginBottom;
     }
@@ -761,7 +796,8 @@ export class LayoutEngineImpl implements LayoutEngine {
       cursorY +=
         blockIndex === 0 ? block.marginTop : Math.max(previousMarginBottom, block.marginTop);
       const width = Math.max(1, containerWidth - block.indent);
-      const contentHash = hashContent(block);
+      const contentIdentity = identifyContent(block);
+      const contentHash = contentIdentity.hash;
       const cache = this.blockCaches[blockIndex];
 
       if (cache !== undefined && cache.contentHash === contentHash && cache.layoutWidth === width) {
@@ -793,7 +829,7 @@ export class LayoutEngineImpl implements LayoutEngine {
       const preparedBlock =
         cache !== undefined && cache.contentHash === contentHash
           ? cache.preparedBlock
-          : this.prepareBlock(block);
+          : (this.getMemoizedPreparedBlock(contentIdentity.text) ?? this.prepareBlock(block));
       const measured = this.layoutPreparedBlock(
         block,
         preparedBlock,
@@ -814,6 +850,7 @@ export class LayoutEngineImpl implements LayoutEngine {
         layoutWidth: width,
         block: measured.block,
       });
+      this.rememberPreparedBlock(contentIdentity.text, preparedBlock);
       cursorY += measured.block.height;
       previousMarginBottom = block.marginBottom;
     });
