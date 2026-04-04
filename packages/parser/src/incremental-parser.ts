@@ -16,6 +16,7 @@ import type {
   IncrementalParseState,
   MarkdownBlock,
   StreamParseSnapshot,
+  TextChange,
 } from "./types.ts";
 
 export function createIncrementalParseState(markdown = ""): IncrementalParseState {
@@ -31,22 +32,100 @@ export function incrementalParse(
   const change = simpleDiff(previousState.text, newText);
 
   if (change === null) {
-    return {
-      state: previousState,
-      mode: "incremental",
-      change,
-      dirtyFromBlock: previousState.blocks.length,
-      dirtyToBlock: previousState.blocks.length,
-      reusedPrefixCount: previousState.blocks.length,
-      reusedSuffixCount: 0,
-      removedCount: 0,
-      allBlocks: previousState.blocks,
-      closedBlocks: previousState.closedBlocks,
-      partialBlocks: previousState.partialBlocks,
-      sourceLength: previousState.sourceLength,
-    };
+    return unchangedParseResult(previousState);
   }
 
+  return parseWithChange(previousState, newText, change, options);
+}
+
+export function appendIncrementalParse(
+  previousState: IncrementalParseState,
+  chunk: string,
+  options?: IncrementalParseOptions,
+): IncrementalParseResult {
+  if (chunk.length === 0) {
+    return unchangedParseResult(previousState);
+  }
+
+  const oldLength = previousState.text.length;
+  const newText = previousState.text + chunk;
+  const change = createAppendChange(oldLength, chunk);
+  return parseWithChange(previousState, newText, change, options);
+}
+
+export function parseMarkdownStream(markdown: string): StreamParseSnapshot {
+  const state = createIncrementalParseState(markdown);
+  return {
+    allBlocks: state.blocks,
+    closedBlocks: state.closedBlocks,
+    partialBlocks: state.partialBlocks,
+    sourceLength: state.sourceLength,
+  };
+}
+
+export function finalizeIncrementalParseState(state: IncrementalParseState): IncrementalParseState {
+  return {
+    ...state,
+    fragments: TreeFragment.addTree(state.tree),
+    closedBlocks: state.blocks,
+    partialBlocks: freezeMarkdownBlockArray([]),
+    version: state.version + 1,
+  };
+}
+
+function fullParseResult(
+  previousState: IncrementalParseState,
+  newText: string,
+  change: TextChange,
+): IncrementalParseResult {
+  const parsed = parseMarkdownDocument(newText);
+  const nextState = createState(
+    newText,
+    parsed.tree,
+    parsed.blocks,
+    parsed.blockSpans,
+    previousState.version + 1,
+  );
+
+  return {
+    state: nextState,
+    mode: "full",
+    change,
+    dirtyFromBlock: 0,
+    dirtyToBlock: nextState.blocks.length,
+    reusedPrefixCount: 0,
+    reusedSuffixCount: 0,
+    removedCount: Math.max(0, previousState.blocks.length - nextState.blocks.length),
+    allBlocks: nextState.blocks,
+    closedBlocks: nextState.closedBlocks,
+    partialBlocks: nextState.partialBlocks,
+    sourceLength: nextState.sourceLength,
+  };
+}
+
+function unchangedParseResult(previousState: IncrementalParseState): IncrementalParseResult {
+  return {
+    state: previousState,
+    mode: "incremental",
+    change: null,
+    dirtyFromBlock: previousState.blocks.length,
+    dirtyToBlock: previousState.blocks.length,
+    reusedPrefixCount: previousState.blocks.length,
+    reusedSuffixCount: 0,
+    removedCount: 0,
+    allBlocks: previousState.blocks,
+    closedBlocks: previousState.closedBlocks,
+    partialBlocks: previousState.partialBlocks,
+    sourceLength: previousState.sourceLength,
+  };
+}
+
+function parseWithChange(
+  previousState: IncrementalParseState,
+  newText: string,
+  change: TextChange,
+  options?: IncrementalParseOptions,
+): IncrementalParseResult {
   if (shouldFullReparse(change, options)) {
     return fullParseResult(previousState, newText, change);
   }
@@ -96,56 +175,6 @@ export function incrementalParse(
     reusedPrefixCount,
     reusedSuffixCount,
     removedCount: Math.max(0, previousState.blocks.length - nextBlocks.length),
-    allBlocks: nextState.blocks,
-    closedBlocks: nextState.closedBlocks,
-    partialBlocks: nextState.partialBlocks,
-    sourceLength: nextState.sourceLength,
-  };
-}
-
-export function parseMarkdownStream(markdown: string): StreamParseSnapshot {
-  const state = createIncrementalParseState(markdown);
-  return {
-    allBlocks: state.blocks,
-    closedBlocks: state.closedBlocks,
-    partialBlocks: state.partialBlocks,
-    sourceLength: state.sourceLength,
-  };
-}
-
-export function finalizeIncrementalParseState(state: IncrementalParseState): IncrementalParseState {
-  return {
-    ...state,
-    fragments: TreeFragment.addTree(state.tree),
-    closedBlocks: state.blocks,
-    partialBlocks: freezeMarkdownBlockArray([]),
-    version: state.version + 1,
-  };
-}
-
-function fullParseResult(
-  previousState: IncrementalParseState,
-  newText: string,
-  change: NonNullable<ReturnType<typeof simpleDiff>>,
-): IncrementalParseResult {
-  const parsed = parseMarkdownDocument(newText);
-  const nextState = createState(
-    newText,
-    parsed.tree,
-    parsed.blocks,
-    parsed.blockSpans,
-    previousState.version + 1,
-  );
-
-  return {
-    state: nextState,
-    mode: "full",
-    change,
-    dirtyFromBlock: 0,
-    dirtyToBlock: nextState.blocks.length,
-    reusedPrefixCount: 0,
-    reusedSuffixCount: 0,
-    removedCount: Math.max(0, previousState.blocks.length - nextState.blocks.length),
     allBlocks: nextState.blocks,
     closedBlocks: nextState.closedBlocks,
     partialBlocks: nextState.partialBlocks,
@@ -238,6 +267,32 @@ function isClosedFencedCode(source: string): boolean {
     closingFence[1][0] === fence[0] &&
     closingFence[1].length >= fence.length
   );
+}
+
+function createAppendChange(oldLength: number, chunk: string): TextChange {
+  return {
+    fromA: oldLength,
+    toA: oldLength,
+    fromB: oldLength,
+    toB: oldLength + chunk.length,
+    changedChars: chunk.length,
+    changedRatio: chunk.length / Math.max(1, oldLength + chunk.length),
+    changedLines: countLines(chunk),
+  };
+}
+
+function countLines(text: string): number {
+  if (text.length === 0) {
+    return 0;
+  }
+
+  let lines = 1;
+  for (let index = 0; index < text.length; index += 1) {
+    if (text.charCodeAt(index) === 10) {
+      lines += 1;
+    }
+  }
+  return lines;
 }
 
 function countReusablePrefix(

@@ -70,18 +70,21 @@
 1. Remaining dominant hotspots are Lezer parser internals and GC, not our layout prepare path.
 2. Incremental update cost is now mostly parser-side (`simpleDiff` + `incrementalParse`) rather than layout-side.
 3. Runtime immutability is now intentionally disabled, so further gains likely require either parser replacement or parser-internal upstream work.
+4. The streaming API still pays avoidable overhead by reconstructing `newText` and then rediscovering an append-only change via `simpleDiff`.
 
 ## Current Loop
 
-- Status: loop 4 completed
+- Status: loop 5 completed
 - Current conclusion:
   - Renderer-side cold-layout hot path has been reduced to a small fraction of total cost.
   - Parser-side allocation cleanup and runtime-freeze removal both produced additional wins.
+  - Stream append now has an explicit append-only fast path without weakening Lezer-based middle-edit incremental parsing.
   - The remaining largest costs are now mostly outside our direct code, inside Lezer parsing and GC.
 - Next candidates if optimization continues later:
   - fixture diversification to measure non-repetitive corpora
   - parser replacement experiments
   - parser-specific allocation experiments around Lezer tree materialization
+  - append-only parser state that avoids rebuilding the full concatenated source string on every push
 
 ## Loop History
 
@@ -241,6 +244,37 @@
 - Decision:
   - Keep the change.
   - Runtime immutability is now TypeScript-enforced by contract rather than runtime-enforced by `Object.freeze()`.
+
+### Loop 5
+
+- Hypothesis:
+  - LLM-style streaming append was still going through the generic `incrementalParse(state, newText)` API, which first rebuilt `newText` and then rediscovered the append-only change with `simpleDiff`.
+  - An explicit append API should preserve Lezer incremental parsing for middle edits while shaving parser overhead from stream append.
+- Change:
+  - Added `appendIncrementalParse(previousState, chunk)` in `packages/parser/src/incremental-parser.ts`.
+  - Switched `packages/parser/src/stream-parser.ts` to use the append path instead of `incrementalParse(this.state, this.state.text + chunk)`.
+  - Kept `incrementalParse(previousState, newText)` unchanged for replace/middle-edit scenarios.
+  - Added parser tests to assert append-path correctness and equivalence with the replace path for the same appended content.
+- Files:
+  - `packages/parser/src/incremental-parser.ts`
+  - `packages/parser/src/index.ts`
+  - `packages/parser/src/stream-parser.ts`
+  - `packages/parser/tests/parser.test.ts`
+- Validation:
+  - `vp check --fix`
+  - `vp test`
+  - `vp run build`
+  - render consistency against loop 4 outputs: `7/7` PNGs identical
+- Benchmark result:
+  - Dedicated append parser microbenchmark on a `300,000` char fixture with a `52` char chunk:
+    - generic replace path median: `18.77ms`
+    - append path median: `15.37ms`
+    - speedup: `1.22x`
+  - Existing `scripts/benchmark-million.ts` still measures a middle insert, not append, so it is not the right benchmark to expect a direct win from this change.
+  - Middle-edit Lezer incremental parsing remains on the same code path as before; parser correctness tests and structural incremental tests stayed green.
+- Decision:
+  - Keep the change.
+  - This is a streaming-path architecture improvement, not a general middle-edit benchmark optimization.
 
 ## Notes
 
