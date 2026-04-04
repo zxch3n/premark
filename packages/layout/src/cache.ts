@@ -8,12 +8,34 @@ export interface BlockCache {
   block: BlockLayout;
 }
 
-export function hashContent(value: unknown): number {
-  const text = JSON.stringify(value);
+export interface ContentIdentity {
+  text: string;
+  hash: number;
+}
+
+function serializeContent(value: unknown): string {
+  return JSON.stringify(value, (key, currentValue) =>
+    key === "sourceBlockIndex" ? undefined : currentValue,
+  );
+}
+
+function hashSerializedText(text: string): number {
   let hash = 2166136261;
   for (let index = 0; index < text.length; index += 1) {
     hash ^= text.charCodeAt(index);
     hash = Math.imul(hash, 16777619);
   }
   return hash >>> 0;
+}
+
+export function identifyContent(value: unknown): ContentIdentity {
+  const text = serializeContent(value);
+  return {
+    text,
+    hash: hashSerializedText(text),
+  };
+}
+
+export function hashContent(value: unknown): number {
+  return hashSerializedText(serializeContent(value));
 }
