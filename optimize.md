@@ -67,20 +67,21 @@
 
 ## Current Bottleneck Hypotheses
 
-1. Cold full render is now dominated by parser + normalization rather than block preparation.
+1. Remaining dominant hotspots are Lezer parser internals and GC, not our layout prepare path.
 2. Incremental update cost is now mostly parser-side (`simpleDiff` + `incrementalParse`) rather than layout-side.
-3. Further large wins likely require parser-side or normalization-side changes, not more renderer-side micro-optimization.
+3. Further gains would likely require either parser replacement, parser-internal upstream work, or relaxing runtime immutability guarantees.
 
 ## Current Loop
 
-- Status: loop 2 completed
+- Status: loop 3 completed
 - Current conclusion:
-  - Renderer-side cold-layout hot path has been reduced enough that parser + normalization are now the dominant cost centers.
-  - Further wins are possible, but they would be a new workstream rather than a continuation of the same renderer bottleneck.
+  - Renderer-side cold-layout hot path has been reduced to a small fraction of total cost.
+  - Parser-side allocation cleanup still produced a smaller additional win.
+  - The remaining largest costs are now mostly outside our direct code, inside Lezer parsing and GC.
 - Next candidates if optimization continues later:
-  - parser-side profiling / optimization
-  - normalization hashing / allocation reduction
   - fixture diversification to measure non-repetitive corpora
+  - parser replacement experiments
+  - optional production-mode freeze policy, if semantic tradeoffs are acceptable
 
 ## Loop History
 
@@ -164,8 +165,46 @@
 ## Stop Condition
 
 - Renderer-side preparation is no longer the limiting factor on the million-character benchmark.
-- The next biggest gains would require parser-side or normalization-side work, which is a distinct optimization track.
-- For the current renderer-focused loop, this is a reasonable stop point.
+- The remaining largest hotspots are:
+  - Lezer `parseInline`
+  - Lezer `finishLeaf`
+  - Lezer `advance`
+  - GC
+- A control experiment with runtime freeze disabled showed only a limited additional upside, while weakening the immutability guarantee:
+  - normal parse samples: `[982.37, 592.04, 571.55]`
+  - freeze-disabled samples: `[942.08, 550.09, 490.01]`
+- At this point, further optimization would mean changing semantics or switching parser strategy, so this is a reasonable stop point for the current architecture.
+
+### Loop 3
+
+- Hypothesis:
+  - Even after duplicate prepared-block reuse, we still paid a noticeable parser-side allocation cost for top-level block signatures by doing `markdown.slice(...)` and string concatenation for every block.
+  - Layout-side still paid a small extra cost from runtime `serializeContent` for normalized block identities.
+- Change:
+  - Replaced top-level block signature generation in `packages/parser/src/lezer-adapter.ts` with direct range hashing over the source string, avoiding `slice + template string`.
+  - Moved normalized block content identity creation into `packages/layout/src/normalize.ts`, using a compact dual-hash builder instead of runtime `JSON.stringify`.
+  - Switched layout caches and prepared-block memo to use precomputed normalized block `contentKey` / `contentHash`.
+- Files:
+  - `packages/parser/src/lezer-adapter.ts`
+  - `packages/layout/src/normalize.ts`
+  - `packages/layout/src/cache.ts`
+  - `packages/layout/src/engine.ts`
+- Validation:
+  - `vp check --fix`
+  - `vp test`
+  - render consistency against loop 2 outputs: `7/7` PNGs identical
+- Benchmark result:
+  - Compared against loop 2 baseline (`/tmp/benchmark-loop2b.json`):
+    - Full render `totalEngineLayoutMs`: `1171.46 -> 782.99` in one sample and `1171.46 -> 762.57` in a repeated sample
+    - Full render `layoutMeasureMs`: `502.81 -> 89.15` in one sample and `502.81 -> 99.89` in a repeated sample
+    - Full render `parseStateMs`: `587.87 -> 516.03` in one sample and `587.87 -> 465.37` in a repeated sample
+    - Incremental `totalIncrementalLayoutMs`: essentially flat to slightly improved
+    - Full rerender after insert: improved by `8.9%` to `26.1%` depending on sample
+- Current profile snapshot:
+  - Major self hotspot `serializeContent` is gone from the top of the profile.
+  - Top frames are now dominated by Lezer parser internals and GC.
+- Decision:
+  - Keep the change.
 
 ## Notes
 

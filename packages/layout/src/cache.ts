@@ -2,6 +2,7 @@ import type { BlockLayout, LayoutLine } from "./types.ts";
 
 export interface BlockCache {
   contentHash: number;
+  contentKey: string;
   prepared: unknown;
   lines: LayoutLine[];
   layoutWidth: number;

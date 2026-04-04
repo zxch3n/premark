@@ -4,6 +4,8 @@ import type { BlockContext, BlockMeta, BlockType, SpacingConfig } from "./types.
 
 export interface NormalizedBlock {
   sourceBlockIndex: number;
+  contentKey: string;
+  contentHash: number;
   type: BlockType;
   meta: BlockMeta;
   context: BlockContext;
@@ -37,6 +39,170 @@ interface WalkState {
   listDepth: number;
   ordered?: boolean;
   listMarker?: string;
+}
+
+interface HashState {
+  primary: number;
+  secondary: number;
+}
+
+function createHashState(): HashState {
+  return {
+    primary: 2166136261,
+    secondary: 33554393,
+  };
+}
+
+function mixCode(state: HashState, code: number): void {
+  state.primary ^= code;
+  state.primary = Math.imul(state.primary, 16777619);
+  state.secondary ^= code;
+  state.secondary = Math.imul(state.secondary, 1597334677);
+}
+
+function mixToken(state: HashState, token: string): void {
+  for (let index = 0; index < token.length; index += 1) {
+    mixCode(state, token.charCodeAt(index));
+  }
+  mixCode(state, 0xff);
+}
+
+function mixNumber(state: HashState, value: number): void {
+  mixToken(state, String(value));
+}
+
+function mixBoolean(state: HashState, value: boolean | undefined): void {
+  mixCode(state, value === undefined ? 2 : value ? 1 : 0);
+}
+
+function finishContentIdentity(state: HashState): { contentKey: string; contentHash: number } {
+  return {
+    contentKey: `${state.primary >>> 0}:${state.secondary >>> 0}`,
+    contentHash: state.primary >>> 0,
+  };
+}
+
+function hashInlineNodes(state: HashState, nodes: readonly MarkdownInline[]): void {
+  mixCode(state, 0x5b);
+  for (const node of nodes) {
+    hashInlineNode(state, node);
+  }
+  mixCode(state, 0x5d);
+}
+
+function hashInlineNode(state: HashState, node: MarkdownInline): void {
+  mixToken(state, node.type);
+  switch (node.type) {
+    case "text":
+      mixToken(state, node.text);
+      break;
+    case "softbreak":
+    case "hardbreak":
+      break;
+    case "strong":
+    case "emphasis":
+    case "strikethrough":
+      hashInlineNodes(state, node.children);
+      break;
+    case "code-span":
+      mixToken(state, node.text);
+      break;
+    case "link":
+    case "image":
+      mixToken(state, node.href);
+      mixToken(state, node.title ?? "");
+      hashInlineNodes(state, node.children);
+      break;
+    case "html":
+      mixToken(state, node.content);
+      break;
+  }
+}
+
+function hashTableCellChildren(state: HashState, nodes: readonly MarkdownInline[]): void {
+  hashInlineNodes(state, nodes);
+}
+
+function hashNormalizedBlockContent(block: Omit<NormalizedBlock, "contentKey" | "contentHash">): {
+  contentKey: string;
+  contentHash: number;
+} {
+  const state = createHashState();
+  mixToken(state, block.type);
+  mixNumber(state, block.indent);
+  mixNumber(state, block.marginTop);
+  mixNumber(state, block.marginBottom);
+  mixNumber(state, block.context.quoteDepth);
+  mixNumber(state, block.context.listDepth);
+  mixToken(state, block.context.listMarker ?? "");
+  mixBoolean(state, block.context.ordered);
+  mixToken(state, block.meta.type);
+
+  switch (block.meta.type) {
+    case "heading":
+      mixNumber(state, block.meta.level);
+      break;
+    case "code_block":
+      mixToken(state, block.meta.lang);
+      mixBoolean(state, block.meta.highlighted);
+      break;
+    case "list":
+      mixBoolean(state, block.meta.ordered);
+      mixNumber(state, block.meta.start ?? 0);
+      break;
+    case "list_item":
+      mixNumber(state, block.meta.depth);
+      mixToken(state, block.meta.marker);
+      break;
+    case "blockquote":
+      mixNumber(state, block.meta.depth);
+      break;
+    case "table":
+      mixNumber(state, block.meta.columnCount);
+      for (const alignment of block.meta.alignments) {
+        mixToken(state, alignment ?? "");
+      }
+      break;
+    case "image":
+      mixToken(state, block.meta.src);
+      mixToken(state, block.meta.alt);
+      break;
+    case "paragraph":
+    case "thematic_break":
+    case "html_block":
+      break;
+  }
+
+  if (block.inline !== undefined) {
+    hashInlineNodes(state, block.inline);
+  }
+  if (block.code !== undefined) {
+    mixToken(state, block.code);
+  }
+  if (block.lang !== undefined) {
+    mixToken(state, block.lang);
+  }
+  if (block.html !== undefined) {
+    mixToken(state, block.html);
+  }
+  if (block.image !== undefined) {
+    mixToken(state, block.image.src);
+    mixToken(state, block.image.alt);
+  }
+  if (block.table !== undefined) {
+    for (const cell of block.table.head.cells) {
+      mixToken(state, cell.align ?? "");
+      hashTableCellChildren(state, cell.children);
+    }
+    for (const row of block.table.body.rows) {
+      for (const cell of row.cells) {
+        mixToken(state, cell.align ?? "");
+        hashTableCellChildren(state, cell.children);
+      }
+    }
+  }
+
+  return finishContentIdentity(state);
 }
 
 function extractInlineText(nodes: readonly MarkdownInline[]): string {
@@ -100,13 +266,18 @@ function createMargins(type: BlockType, spacing: SpacingConfig) {
 
 function pushBlock(
   output: NormalizedBlock[],
-  block: Omit<NormalizedBlock, "marginTop" | "marginBottom">,
+  block: Omit<NormalizedBlock, "marginTop" | "marginBottom" | "contentKey" | "contentHash">,
   spacing: SpacingConfig,
 ) {
   const margins = createMargins(block.type, spacing);
+  const contentIdentity = hashNormalizedBlockContent({
+    ...block,
+    ...margins,
+  });
   output.push({
     ...block,
     ...margins,
+    ...contentIdentity,
   });
 }
 
