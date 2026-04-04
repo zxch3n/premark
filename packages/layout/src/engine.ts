@@ -6,7 +6,7 @@ import {
   type MarkdownBlock,
 } from "@pretext-md/parser";
 
-import { hashContent, identifyContent, type BlockCache } from "./cache.ts";
+import { hashContent, type BlockCache } from "./cache.ts";
 import { createDefaultSpacing, resolveFonts } from "./font-theme.ts";
 import { layoutCodeBlock, prepareCodeBlock, type PreparedCodeBlock } from "./measure/code-block.ts";
 import { createListPrefix } from "./measure/list.ts";
@@ -687,13 +687,13 @@ export class LayoutEngineImpl implements LayoutEngine {
           ? normalized.marginTop
           : Math.max(previousMarginBottom, normalized.marginTop);
       const width = Math.max(1, containerWidth - normalized.indent);
-      const contentIdentity = identifyContent(normalized);
-      const contentHash = contentIdentity.hash;
+      const contentHash = normalized.contentHash;
+      const contentKey = normalized.contentKey;
       const cache = this.blockCaches[blockIndex];
       const preparedBlock =
-        cache !== undefined && cache.contentHash === contentHash
+        cache !== undefined && cache.contentKey === contentKey
           ? cache.preparedBlock
-          : (this.getMemoizedPreparedBlock(contentIdentity.text) ?? this.prepareBlock(normalized));
+          : (this.getMemoizedPreparedBlock(contentKey) ?? this.prepareBlock(normalized));
       const measured = this.layoutPreparedBlock(
         normalized,
         preparedBlock,
@@ -708,13 +708,14 @@ export class LayoutEngineImpl implements LayoutEngine {
       blocks.push(measured.block);
       nextCaches.push({
         contentHash,
+        contentKey,
         prepared: preparedBlock,
         preparedBlock,
         lines: measured.lines,
         layoutWidth: width,
         block: measured.block,
       });
-      this.rememberPreparedBlock(contentIdentity.text, preparedBlock);
+      this.rememberPreparedBlock(contentKey, preparedBlock);
       cursorY += measured.block.height;
       previousMarginBottom = normalized.marginBottom;
     }
@@ -796,11 +797,11 @@ export class LayoutEngineImpl implements LayoutEngine {
       cursorY +=
         blockIndex === 0 ? block.marginTop : Math.max(previousMarginBottom, block.marginTop);
       const width = Math.max(1, containerWidth - block.indent);
-      const contentIdentity = identifyContent(block);
-      const contentHash = contentIdentity.hash;
+      const contentHash = block.contentHash;
+      const contentKey = block.contentKey;
       const cache = this.blockCaches[blockIndex];
 
-      if (cache !== undefined && cache.contentHash === contentHash && cache.layoutWidth === width) {
+      if (cache !== undefined && cache.contentKey === contentKey && cache.layoutWidth === width) {
         const translatedLines = cache.lines.map((line) =>
           translateLine(line, blockIndex, lines.length, cursorY - cache.block.y),
         );
@@ -827,9 +828,9 @@ export class LayoutEngineImpl implements LayoutEngine {
       }
 
       const preparedBlock =
-        cache !== undefined && cache.contentHash === contentHash
+        cache !== undefined && cache.contentKey === contentKey
           ? cache.preparedBlock
-          : (this.getMemoizedPreparedBlock(contentIdentity.text) ?? this.prepareBlock(block));
+          : (this.getMemoizedPreparedBlock(contentKey) ?? this.prepareBlock(block));
       const measured = this.layoutPreparedBlock(
         block,
         preparedBlock,
@@ -844,13 +845,14 @@ export class LayoutEngineImpl implements LayoutEngine {
       blocks.push(measured.block);
       nextCaches.push({
         contentHash,
+        contentKey,
         prepared: preparedBlock,
         preparedBlock,
         lines: measured.lines,
         layoutWidth: width,
         block: measured.block,
       });
-      this.rememberPreparedBlock(contentIdentity.text, preparedBlock);
+      this.rememberPreparedBlock(contentKey, preparedBlock);
       cursorY += measured.block.height;
       previousMarginBottom = block.marginBottom;
     });

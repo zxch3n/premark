@@ -74,7 +74,7 @@ export function extractTopLevelBlockEntries(
         from: child.from,
         to: child.to,
         type: blockType,
-        signature: hashText(`${blockType}:${markdown.slice(child.from, child.to)}`),
+        signature: hashTextRangeWithPrefix(markdown, child.from, child.to, blockType),
       },
     });
   });
@@ -693,5 +693,18 @@ function hashText(text: string): number {
     hash ^= text.charCodeAt(index);
     hash = Math.imul(hash, 16777619);
   }
+  return hash >>> 0;
+}
+
+function hashTextRangeWithPrefix(text: string, from: number, to: number, prefix: string): number {
+  let hash = hashText(prefix);
+  hash ^= 58;
+  hash = Math.imul(hash, 16777619);
+
+  for (let index = from; index < to; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
   return hash >>> 0;
 }
