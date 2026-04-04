@@ -71,14 +71,15 @@
 2. Incremental update cost is now mostly parser-side (`simpleDiff` + `incrementalParse`) rather than layout-side.
 3. Runtime immutability is now intentionally disabled, so further gains likely require either parser replacement or parser-internal upstream work.
 4. The streaming API still pays avoidable overhead by reconstructing `newText` and then rediscovering an append-only change via `simpleDiff`.
+5. Append-only streaming still over-scans top-level blocks after parsing, even though the closed prefix is already known to be stable.
 
 ## Current Loop
 
-- Status: loop 5 completed
+- Status: loop 6 completed
 - Current conclusion:
   - Renderer-side cold-layout hot path has been reduced to a small fraction of total cost.
   - Parser-side allocation cleanup and runtime-freeze removal both produced additional wins.
-  - Stream append now has an explicit append-only fast path without weakening Lezer-based middle-edit incremental parsing.
+  - Stream append now has an explicit append-only fast path and tail-only top-level block extraction without weakening Lezer-based middle-edit incremental parsing.
   - The remaining largest costs are now mostly outside our direct code, inside Lezer parsing and GC.
 - Next candidates if optimization continues later:
   - fixture diversification to measure non-repetitive corpora
@@ -275,6 +276,45 @@
 - Decision:
   - Keep the change.
   - This is a streaming-path architecture improvement, not a general middle-edit benchmark optimization.
+
+### Loop 6
+
+- Hypothesis:
+  - Even after adding an append-only parser API, the append path still paid avoidable work by extracting and comparing top-level block entries as if it were a generic replace.
+  - For append-only updates, the closed prefix is already known from parser state, so only the tail needs fresh top-level block extraction and materialization.
+- Change:
+  - Extended `extractTopLevelBlockEntries` in `packages/parser/src/lezer-adapter.ts` with a `startBlockIndex` parameter.
+  - Reworked `appendIncrementalParse` in `packages/parser/src/incremental-parser.ts` to:
+    - reuse `previousState.closedBlocks.length` as the stable prefix boundary
+    - extract only tail top-level entries from the new tree
+    - rebuild spans/blocks as `old stable prefix + new tail`
+  - Adjusted parser tests to assert semantic equivalence rather than identical internal dirty window heuristics.
+- Files:
+  - `packages/parser/src/lezer-adapter.ts`
+  - `packages/parser/src/incremental-parser.ts`
+  - `packages/parser/tests/parser.test.ts`
+- Validation:
+  - `vp check --fix`
+  - `vp test`
+  - `vp run build`
+  - render consistency against loop 5 outputs: `7/7` PNGs identical
+- Benchmark result:
+  - Dedicated append parser microbenchmark on a `300,000` char fixture with a `52` char chunk:
+    - generic replace path median: `29.69ms`
+    - append path median: `18.26ms`
+    - speedup: `1.63x`
+    - previous loop speedup was `1.22x`
+  - Existing middle-insert benchmark (`scripts/benchmark-million.ts`) repeated sample against loop 5 baseline (`/tmp/benchmark-loop5b.json`):
+    - Full render `totalEngineLayoutMs`: `803.05 -> 686.33` (`-14.5%`) in repeated sample
+    - Incremental `incrementalParseMs`: `87.57 -> 81.24` (`-7.2%`)
+    - Incremental `totalIncrementalLayoutMs`: `128.89 -> 120.83` (`-6.3%`)
+    - Full rerender after insert: `817.73 -> 682.25` (`-16.6%`)
+  - Interpretation:
+    - Single benchmark samples remained noisy, so repeated runs were required.
+    - The repeated sample showed no regression in the generic middle-edit path.
+- Decision:
+  - Keep the change.
+  - This continues to improve the streaming append architecture while leaving replace/middle-edit semantics on the Lezer path.
 
 ## Notes
 

@@ -50,7 +50,39 @@ export function appendIncrementalParse(
   const oldLength = previousState.text.length;
   const newText = previousState.text + chunk;
   const change = createAppendChange(oldLength, chunk);
-  return parseWithChange(previousState, newText, change, options);
+  if (shouldFullReparse(change, options)) {
+    return fullParseResult(previousState, newText, change);
+  }
+
+  const fragments = TreeFragment.applyChanges(previousState.fragments, [change]);
+  const tree = getMarkdownParser().parse(newText, fragments);
+  const reusedPrefixCount = previousState.closedBlocks.length;
+  const extracted = extractTopLevelBlockEntries(tree, newText, reusedPrefixCount);
+  const tailSpans = extracted.entries.map((entry) => entry.span);
+  const nextSpans = freezeBlockSpans([
+    ...previousState.blockSpans.slice(0, reusedPrefixCount),
+    ...tailSpans,
+  ]);
+  const nextBlocks = freezeMarkdownBlocks([
+    ...previousState.blocks.slice(0, reusedPrefixCount),
+    ...materializeBlocks(extracted.entries, newText, extracted.definitions),
+  ]);
+  const nextState = createState(newText, tree, nextBlocks, nextSpans, previousState.version + 1);
+
+  return {
+    state: nextState,
+    mode: "incremental",
+    change,
+    dirtyFromBlock: reusedPrefixCount,
+    dirtyToBlock: nextBlocks.length,
+    reusedPrefixCount,
+    reusedSuffixCount: 0,
+    removedCount: 0,
+    allBlocks: nextState.blocks,
+    closedBlocks: nextState.closedBlocks,
+    partialBlocks: nextState.partialBlocks,
+    sourceLength: nextState.sourceLength,
+  };
 }
 
 export function parseMarkdownStream(markdown: string): StreamParseSnapshot {
