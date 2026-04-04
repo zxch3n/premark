@@ -69,19 +69,19 @@
 
 1. Remaining dominant hotspots are Lezer parser internals and GC, not our layout prepare path.
 2. Incremental update cost is now mostly parser-side (`simpleDiff` + `incrementalParse`) rather than layout-side.
-3. Further gains would likely require either parser replacement, parser-internal upstream work, or relaxing runtime immutability guarantees.
+3. Runtime immutability is now intentionally disabled, so further gains likely require either parser replacement or parser-internal upstream work.
 
 ## Current Loop
 
-- Status: loop 3 completed
+- Status: loop 4 completed
 - Current conclusion:
   - Renderer-side cold-layout hot path has been reduced to a small fraction of total cost.
-  - Parser-side allocation cleanup still produced a smaller additional win.
+  - Parser-side allocation cleanup and runtime-freeze removal both produced additional wins.
   - The remaining largest costs are now mostly outside our direct code, inside Lezer parsing and GC.
 - Next candidates if optimization continues later:
   - fixture diversification to measure non-repetitive corpora
   - parser replacement experiments
-  - optional production-mode freeze policy, if semantic tradeoffs are acceptable
+  - parser-specific allocation experiments around Lezer tree materialization
 
 ## Loop History
 
@@ -170,10 +170,8 @@
   - Lezer `finishLeaf`
   - Lezer `advance`
   - GC
-- A control experiment with runtime freeze disabled showed only a limited additional upside, while weakening the immutability guarantee:
-  - normal parse samples: `[982.37, 592.04, 571.55]`
-  - freeze-disabled samples: `[942.08, 550.09, 490.01]`
-- At this point, further optimization would mean changing semantics or switching parser strategy, so this is a reasonable stop point for the current architecture.
+- Runtime freeze is now intentionally off, so that tradeoff has already been taken.
+- At this point, further optimization would mean attacking Lezer/GC behavior more directly, changing parser strategy, or accepting narrower Markdown semantics.
 
 ### Loop 3
 
@@ -205,6 +203,44 @@
   - Top frames are now dominated by Lezer parser internals and GC.
 - Decision:
   - Keep the change.
+
+### Loop 4
+
+- Hypothesis:
+  - Recursive runtime `Object.freeze()` across every emitted block/span tree was still an avoidable parse-side O(AST size) cost.
+  - Since parser output types are already `readonly`, and the caller explicitly accepted TypeScript-only immutability, removing runtime freeze should improve parse/apply costs without affecting render output.
+- Change:
+  - Turned `packages/parser/src/immutable.ts` into a zero-work passthrough.
+  - Removed parser tests that asserted `Object.isFrozen(...)`.
+- Files:
+  - `packages/parser/src/immutable.ts`
+  - `packages/parser/tests/parser.test.ts`
+  - `optimize.md`
+- Validation:
+  - `vp check --fix`
+  - `vp test`
+  - `vp run build`
+  - render consistency against loop 3 outputs: `7/7` PNGs identical
+- Benchmark result:
+  - Compared against loop 3 stable baseline (`/tmp/benchmark-loop4b.json`):
+    - Full render `totalEngineLayoutMs`: `762.57 -> 692.58` in one sample and `762.57 -> 689.69` in a repeated sample
+    - Incremental `totalIncrementalLayoutMs`: `133.09 -> 117.92` in one sample and `133.09 -> 124.47` in a repeated sample
+    - Incremental `applyParseResultMs`: `54.30 -> 39.34` in one sample and `54.30 -> 49.91` in a repeated sample
+    - Full rerender after insert: `781.73 -> 796.41` in one sample and `781.73 -> 680.26` in a repeated sample
+  - Interpretation:
+    - The cold-render and true incremental paths improved consistently.
+    - The isolated `fullRerenderAfterInsert` delta is noisy in a single sample, but improved in the repeated run and is not treated as a regression.
+- Current profile snapshot:
+  - Chrome DevTools-compatible CPU profile:
+    - `/tmp/premark-cpuprofiles/CPU.20260404.034154.151637.0.001.cpuprofile`
+  - Top sampled frames remain dominated by GC and Lezer internals:
+    - GC
+    - Lezer `parseInline`
+    - Lezer `finishLeaf`
+    - Lezer `advance`
+- Decision:
+  - Keep the change.
+  - Runtime immutability is now TypeScript-enforced by contract rather than runtime-enforced by `Object.freeze()`.
 
 ## Notes
 
