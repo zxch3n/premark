@@ -11,7 +11,7 @@ import type {
   TextLine,
 } from "@pretext-md/layout";
 
-const baseCss = `.pmd-doc{position:relative;width:100%;max-width:100%;overflow:hidden}.pmd-surface{position:relative}.pmd-block{position:absolute;box-sizing:border-box}.pmd-block--blockquote{padding-left:14px}.pmd-block--blockquote::before{content:"";position:absolute;inset:0 auto 0 0;width:3px;background:rgba(125,125,140,.35);border-radius:999px}.pmd-line{position:absolute;white-space:pre}.pmd-fragment{position:absolute;top:0;box-sizing:border-box;white-space:pre}.pmd-fragment--inline_code{padding-inline:6px;border-radius:6px;background:rgba(125,125,140,.14)}.pmd-fragment--link{color:inherit;text-decoration:underline;text-decoration-color:rgba(11,98,255,.35)}.pmd-fragment--strikethrough,.pmd-cell-fragment--strikethrough{text-decoration:line-through;text-decoration-color:currentColor}.pmd-rule{position:absolute;inset:50% 0 auto;border-top:1px solid rgba(125,125,140,.35)}.pmd-image{display:block;width:100%;height:100%;object-fit:contain;border-radius:16px;background:radial-gradient(circle at 20% 20%,rgba(255,210,180,.3),transparent 45%),linear-gradient(135deg,rgba(246,239,228,.92),rgba(234,240,246,.92))}.pmd-html{width:100%;height:100%;overflow:hidden}.pmd-table{width:100%;border-collapse:collapse;table-layout:fixed;font:inherit}.pmd-table th,.pmd-table td{border:1px solid rgba(125,125,140,.24);vertical-align:top;padding:10px 12px}.pmd-cell-line{position:relative;white-space:pre-wrap}.pmd-cell-fragment{display:inline;white-space:pre-wrap}`;
+const baseCss = `.pmd-doc{position:relative;width:100%;max-width:100%;overflow:hidden}.pmd-surface{position:relative}.pmd-block{position:absolute;box-sizing:border-box}.pmd-quote-bar{background:rgba(125,125,140,.35)}.pmd-line{position:absolute;white-space:pre}.pmd-fragment{position:absolute;top:0;box-sizing:border-box;white-space:pre}.pmd-fragment--inline_code{padding-inline:6px;border-radius:6px;background:rgba(125,125,140,.14)}.pmd-fragment--link{color:inherit;text-decoration:underline;text-decoration-color:rgba(11,98,255,.35)}.pmd-fragment--strikethrough,.pmd-cell-fragment--strikethrough{text-decoration:line-through;text-decoration-color:currentColor}.pmd-rule{position:absolute;inset:50% 0 auto;border-top:1px solid rgba(125,125,140,.35)}.pmd-image{display:block;width:100%;height:100%;object-fit:contain;border-radius:16px;background:radial-gradient(circle at 20% 20%,rgba(255,210,180,.3),transparent 45%),linear-gradient(135deg,rgba(246,239,228,.92),rgba(234,240,246,.92))}.pmd-html{width:100%;height:100%;overflow:hidden}.pmd-table{width:100%;border-collapse:collapse;table-layout:fixed;font:inherit}.pmd-table th,.pmd-table td{border:1px solid rgba(125,125,140,.24);vertical-align:top;padding:10px 12px}.pmd-cell-line{position:relative;white-space:pre-wrap}.pmd-cell-fragment{display:inline;white-space:pre-wrap}`;
 const codeCss = `.pmd-code{width:100%;height:100%;margin:0;box-sizing:border-box;overflow:hidden;border-radius:14px;background:linear-gradient(180deg,rgba(16,20,26,.94),rgba(28,34,42,.94)),linear-gradient(135deg,rgba(86,114,255,.2),transparent 48%);color:#e8ecf3}.pmd-code>code{display:block;white-space:pre-wrap;word-break:break-word}`;
 
 function escapeHtml(value: string): string {
@@ -30,11 +30,13 @@ function style(entries: Record<string, string | number | undefined>): string {
     .join(";");
 }
 
-function renderFragment(fragment: InlineFragment): string {
+function renderFragment(fragment: InlineFragment, lineHeight: number): string {
   const className = `pmd-fragment pmd-fragment--${fragment.type}`;
   const inlineStyle = style({
     left: `${fragment.x}px`,
     width: `${fragment.width}px`,
+    height: `${lineHeight}px`,
+    "line-height": `${lineHeight}px`,
     font: fragment.font,
   });
   if (fragment.meta?.type === "link") {
@@ -49,7 +51,7 @@ function renderTextLine(line: TextLine, block: BlockLayout): string {
     left: `${line.x - block.contentBox.x}px`,
     height: `${line.height}px`,
     width: `${line.width}px`,
-  })}">${line.fragments.map(renderFragment).join("")}</div>`;
+  })}">${line.fragments.map((f) => renderFragment(f, line.height)).join("")}</div>`;
 }
 
 function renderCellFragment(fragment: InlineFragment): string {
@@ -80,7 +82,7 @@ function renderCodeBlock(content: CodeBlockContent): string {
   return `<pre class="pmd-code" style="${style({
     padding: `${content.padding.top}px ${content.padding.right}px ${content.padding.bottom}px ${content.padding.left}px`,
     font: content.font,
-    lineHeight: `${content.lineHeight}px`,
+    "line-height": `${content.lineHeight}px`,
   })}"><code class="language-${escapeHtml(content.lang || "plain")}">${codeMarkup}</code></pre>`;
 }
 
@@ -125,6 +127,27 @@ function renderOpaqueBlock(line: OpaqueLine): string {
   }
 }
 
+/** Default indent per blockquote nesting level (blockquoteIndent + blockquoteBorderWidth). */
+const QUOTE_LEVEL_INDENT = 21;
+/** Width of the blockquote indicator bar. */
+const QUOTE_BAR_WIDTH = 3;
+
+function renderQuoteBars(quoteDepth: number): string {
+  let bars = "";
+  for (let level = 1; level <= quoteDepth; level++) {
+    const left = (level - 1 - quoteDepth) * QUOTE_LEVEL_INDENT;
+    bars += `<div class="pmd-quote-bar" style="${style({
+      position: "absolute",
+      top: "0",
+      bottom: "0",
+      left: `${left}px`,
+      width: `${QUOTE_BAR_WIDTH}px`,
+      "border-radius": "999px",
+    })}"></div>`;
+  }
+  return bars;
+}
+
 function renderBlock(block: BlockLayout, lines: LayoutLine[]): string {
   const classNames = [
     "pmd-block",
@@ -141,12 +164,15 @@ function renderBlock(block: BlockLayout, lines: LayoutLine[]): string {
         ? renderOpaqueBlock(lines[0] as OpaqueLine)
         : (lines as TextLine[]).map((line) => renderTextLine(line, block)).join("");
 
+  const quoteBars = block.context.quoteDepth > 0 ? renderQuoteBars(block.context.quoteDepth) : "";
+
   return `<section class="${classNames}" style="${style({
     top: `${block.y}px`,
     left: `${block.contentBox.x}px`,
     width: `${block.contentBox.width}px`,
     height: `${block.height}px`,
-  })}">${body}</section>`;
+    overflow: block.context.quoteDepth > 0 ? "visible" : undefined,
+  })}">${quoteBars}${body}</section>`;
 }
 
 export interface RenderToHtmlOptions {
