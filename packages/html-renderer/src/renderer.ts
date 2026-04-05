@@ -26,7 +26,7 @@ function escapeHtml(value: string): string {
 function style(entries: Record<string, string | number | undefined>): string {
   return Object.entries(entries)
     .filter(([, value]) => value !== undefined)
-    .map(([key, value]) => `${key}:${value}`)
+    .map(([key, value]) => `${key}:${String(value).replaceAll('"', "'")}`)
     .join(";");
 }
 
@@ -36,8 +36,8 @@ function renderFragment(fragment: InlineFragment, lineHeight: number): string {
     left: `${fragment.x}px`,
     width: `${fragment.width}px`,
     height: `${lineHeight}px`,
-    "line-height": `${lineHeight}px`,
     font: fragment.font,
+    "line-height": `${lineHeight}px`,
   });
   if (fragment.meta?.type === "link") {
     return `<a class="${className}" style="${inlineStyle}" href="${escapeHtml(fragment.meta.href)}">${escapeHtml(fragment.text)}</a>`;

@@ -172,7 +172,7 @@ function convertHeading(
     contentFrom = children[0].to;
   }
 
-  if (children.at(-1)?.type.name === "HeaderMark") {
+  if (children.at(-1)?.type.name === "HeaderMark" && children.at(-1) !== children[0]) {
     contentTo = children.at(-1)!.from;
   }
 
