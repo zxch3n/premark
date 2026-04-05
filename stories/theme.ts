@@ -50,9 +50,8 @@ export const enhancedCss = `
   }
 
   /* Blockquote — indigo left border */
-  .pmd-block--blockquote::before {
+  .pmd-quote-bar {
     background: ${color.accentBorder} !important;
-    border-radius: 999px;
   }
 
   /* Table borders — subtle */

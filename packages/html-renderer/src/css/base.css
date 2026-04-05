@@ -14,17 +14,8 @@
   box-sizing: border-box;
 }
 
-.pmd-block--blockquote {
-  padding-left: 14px;
-}
-
-.pmd-block--blockquote::before {
-  content: "";
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 3px;
+.pmd-quote-bar {
   background: rgba(125, 125, 140, 0.35);
-  border-radius: 999px;
 }
 
 .pmd-line {
