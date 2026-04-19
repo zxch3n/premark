@@ -242,7 +242,10 @@ function drawFragment(
     ctx.fillStyle = palette.inlineCode;
     ctx.fill();
   }
-  const textX = fragment.type === "inline_code" ? x + 4 : x;
+  // Layout reserves `chromeWidth: 12` for inline code pills (split 6/6), so
+  // the text has to sit 6px in from the left — using 4px made every pill
+  // visibly off-center to the right.
+  const textX = fragment.type === "inline_code" ? x + 6 : x;
   drawText(
     ctx,
     fragment.text,
