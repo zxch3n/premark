@@ -157,6 +157,10 @@ export async function mountWikiCanvas(
   const engine: LayoutEngine = createLayoutEngine({
     fontTheme: "modern",
     highlighter,
+    // Tiles are narrow (625px). Pull list items flush with headings/paragraphs
+    // so every block shares a common left edge instead of sliding ~28px in
+    // for each list level.
+    spacing: { listIndent: 0 },
   });
   const innerWidth = tileWidth - TILE_CONTENT_PADDING * 2;
   const layoutByCacheKey = new Map<string, TileLayout>();
