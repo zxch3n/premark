@@ -274,23 +274,104 @@ function drawFragment(
   }
 }
 
+const TASK_PREFIX_RE = /^\[( |x|X)\] /;
+const CHECKBOX_SIZE = 14;
+
 function drawTextLine(
   ctx: CanvasRenderingContext2D,
   line: TextLine,
   originX: number,
   originY: number,
   palette: TilePalette,
+  allowTaskPrefix = false,
 ): void {
-  for (const fragment of line.fragments) {
-    drawFragment(
-      ctx,
-      fragment,
-      originX + line.x + fragment.x,
-      originY + line.y,
-      line.height,
-      palette,
-    );
+  // Locate the fragment that carries the "[x] " / "[ ] " prefix, if any.
+  // Everything before it (the list marker "-") is suppressed so the checkbox
+  // replaces the bullet visually instead of sitting next to it.
+  let taskIndex = -1;
+  let taskMatch: RegExpExecArray | null = null;
+  if (allowTaskPrefix) {
+    for (let i = 0; i < line.fragments.length; i += 1) {
+      const candidate = TASK_PREFIX_RE.exec(line.fragments[i].text);
+      if (candidate) {
+        taskIndex = i;
+        taskMatch = candidate;
+        break;
+      }
+    }
   }
+
+  for (let i = 0; i < line.fragments.length; i += 1) {
+    const fragment = line.fragments[i];
+    const baseX = originX + line.x + fragment.x;
+    const baseY = originY + line.y;
+    if (taskIndex >= 0) {
+      if (i < taskIndex) continue;
+      if (i === taskIndex && taskMatch) {
+        const checked = taskMatch[1].toLowerCase() === "x";
+        ctx.save();
+        ctx.font = fragment.font;
+        const prefixWidth = ctx.measureText(taskMatch[0]).width;
+        ctx.restore();
+        drawCheckbox(ctx, baseX, baseY, line.height, checked, palette);
+        const rest = fragment.text.slice(taskMatch[0].length);
+        if (rest.length > 0) {
+          drawFragment(
+            ctx,
+            { ...fragment, text: rest },
+            baseX + prefixWidth,
+            baseY,
+            line.height,
+            palette,
+          );
+        }
+        continue;
+      }
+    }
+    drawFragment(ctx, fragment, baseX, baseY, line.height, palette);
+  }
+}
+
+function drawCheckbox(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  lineTop: number,
+  lineHeight: number,
+  checked: boolean,
+  palette: TilePalette,
+): void {
+  // Fixed-size glyph left-aligned at `x`, so every checkbox in a list lines
+  // up vertically regardless of whether the literal prefix was "[x] " or
+  // "[ ] " (which have slightly different measured widths).
+  const boxSize = CHECKBOX_SIZE;
+  const bx = x;
+  const by = lineTop + (lineHeight - boxSize) / 2;
+
+  ctx.save();
+  roundedRect(ctx, bx, by, boxSize, boxSize, 3);
+  if (checked) {
+    ctx.fillStyle = palette.accent;
+    ctx.fill();
+  } else {
+    ctx.fillStyle = palette.codeBg;
+    ctx.fill();
+    ctx.strokeStyle = palette.muted;
+    ctx.lineWidth = 1.25;
+    ctx.stroke();
+  }
+
+  if (checked) {
+    ctx.strokeStyle = palette.card;
+    ctx.lineWidth = Math.max(1.3, boxSize * 0.14);
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(bx + boxSize * 0.22, by + boxSize * 0.54);
+    ctx.lineTo(bx + boxSize * 0.44, by + boxSize * 0.74);
+    ctx.lineTo(bx + boxSize * 0.8, by + boxSize * 0.3);
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 type TokenRun = { text: string; tokenType: string };
@@ -530,7 +611,12 @@ function drawBlock(
     return;
   }
 
-  for (const line of lines as TextLine[]) {
-    drawTextLine(ctx, line, originX, originY, palette);
+  const renderTaskPrefix = block.meta.type === "list_item";
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const line = lines[lineIndex] as TextLine;
+    // Task markers only appear at the very start of a list item's paragraph —
+    // restricting to the first line prevents an accidental `[x] ` literal in
+    // later wrapped lines from rendering as a checkbox.
+    drawTextLine(ctx, line, originX, originY, palette, renderTaskPrefix && lineIndex === 0);
   }
 }
