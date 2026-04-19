@@ -17,4 +17,15 @@ describe("renderToHtml", () => {
     expect(rendered.html).toContain("language-ts");
     expect(rendered.css).toContain(".pmd-code");
   });
+
+  it("escapes quoted font families in style attributes", () => {
+    const engine = createLayoutEngine({
+      fontTheme: "modern",
+      highlighter: createHighlighter(),
+    });
+    const layout = engine.layout("Text with `inline code` here.", 600);
+    const rendered = renderToHtml(layout);
+    expect(rendered.html).not.toMatch(/font:[^"]*"JetBrains Mono"/);
+    expect(rendered.html).toContain("&quot;JetBrains Mono&quot;");
+  });
 });

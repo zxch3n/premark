@@ -260,7 +260,9 @@ function splitClosedAndPartialBlocks(
 
   const lastBlock = blocks.at(-1)!;
   const lastSpan = blockSpans.at(-1)!;
-  if (isDefinitelyClosed(lastBlock, text.slice(lastSpan.from, lastSpan.to))) {
+  const source = text.slice(lastSpan.from, lastSpan.to);
+  const hasTrailingText = lastSpan.to < text.length;
+  if (isDefinitelyClosed(lastBlock, source, hasTrailingText)) {
     return {
       closedBlocks: blocks,
       partialBlocks: freezeMarkdownBlockArray([]),
@@ -273,11 +275,20 @@ function splitClosedAndPartialBlocks(
   };
 }
 
-function isDefinitelyClosed(block: MarkdownBlock, source: string): boolean {
+function isDefinitelyClosed(
+  block: MarkdownBlock,
+  source: string,
+  hasTrailingText: boolean,
+): boolean {
   switch (block.type) {
     case "heading":
     case "thematic-break":
-      return true;
+      // The Lezer span for these blocks excludes the terminating newline, so
+      // we can only be sure the block has finished growing once text exists
+      // past its span. Without that, more chars might still extend it
+      // (e.g. `# Buildi` → `# Building`), and caching it as closed would
+      // freeze stale content through the append fast path.
+      return hasTrailingText;
     case "code-block":
       return isClosedFencedCode(source);
     default:
