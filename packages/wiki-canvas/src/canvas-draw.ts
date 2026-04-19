@@ -279,6 +279,7 @@ function drawFragment(
 
 const TASK_PREFIX_RE = /^\[( |x|X)\] /;
 const CHECKBOX_SIZE = 14;
+const CHECKBOX_GAP = 8;
 
 function drawTextLine(
   ctx: CanvasRenderingContext2D,
@@ -293,6 +294,7 @@ function drawTextLine(
   // replaces the bullet visually instead of sitting next to it.
   let taskIndex = -1;
   let taskMatch: RegExpExecArray | null = null;
+  let taskShift = 0;
   if (allowTaskPrefix) {
     for (let i = 0; i < line.fragments.length; i += 1) {
       const candidate = TASK_PREFIX_RE.exec(line.fragments[i].text);
@@ -301,6 +303,17 @@ function drawTextLine(
         taskMatch = candidate;
         break;
       }
+    }
+    if (taskIndex >= 0 && taskMatch) {
+      const taskFrag = line.fragments[taskIndex];
+      ctx.save();
+      ctx.font = taskFrag.font;
+      const prefixWidth = ctx.measureText(taskMatch[0]).width;
+      ctx.restore();
+      // Move everything after the suppressed marker + literal prefix leftward
+      // by `taskShift`, so the checkbox sits at the list marker's natural x
+      // (line.x + fragments[0].x) rather than one marker-width in from it.
+      taskShift = taskFrag.x - line.fragments[0].x + prefixWidth - (CHECKBOX_SIZE + CHECKBOX_GAP);
     }
   }
 
@@ -312,17 +325,14 @@ function drawTextLine(
       if (i < taskIndex) continue;
       if (i === taskIndex && taskMatch) {
         const checked = taskMatch[1].toLowerCase() === "x";
-        ctx.save();
-        ctx.font = fragment.font;
-        const prefixWidth = ctx.measureText(taskMatch[0]).width;
-        ctx.restore();
-        drawCheckbox(ctx, baseX, baseY, line.height, checked, palette);
+        const checkboxX = originX + line.x + line.fragments[0].x;
+        drawCheckbox(ctx, checkboxX, baseY, line.height, checked, palette);
         const rest = fragment.text.slice(taskMatch[0].length);
         if (rest.length > 0) {
           drawFragment(
             ctx,
             { ...fragment, text: rest },
-            baseX + prefixWidth,
+            checkboxX + CHECKBOX_SIZE + CHECKBOX_GAP,
             baseY,
             line.height,
             palette,
@@ -330,6 +340,8 @@ function drawTextLine(
         }
         continue;
       }
+      drawFragment(ctx, fragment, baseX - taskShift, baseY, line.height, palette);
+      continue;
     }
     drawFragment(ctx, fragment, baseX, baseY, line.height, palette);
   }
