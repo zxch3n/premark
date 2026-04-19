@@ -104,9 +104,12 @@ export async function mountWikiCanvas(
   const palette = options.palette ?? darkTilePalette;
   const layoutMode: LayoutMode = options.layoutMode ?? "graph";
   const nodeCount = options.nodes.length;
-  // Lower default DPR for very large canvases so we don't blow VRAM.
-  const dprCap = nodeCount > 400 ? 1 : nodeCount > 150 ? 1.5 : 2;
-  const pixelRatio = options.pixelRatio ?? Math.min(window.devicePixelRatio || 1, dprCap);
+  // Render tile bitmaps at the device pixel ratio (capped at 2) so text stays
+  // crisp on Retina/4K displays. CSS still displays each sprite at its logical
+  // 1x size — the DPR only scales the off-screen canvas' backing store.
+  // Safe at scale because we dedupe tiles via `cacheKey`, so VRAM is tied to
+  // *unique* content, not node count.
+  const pixelRatio = options.pixelRatio ?? Math.min(window.devicePixelRatio || 1, 2);
   const maxEdges =
     options.maxEdges ??
     (layoutMode === "masonry"
