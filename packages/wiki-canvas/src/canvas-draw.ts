@@ -330,7 +330,7 @@ function drawTextLine(
       if (i === taskIndex && taskMatch) {
         const checked = taskMatch[1].toLowerCase() === "x";
         const checkboxX = originX + line.x + line.fragments[0].x;
-        drawCheckbox(ctx, checkboxX, baseY, line.height, checked, palette);
+        drawCheckbox(ctx, checkboxX, baseY, line.height, fragment.font, checked, palette);
         const rest = fragment.text.slice(taskMatch[0].length);
         if (rest.length > 0) {
           drawFragment(
@@ -356,15 +356,23 @@ function drawCheckbox(
   x: number,
   lineTop: number,
   lineHeight: number,
+  textFont: string,
   checked: boolean,
   palette: TilePalette,
 ): void {
-  // Fixed-size glyph left-aligned at `x`, so every checkbox in a list lines
-  // up vertically regardless of whether the literal prefix was "[x] " or
-  // "[ ] " (which have slightly different measured widths).
+  // Fixed-size glyph left-aligned at `x`. Align its vertical *visual* center
+  // with the text's x-height midline (not the font's bounding-box center),
+  // so the box sits where the eye reads as "middle of the text" instead of
+  // floating a bit above the lowercase letters.
   const boxSize = CHECKBOX_SIZE;
+  const size = fontSize(textFont);
+  const ascent = size * 0.8;
+  const descent = size * 0.2;
+  const baseline = lineTop + (lineHeight - (ascent + descent)) / 2 + ascent;
+  const xHeight = size * 0.5;
+  const midline = baseline - xHeight / 2;
   const bx = x;
-  const by = lineTop + (lineHeight - boxSize) / 2;
+  const by = midline - boxSize / 2;
 
   ctx.save();
   roundedRect(ctx, bx, by, boxSize, boxSize, 3);
