@@ -2,7 +2,6 @@
   position: relative;
   width: 100%;
   max-width: 100%;
-  overflow: hidden;
 }
 
 .pmd-surface {
@@ -24,9 +23,6 @@
 }
 
 .pmd-fragment {
-  position: absolute;
-  top: 0;
-  box-sizing: border-box;
   white-space: pre;
 }
 

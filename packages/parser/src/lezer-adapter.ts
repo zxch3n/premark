@@ -164,16 +164,25 @@ function convertHeading(
   let contentFrom = node.from;
   let contentTo = node.to;
   const children = getChildren(node);
+  const firstChild = children[0];
+  const lastChild = children.at(-1);
 
-  if (
-    children[0]?.type.name === "HeaderMark" &&
-    markdown.slice(children[0].from, children[0].to) !== "==="
-  ) {
-    contentFrom = children[0].to;
+  if (firstChild?.type.name === "HeaderMark" && firstChild.from === node.from) {
+    contentFrom = firstChild.to;
   }
 
-  if (children.at(-1)?.type.name === "HeaderMark" && children.at(-1) !== children[0]) {
-    contentTo = children.at(-1)!.from;
+  if (
+    lastChild?.type.name === "HeaderMark" &&
+    lastChild.to === node.to &&
+    lastChild !== firstChild
+  ) {
+    contentTo = lastChild.from;
+  } else if (
+    lastChild?.type.name === "HeaderMark" &&
+    lastChild.to === node.to &&
+    /^[=-]+$/u.test(markdown.slice(lastChild.from, lastChild.to))
+  ) {
+    contentTo = lastChild.from;
   }
 
   const [trimmedFrom, trimmedTo] = trimWhitespaceRange(markdown, contentFrom, contentTo);

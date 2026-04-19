@@ -28,6 +28,29 @@ describe("parseMarkdown", () => {
     expect(blocks[3]).toMatchObject({ type: "code-block", info: "ts" });
   });
 
+  it("captures heading inline content for ATX and Setext variants", () => {
+    expect(parseMarkdown("# Hello World")[0]).toMatchObject({
+      type: "heading",
+      level: 1,
+      children: [{ type: "text", text: "Hello World" }],
+    });
+    expect(parseMarkdown("# Closed ATX #")[0]).toMatchObject({
+      type: "heading",
+      level: 1,
+      children: [{ type: "text", text: "Closed ATX" }],
+    });
+    expect(parseMarkdown("Hello\n=====")[0]).toMatchObject({
+      type: "heading",
+      level: 1,
+      children: [{ type: "text", text: "Hello" }],
+    });
+    expect(parseMarkdown("Hello\n-----")[0]).toMatchObject({
+      type: "heading",
+      level: 2,
+      children: [{ type: "text", text: "Hello" }],
+    });
+  });
+
   it("parses GFM table, blockquote, html block, image and inline styles", () => {
     const blocks = parseMarkdown(
       [
@@ -369,6 +392,55 @@ describe("appendIncrementalParse", () => {
     expect(appendResult.state.blocks).toEqual(replaceResult.state.blocks);
     expect(appendResult.mode).toBe("incremental");
     expect(replaceResult.mode).toBe("incremental");
+  });
+
+  it("extends the tail heading as characters stream in", () => {
+    const text = "# Building a High-Performance Pipeline\n\nBody paragraph.";
+    let state = createIncrementalParseState("");
+    for (let i = 0; i < text.length; i += 3) {
+      state = appendIncrementalParse(state, text.slice(i, i + 3), forceIncrementalOptions).state;
+    }
+    expect(state.blocks).toEqual(parseMarkdown(text));
+  });
+
+  it("extends a setext heading as its underline streams in", () => {
+    const text = "Heading text\n=====\n\nBody paragraph.";
+    let state = createIncrementalParseState("");
+    for (const char of text) {
+      state = appendIncrementalParse(state, char, forceIncrementalOptions).state;
+    }
+    expect(state.blocks).toEqual(parseMarkdown(text));
+  });
+
+  it("keeps mid-document headings intact when streamed character by character", () => {
+    const text = [
+      "Intro paragraph.",
+      "",
+      "# First Heading",
+      "",
+      "Body after first.",
+      "",
+      "## Second Heading",
+      "",
+      "Body after second.",
+      "",
+      "### Third Heading",
+      "",
+      "Body after third.",
+      "",
+      "---",
+      "",
+      "Subtitle",
+      "========",
+      "",
+      "Final body.",
+    ].join("\n");
+
+    let state = createIncrementalParseState("");
+    for (const char of text) {
+      state = appendIncrementalParse(state, char, forceIncrementalOptions).state;
+    }
+    expect(state.blocks).toEqual(parseMarkdown(text));
   });
 });
 
