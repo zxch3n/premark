@@ -7,7 +7,8 @@
       "@pretext-md/parser": ["./packages/parser/src/index.ts"],
       "@pretext-md/layout": ["./packages/layout/src/index.ts"],
       "@pretext-md/highlight": ["./packages/highlight/src/index.ts"],
-      "@pretext-md/html-renderer": ["./packages/html-renderer/src/index.ts"]
+      "@pretext-md/html-renderer": ["./packages/html-renderer/src/index.ts"],
+      "@pretext-md/wiki-canvas": ["./packages/wiki-canvas/src/index.ts"]
     },
     "types": ["node"],
     "allowImportingTsExtensions": true,
@@ -18,5 +19,5 @@
     "skipLibCheck": true,
     "ignoreDeprecations": "6.0"
   },
-  "include": ["apps", "packages", "scripts", "stories", ".storybook", "vitest.setup.ts"]
+  "include": ["apps", "packages", "scripts", "stories", "tools", ".storybook", "vitest.setup.ts"]
 }

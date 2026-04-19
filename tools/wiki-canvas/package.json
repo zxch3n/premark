@@ -1,0 +1,24 @@
+{
+  "name": "@pretext-md/wiki-canvas-cli",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CLI that scans a folder for Markdown, parses [[wikilinks]], and serves a PixiJS-powered canvas viewer.",
+  "license": "MIT",
+  "bin": {
+    "premark-wiki": "./src/cli.ts"
+  },
+  "type": "module",
+  "scripts": {
+    "start": "jiti src/cli.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@pretext-md/wiki-canvas": "workspace:*",
+    "vite": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "jiti": "catalog:",
+    "typescript": "catalog:"
+  }
+}

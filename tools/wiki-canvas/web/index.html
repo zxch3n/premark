@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Premark · Wiki Canvas</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        background: #080b13;
+        color: #e2e8f0;
+        font-family:
+          "Inter",
+          -apple-system,
+          system-ui,
+          sans-serif;
+        overflow: hidden;
+      }
+      #stage {
+        position: fixed;
+        inset: 0;
+      }
+      .hud {
+        position: fixed;
+        top: 14px;
+        left: 14px;
+        right: 14px;
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        z-index: 10;
+        pointer-events: none;
+      }
+      .hud > * {
+        pointer-events: auto;
+      }
+      .chip {
+        padding: 6px 12px;
+        border-radius: 999px;
+        background: rgba(15, 19, 32, 0.72);
+        border: 1px solid rgba(148, 163, 184, 0.12);
+        backdrop-filter: blur(10px);
+        font:
+          500 12px/1 "Inter",
+          sans-serif;
+        color: #cbd5e1;
+        letter-spacing: 0.01em;
+        white-space: nowrap;
+      }
+      .chip.accent {
+        color: #c7d2fe;
+        border-color: rgba(129, 140, 248, 0.35);
+        background: rgba(129, 140, 248, 0.14);
+      }
+      .chip.success {
+        color: #6ee7b7;
+        border-color: rgba(52, 211, 153, 0.35);
+        background: rgba(52, 211, 153, 0.1);
+      }
+      .spacer {
+        flex: 1;
+      }
+      button.chip {
+        cursor: pointer;
+      }
+      button.chip:hover {
+        background: rgba(129, 140, 248, 0.22);
+      }
+      .footer {
+        position: fixed;
+        bottom: 14px;
+        left: 0;
+        right: 0;
+        text-align: center;
+        font:
+          400 12px/1 "Inter",
+          sans-serif;
+        color: rgba(148, 163, 184, 0.7);
+        z-index: 10;
+        pointer-events: none;
+      }
+      .footer kbd {
+        background: rgba(148, 163, 184, 0.14);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 4px;
+        padding: 1px 5px;
+        font-family: "JetBrains Mono", ui-monospace, monospace;
+        font-size: 11px;
+      }
+      #fatal {
+        position: fixed;
+        inset: 0;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        background: rgba(8, 11, 19, 0.85);
+        z-index: 100;
+        padding: 40px;
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="stage"></div>
+    <div class="hud">
+      <div class="chip" id="title">Wiki Canvas</div>
+      <div class="chip" id="countChip">…</div>
+      <div class="chip accent" id="edgeChip">…</div>
+      <div class="chip success" id="renderChip">…</div>
+      <div class="spacer"></div>
+      <button class="chip" id="fitBtn">Reset view</button>
+    </div>
+    <div class="footer">Drag to pan · scroll to zoom · <kbd>R</kbd> to reset view</div>
+    <div id="fatal"></div>
+    <script type="module" src="/main.ts"></script>
+  </body>
+</html>

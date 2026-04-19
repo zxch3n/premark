@@ -10,6 +10,7 @@
     "benchmark:incremental": "vp run @pretext-md/parser#build && vp run @pretext-md/layout#build && vp run @pretext-md/highlight#build && jiti scripts/benchmark-incremental.ts",
     "render:markdown": "jiti scripts/render-markdown.ts",
     "render:examples": "jiti scripts/render-markdown.ts examples/markdown --output examples/rendered --width 920 --scale 2",
+    "wiki-canvas": "jiti tools/wiki-canvas/src/cli.ts",
     "test": "vp test",
     "typecheck": "vp exec tsc --noEmit -p tsconfig.json",
     "storybook": "vp exec storybook dev -p 6006",
