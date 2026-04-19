@@ -209,9 +209,13 @@ function drawText(
   ctx.font = font;
   ctx.fillStyle = color;
   ctx.textBaseline = "alphabetic";
-  const metrics = ctx.measureText(text.length > 0 ? text : "M");
-  const ascent = metrics.actualBoundingBoxAscent || fontSize(font) * 0.8;
-  const descent = metrics.actualBoundingBoxDescent || fontSize(font) * 0.2;
+  // Use font-size-derived metrics so every fragment on a line lands on the
+  // same baseline regardless of which characters it carries. `actualBoundingBox`
+  // shrinks for strings without descenders (e.g. "hello"), which otherwise
+  // pushes the text up and makes inline code pills look vertically off.
+  const size = fontSize(font);
+  const ascent = size * 0.8;
+  const descent = size * 0.2;
   const baseline = top + (lineHeight - (ascent + descent)) / 2 + ascent;
   ctx.fillText(text, x, baseline);
 }
