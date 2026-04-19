@@ -39,6 +39,9 @@ interface CanvasEditorApi {
   clearImeEvents: () => void;
   imeEvents: () => CanvasEditorImeEvent[];
   markdown: () => string;
+  rerender: () => void;
+  streamOtherDocument: () => void;
+  streamSameDocument: () => void;
 }
 
 declare global {
@@ -170,6 +173,9 @@ export function mountCanvasEditorApp(root: HTMLElement): void {
     },
     imeEvents: () => [...imeEvents],
     markdown: () => markdown,
+    rerender: () => render(root),
+    streamOtherDocument: () => streamOtherDocumentChunk(root),
+    streamSameDocument: () => streamAiChunk(root),
   };
 
   render(root);

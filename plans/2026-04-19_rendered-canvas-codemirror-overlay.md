@@ -471,5 +471,5 @@ Manual Tests:
 
 - Added a separate IME automation plan at `plans/2026-04-20_macos-ime-automation.md`.
 - Added fast synthetic and Chromium CDP IME browser tests. CDP `Input.insertText` works for commit text; CDP `Input.imeSetComposition` is an explicit fixme because it currently leaves preedit text stuck and can trip CodeMirror 6 internals.
-- Added an opt-in headed macOS real IME runner based on `osascript`.
-- The macOS real IME runner has not been executed yet because it requires a configured input source and Accessibility permission.
+- Added an opt-in headed macOS real IME runner based on `osascript`, expanded to cover commit, selected-range replacement, cancel, rerender/stream during composition, and undo/redo.
+- The macOS real IME runner now has a preflight timeout. It was executed with Apple Pinyin enabled and failed at preflight because `System Events` is not authorized for the current runner; this needs Accessibility permission before real OS IME can pass on this machine.
