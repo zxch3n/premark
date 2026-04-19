@@ -21,10 +21,24 @@ interface ActiveOverlay {
   composing: boolean;
 }
 
+interface CanvasEditorImeEvent {
+  readonly type: string;
+  readonly data: string | null;
+  readonly inputType: string | null;
+  readonly key: string | null;
+  readonly isComposing: boolean;
+  readonly text: string;
+}
+
 interface CanvasEditorApi {
   commit: () => void;
   cancel: () => void;
   activeBlockIndex: () => number | null;
+  activeOverlayHostId: () => string | null;
+  activeText: () => string | null;
+  clearImeEvents: () => void;
+  imeEvents: () => CanvasEditorImeEvent[];
+  markdown: () => string;
 }
 
 declare global {
@@ -44,6 +58,8 @@ const streamBatcher = createAnimationFrameStreamBatcher(workspace);
 
 let activeOverlay: ActiveOverlay | null = null;
 let streamingBlockId: string | null = null;
+let nextOverlayId = 1;
+const imeEvents: CanvasEditorImeEvent[] = [];
 let markdown = `# Rendered Canvas Editing
 
 Workspace search can return rendered Markdown snippets instead of raw source lines.
@@ -147,6 +163,13 @@ export function mountCanvasEditorApp(root: HTMLElement): void {
     commit: () => commitOverlay(root),
     cancel: () => cancelOverlay(root),
     activeBlockIndex: () => activeOverlay?.blockIndex ?? null,
+    activeOverlayHostId: () => activeOverlay?.host.id() ?? null,
+    activeText: () => activeOverlay?.host.text() ?? null,
+    clearImeEvents: () => {
+      imeEvents.length = 0;
+    },
+    imeEvents: () => [...imeEvents],
+    markdown: () => markdown,
   };
 
   render(root);
@@ -274,6 +297,7 @@ function openOverlay(root: HTMLElement, blockIndex: number): void {
 
   host.mount(source, getOverlayRect(blockLayout), {
     onChange: (_doc, update) => applyOverlayChange(root, update),
+    onImeEvent: (event) => recordImeEvent(event),
     onCompositionStart: () => {
       if (activeOverlay !== null) {
         activeOverlay.composing = true;
@@ -474,6 +498,34 @@ function escapeHtml(value: string): string {
     .replaceAll("'", "&#39;");
 }
 
+function recordImeEvent(event: Event): void {
+  const data =
+    "data" in event && typeof event.data === "string"
+      ? event.data
+      : "data" in event && event.data === null
+        ? null
+        : null;
+  const inputType =
+    "inputType" in event && typeof event.inputType === "string" ? event.inputType : null;
+  const key = "key" in event && typeof event.key === "string" ? event.key : null;
+  const isComposing =
+    "isComposing" in event && typeof event.isComposing === "boolean"
+      ? event.isComposing
+      : activeOverlay?.composing === true;
+
+  imeEvents.push({
+    type: event.type,
+    data,
+    inputType,
+    key,
+    isComposing,
+    text: activeOverlay?.host.text() ?? "",
+  });
+  if (imeEvents.length > 200) {
+    imeEvents.splice(0, imeEvents.length - 200);
+  }
+}
+
 class EditableOverlayHost {
   private element: HTMLElement | null = null;
 
@@ -486,6 +538,7 @@ class EditableOverlayHost {
     rect: DOMRectReadOnly,
     callbacks: {
       readonly onChange: (doc: string, update: ViewUpdate) => void;
+      readonly onImeEvent: (event: Event) => void;
       readonly onCompositionStart: () => void;
       readonly onCompositionEnd: () => void;
     },
@@ -493,6 +546,8 @@ class EditableOverlayHost {
     this.destroy();
     const element = document.createElement("div");
     element.className = "editable-overlay-host";
+    element.dataset.overlayId = String(nextOverlayId);
+    nextOverlayId += 1;
     this.parent.append(element);
     this.element = element;
     this.setRect(rect);
@@ -500,9 +555,28 @@ class EditableOverlayHost {
     this.editor = createCodeMirrorOverlay(element, doc, {
       onChange: callbacks.onChange,
     });
-    this.editor.contentDOM.addEventListener("compositionstart", callbacks.onCompositionStart);
-    this.editor.contentDOM.addEventListener("compositionend", callbacks.onCompositionEnd);
+    this.editor.contentDOM.addEventListener("beforeinput", callbacks.onImeEvent);
+    this.editor.contentDOM.addEventListener("input", callbacks.onImeEvent);
+    this.editor.contentDOM.addEventListener("compositionupdate", callbacks.onImeEvent);
+    this.editor.contentDOM.addEventListener("keydown", callbacks.onImeEvent);
+    this.editor.contentDOM.addEventListener("keyup", callbacks.onImeEvent);
+    this.editor.contentDOM.addEventListener("compositionstart", (event) => {
+      callbacks.onImeEvent(event);
+      callbacks.onCompositionStart();
+    });
+    this.editor.contentDOM.addEventListener("compositionend", (event) => {
+      callbacks.onImeEvent(event);
+      callbacks.onCompositionEnd();
+    });
     this.editor.focus();
+  }
+
+  id(): string | null {
+    return this.element?.dataset.overlayId ?? null;
+  }
+
+  text(): string | null {
+    return this.editor?.state.doc.toString() ?? null;
   }
 
   setRect(rect: DOMRectReadOnly): void {

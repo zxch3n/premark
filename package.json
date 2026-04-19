@@ -11,6 +11,8 @@
     "benchmark:workspace": "vp run @pretext-md/parser#build && vp run @pretext-md/layout#build && vp run @pretext-md/workspace#build && jiti scripts/benchmark-workspace-search.ts",
     "test:visual": "vp exec playwright test -c playwright.visual.config.ts",
     "test:browser": "vp run @pretext-md/parser#build && vp run @pretext-md/layout#build && vp run @pretext-md/workspace#build && vp exec playwright test -c playwright.browser.config.ts",
+    "test:ime:browser": "vp run @pretext-md/parser#build && vp run @pretext-md/layout#build && vp run @pretext-md/workspace#build && vp exec playwright test -c playwright.browser.config.ts tests/browser/ime-synthetic.spec.ts tests/browser/ime-cdp.spec.ts",
+    "test:ime:macos": "vp run @pretext-md/parser#build && vp run @pretext-md/layout#build && vp run @pretext-md/workspace#build && vp exec playwright test -c playwright.macos-ime.config.ts",
     "test:cross-browser": "vp run @pretext-md/parser#build && vp run @pretext-md/layout#build && vp run @pretext-md/workspace#build && vp exec playwright test -c playwright.cross-browser.config.ts",
     "summarize:visual": "jiti scripts/summarize-visual-parity.ts",
     "render:markdown": "jiti scripts/render-markdown.ts",

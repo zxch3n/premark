@@ -27,6 +27,7 @@ Last Updated: 2026-04-20
 - Fixture differences are expected to be fixable through repeated calibration. For supported Markdown/features, the plan is to keep adjusting CSS, measurement, layout, and overlay rendering until no new unexplained mismatch is found in the active fixture matrix.
 - Source ranges should live in external document metadata/source maps instead of mutable Markdown AST nodes, because incremental parsing intentionally reuses unchanged block objects whose source offsets may shift.
 - Dirty output should split changed block content from reused suffix blocks that only need y/layout movement, so canvas invalidation can stay narrower than "everything after edit is content-dirty".
+- IME coverage is now split into synthetic browser tests, Chromium CDP commit-text tests, and an opt-in macOS real IME smoke runner. CDP `Input.imeSetComposition` is tracked as a current CodeMirror blocker. See `plans/2026-04-20_macos-ime-automation.md`.
 
 ## Product Shape
 
@@ -460,8 +461,15 @@ Manual Tests:
     - `vp check --fix` passed with two unrelated existing wiki-canvas warnings.
 - No rollback has occurred.
 - Release follow-up items:
-  - Run real Chinese/Japanese/Korean/Windows IME smoke on target OSes before release.
+  - Run real Chinese/Japanese/Korean/Windows IME smoke on target OSes before release. macOS now has an opt-in automation harness, but it still needs to be executed on a configured machine.
   - Decide whether tables and other special blocks need custom widgets after user testing.
 - Known risk: CodeMirror and Premark may never reach perfect visual parity for all Markdown structures. The mitigation is to start with active block/note overlay parity and document acceptable mismatches.
 - Known risk: IME behavior may still be affected by aggressive overlay updates. The mitigation is composition guard and manual IME smoke tests.
 - Plan change likely: once the first overlay spike exists, the edit scope may change from block-level to note-level if block-level editing feels fragmented.
+
+### 2026-04-20 IME automation follow-up
+
+- Added a separate IME automation plan at `plans/2026-04-20_macos-ime-automation.md`.
+- Added fast synthetic and Chromium CDP IME browser tests. CDP `Input.insertText` works for commit text; CDP `Input.imeSetComposition` is an explicit fixme because it currently leaves preedit text stuck and can trip CodeMirror 6 internals.
+- Added an opt-in headed macOS real IME runner based on `osascript`.
+- The macOS real IME runner has not been executed yet because it requires a configured input source and Accessibility permission.
