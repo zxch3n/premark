@@ -12,352 +12,632 @@ export default {
   },
 };
 
-// ── Template pool ─────────────────────────────────────────
-// A handful of distinct markdown shapes with deliberately different lengths:
-// single-paragraph micro notes, mid-size code snippets, and long-form articles
-// with tables and prose. Tile bitmaps are deduped by `cacheKey`, so 1000
-// sprites only ever rasterize ~15 unique canvases even though they land at
-// very different heights.
+// ── Template shapes + procedural generators ──────────────
+// Each tile mixes a random title, prose, bullets, tables, and code snippets
+// drawn from shared word pools, so no two tiles render the exact same
+// markdown. Tiles are therefore not deduped — VRAM scales with note count,
+// which is fine at the 1K default but expensive near the 10K slider ceiling.
 
 type TileSize = "xs" | "s" | "m" | "l" | "xl";
 
-interface Template {
-  key: string;
-  title: string;
-  size: TileSize;
-  build: () => string;
+const TITLE_ADJ = [
+  "Ambient",
+  "Arcane",
+  "Azure",
+  "Bright",
+  "Calm",
+  "Celeste",
+  "Cloud",
+  "Crimson",
+  "Dappled",
+  "Dense",
+  "Drifting",
+  "Dusk",
+  "Echo",
+  "Electric",
+  "Ember",
+  "Fluid",
+  "Focal",
+  "Forest",
+  "Fossil",
+  "Frozen",
+  "Gilded",
+  "Glacial",
+  "Glass",
+  "Grain",
+  "Harbor",
+  "Hidden",
+  "Hollow",
+  "Iris",
+  "Jade",
+  "Keen",
+  "Kinetic",
+  "Lagoon",
+  "Latent",
+  "Liminal",
+  "Lucid",
+  "Lunar",
+  "Marbled",
+  "Marine",
+  "Mosaic",
+  "Muted",
+  "Nebula",
+  "Neon",
+  "North",
+  "Obsidian",
+  "Opal",
+  "Orbital",
+  "Paper",
+  "Pastel",
+  "Plume",
+  "Prism",
+  "Quartz",
+  "Quiet",
+  "Radiant",
+  "Resin",
+  "Ripple",
+  "Salt",
+  "Silent",
+  "Silver",
+  "Slate",
+  "Solstice",
+  "Spark",
+  "Stellar",
+  "Tidal",
+  "Timber",
+  "Trace",
+  "Twilight",
+  "Umbra",
+  "Velvet",
+  "Vesper",
+  "Voyager",
+  "Whisper",
+  "Woven",
+  "Zephyr",
+  "Zodiac",
+];
+
+const TITLE_NOUN = [
+  "Archive",
+  "Atlas",
+  "Almanac",
+  "Beacon",
+  "Blueprint",
+  "Buffer",
+  "Cache",
+  "Cadence",
+  "Canvas",
+  "Cartridge",
+  "Cascade",
+  "Channel",
+  "Circuit",
+  "Codex",
+  "Compass",
+  "Compiler",
+  "Conduit",
+  "Contour",
+  "Corridor",
+  "Cradle",
+  "Crest",
+  "Cycle",
+  "Delta",
+  "Dial",
+  "Diagram",
+  "Dialect",
+  "Dossier",
+  "Draft",
+  "Engine",
+  "Epoch",
+  "Facet",
+  "Filament",
+  "Fixture",
+  "Foyer",
+  "Fragment",
+  "Frame",
+  "Gallery",
+  "Gauge",
+  "Glyph",
+  "Harness",
+  "Index",
+  "Journal",
+  "Lattice",
+  "Ledger",
+  "Loom",
+  "Lumen",
+  "Manifold",
+  "Mesh",
+  "Mirror",
+  "Notation",
+  "Notebook",
+  "Orbit",
+  "Parchment",
+  "Pattern",
+  "Pivot",
+  "Portal",
+  "Quiver",
+  "Radar",
+  "Radix",
+  "Register",
+  "Relay",
+  "Schema",
+  "Sigil",
+  "Silhouette",
+  "Sketchbook",
+  "Spire",
+  "Stanza",
+  "Strand",
+  "Syntax",
+  "Tablet",
+  "Threshold",
+  "Thread",
+  "Tome",
+  "Totem",
+  "Transcript",
+  "Trellis",
+  "Vessel",
+  "Voxel",
+];
+
+const SUBJECTS = [
+  "The streaming layout engine",
+  "Each tile",
+  "A well-formed document",
+  "The masonry packer",
+  "Our font metric loader",
+  "The parser frontier",
+  "Every rasterization pass",
+  "An incremental diff",
+  "The texture atlas",
+  "A sprite at max zoom",
+  "The measurement cache",
+  "The viewport scheduler",
+  "A fragment graph",
+  "The write-through buffer",
+  "The canvas world",
+];
+
+const VERBS = [
+  "keeps",
+  "discards",
+  "packs",
+  "measures",
+  "amortizes",
+  "reuses",
+  "invalidates",
+  "rasterizes",
+  "commits",
+  "schedules",
+  "resolves",
+  "stabilizes",
+  "flushes",
+  "tracks",
+  "clamps",
+  "batches",
+];
+
+const OBJECTS = [
+  "its working set in a single contiguous buffer",
+  "only the blocks that changed since the last frame",
+  "glyph runs at subpixel precision",
+  "a few kilobytes of per-document state",
+  "every layout pass on a deterministic schedule",
+  "incremental parses without rebuilding the tree",
+  "the bitmap cache by content hash, not position",
+  "rendering work proportional to what is visible",
+  "unneeded textures as soon as the user zooms out",
+  "line metrics from the real font, never heuristics",
+  "column placement to the shortest live stack",
+  "wiki references through a stable identifier map",
+];
+
+const DETAILS = [
+  "Block-level diffing keeps the frontier stable across edits.",
+  "Pan and zoom share a single transform matrix on the world container.",
+  "Tables reflow to column widths derived from their longest cell.",
+  "Headings carry their own measured line-height budget.",
+  "Every code fence re-enters the parser at the language boundary.",
+  "The renderer never walks the DOM — all layout is headless.",
+  "Wikilinks resolve at scan time, not on every redraw.",
+  "Sprites below a pixel threshold collapse to a colored rectangle.",
+  "The frame loop is idle until a viewport or content change arrives.",
+  "Unrendered tiles defer their canvas allocation until first paint.",
+  "The hit test walks the masonry grid in column-major order.",
+  "A fade gradient signals clipped content at the bottom of tall tiles.",
+];
+
+const QUOTES = [
+  "Layout is a side effect of caring about type.",
+  "A document is not a page.",
+  "The best map is one you can zoom into.",
+  "Density becomes legibility when the grid is honest.",
+  "Streaming is the only honest model for text.",
+  "Every pixel should know why it is there.",
+  "Caches are apologies to the future.",
+  "A tile is a photograph of a thought.",
+  "The unit of interaction is the glance.",
+  "Masonry is order in disguise.",
+  "Small edits shouldn't redraw the world.",
+  "The graph exists only because we drew it.",
+  "A block is a block is a block.",
+  "What fits in view is the whole document now.",
+];
+
+const BULLETS = [
+  "Stable prefix reuse on append",
+  "Deterministic column packing",
+  "Block-level diffing across edits",
+  "Subpixel font metrics throughout",
+  "Headless measurement with zero DOM",
+  "One texture per unique tile body",
+  "Dropped frame budget under 4ms",
+  "Lazy rasterization past the viewport",
+  "Constant-time edge lookup by id",
+  "Jitter preserves readability at scale",
+  "Fade masks signal clipped overflow",
+  "Atlas packing aligned to tile rows",
+  "Graph edges culled by zoom level",
+  "Incremental reparse at block boundaries",
+  "Focus mode resolves to the full document",
+  "Every link has a ground-truth target",
+  "Tile dedupe keyed on markdown hash",
+  "Cached metrics survive font swaps",
+  "Wrap boundaries honor CJK punctuation",
+  "Tab size is eight, by ancient decree",
+];
+
+const SUBHEADINGS = [
+  "Motivation",
+  "Design notes",
+  "What changed",
+  "Cost model",
+  "Open questions",
+  "Edge cases",
+  "Under the hood",
+  "Performance",
+  "Caveats",
+  "What comes next",
+  "Tradeoffs",
+  "Field report",
+];
+
+const TAG_WORDS = [
+  "layout",
+  "streaming",
+  "canvas",
+  "atlas",
+  "parser",
+  "glyph",
+  "metric",
+  "block",
+  "inline",
+  "fragment",
+  "tile",
+  "sprite",
+  "diff",
+  "patch",
+  "graph",
+  "zoom",
+  "viewport",
+  "cache",
+  "font",
+  "cjk",
+  "scroll",
+  "masonry",
+];
+
+const TABLE_COLS = [
+  "Metric",
+  "Value",
+  "Budget",
+  "Observed",
+  "Delta",
+  "Phase",
+  "Scope",
+  "Owner",
+  "Tick",
+  "Count",
+  "Ratio",
+  "Status",
+  "Size",
+  "Target",
+  "Layer",
+];
+
+const TABLE_ROW_LABELS = [
+  "Small",
+  "Medium",
+  "Large",
+  "Tiny",
+  "Huge",
+  "Warm",
+  "Cold",
+  "Hot",
+  "Idle",
+  "Busy",
+  "First paint",
+  "Stable frame",
+  "Scroll hold",
+  "Cache miss",
+  "Cache hit",
+  "1K notes",
+  "10K notes",
+  "Zoom 0.1",
+  "Zoom 1.0",
+  "Zoom 2.5",
+];
+
+const FUNC_NAMES = [
+  "measure",
+  "collect",
+  "stream",
+  "flush",
+  "layout",
+  "paint",
+  "schedule",
+  "diff",
+  "merge",
+  "scan",
+  "pack",
+  "resolve",
+  "project",
+  "quantize",
+  "commit",
+  "settle",
+  "chunk",
+];
+
+const TYPE_PARTS = [
+  "Tile",
+  "Block",
+  "Fragment",
+  "Cache",
+  "Layer",
+  "Span",
+  "Buffer",
+  "Range",
+  "Glyph",
+  "Metric",
+  "Spec",
+  "Frame",
+  "Scene",
+  "Node",
+  "Edge",
+];
+
+const FIELD_NAMES = [
+  "width",
+  "height",
+  "offset",
+  "count",
+  "stride",
+  "phase",
+  "alpha",
+  "tint",
+  "bucket",
+  "cursor",
+  "capacity",
+  "baseline",
+  "gap",
+  "delta",
+  "ticks",
+];
+
+function pick<T>(arr: T[], rng: () => number): T {
+  return arr[Math.floor(rng() * arr.length)]!;
 }
 
-const TEMPLATES: Template[] = [
-  // ── extra-small: one-liner quotes ────────────────────────
-  {
-    key: "quote-xs",
-    title: "Quote",
-    size: "xs",
-    build: () => `# Quote
-
-> Layout is what you don't notice.
-`,
-  },
-  {
-    key: "tag-xs",
-    title: "Tag",
-    size: "xs",
-    build: () => `# Tag
-
-\`#layout\` · \`#streaming\` · \`#canvas\`
-`,
-  },
-  // ── small: short paragraphs ──────────────────────────────
-  {
-    key: "intro-s",
-    title: "About",
-    size: "s",
-    build: () => `# About
-
-Premark is a streaming Markdown pipeline. Three packages, one document model, zero runtime JS in the output.
-`,
-  },
-  {
-    key: "fonts-s",
-    title: "Fonts",
-    size: "s",
-    build: () => `# Fonts
-
-Sans: \`Inter\`. Mono: \`JetBrains Mono\`.
-
-中文段落用于验证混合排版与禁则。
-`,
-  },
-  {
-    key: "reflect-s",
-    title: "Reflection",
-    size: "s",
-    build: () => `# Reflection
-
-> The best UI for a wiki isn't a sidebar tree — it's a map you can zoom into until any leaf becomes the whole world.
-`,
-  },
-  // ── medium: typical note ─────────────────────────────────
-  {
-    key: "engine-m",
-    title: "Layout Engine",
-    size: "m",
-    build: () => `# Layout Engine
-
-Headless measurement that emits a \`DocumentLayout\`.
-
-\`\`\`ts
-const engine = createLayoutEngine({ fontTheme: "modern" })
-const layout = engine.layout(markdown, 625)
-\`\`\`
-
-> Sub-pixel accurate, deterministic, no DOM required.
-`,
-  },
-  {
-    key: "parser-m",
-    title: "Streaming Parser",
-    size: "m",
-    build: () => `# Streaming Parser
-
-Wraps \`@lezer/markdown\` with **incremental** parsing.
-
-- Stable prefix reuse on append
-- Block-level diffing
-- O(1) amortized per token
-`,
-  },
-  {
-    key: "roadmap-m",
-    title: "Roadmap",
-    size: "m",
-    build: () => `# Roadmap
-
-- [x] Streaming layout deltas
-- [x] Wiki-canvas viewer
-- [ ] Sprite atlas packing
-- [ ] LOD summaries when zoomed out
-- [ ] Click → focus mode
-`,
-  },
-  // ── large: code snippets + prose ─────────────────────────
-  {
-    key: "perf-l",
-    title: "Performance Notes",
-    size: "l",
-    build: () => `# Performance Notes
-
-Tile dedupe keeps VRAM proportional to **unique** content, not node count.
-
-| Doc size | Layout | Draw | Total |
-| :--- | ---: | ---: | ---: |
-| 1 KB | 0.5ms | 1.2ms | 1.7ms |
-| 10 KB | 3.1ms | 4.0ms | 7.1ms |
-| 100 KB | 18ms | 22ms | 40ms |
-
-> Caching the \`Texture.from(canvas)\` lets PIXI batch upload at scale.
-
-The masonry layout keeps tall tiles and tiny notes in the same picture without a vertical ribbon of whitespace.
-`,
-  },
-  {
-    key: "code-rust-l",
-    title: "Rust",
-    size: "l",
-    build: () => `# Rust
-
-\`\`\`rust
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Block {
-    pub kind: BlockKind,
-    pub y: f32,
-    pub height: f32,
+function sampleN<T>(arr: T[], n: number, rng: () => number): T[] {
+  const picked: T[] = [];
+  const used = new Set<number>();
+  const target = Math.min(n, arr.length);
+  while (picked.length < target) {
+    const idx = Math.floor(rng() * arr.length);
+    if (used.has(idx)) continue;
+    used.add(idx);
+    picked.push(arr[idx]!);
+  }
+  return picked;
 }
 
-impl Block {
-    pub fn area(&self, width: f32) -> f32 {
-        self.height * width
+function rollInt(rng: () => number, min: number, max: number): number {
+  return Math.floor(rng() * (max - min + 1)) + min;
+}
+
+function capitalize(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function randomTitle(rng: () => number): string {
+  return `${pick(TITLE_ADJ, rng)} ${pick(TITLE_NOUN, rng)}`;
+}
+
+function paragraph(rng: () => number, sentences: number): string {
+  const parts: string[] = [];
+  const subjectSentences = Math.ceil(sentences / 2);
+  for (let i = 0; i < subjectSentences; i += 1) {
+    parts.push(`${pick(SUBJECTS, rng)} ${pick(VERBS, rng)} ${pick(OBJECTS, rng)}.`);
+  }
+  for (let i = subjectSentences; i < sentences; i += 1) {
+    parts.push(pick(DETAILS, rng));
+  }
+  return parts.join(" ");
+}
+
+function quoteBlock(rng: () => number): string {
+  return `> ${pick(QUOTES, rng)}`;
+}
+
+function bulletList(rng: () => number, n: number): string {
+  return sampleN(BULLETS, n, rng)
+    .map((b) => `- ${b}`)
+    .join("\n");
+}
+
+function checklist(rng: () => number, n: number): string {
+  return sampleN(BULLETS, n, rng)
+    .map((b, i) => `- [${i % 3 === 0 ? "x" : " "}] ${b}`)
+    .join("\n");
+}
+
+function inlineTags(rng: () => number): string {
+  return sampleN(TAG_WORDS, 3, rng)
+    .map((t) => `\`#${t}\``)
+    .join(" · ");
+}
+
+function codeBlockTs(rng: () => number): string {
+  const fn = pick(FUNC_NAMES, rng);
+  const type = capitalize(pick(TYPE_PARTS, rng)) + capitalize(pick(TYPE_PARTS, rng));
+  const a = pick(FIELD_NAMES, rng);
+  let b = pick(FIELD_NAMES, rng);
+  while (b === a) b = pick(FIELD_NAMES, rng);
+  const n1 = rollInt(rng, 4, 999);
+  const n2 = rollInt(rng, 100, 9999);
+  return [
+    "```ts",
+    `interface ${type} {`,
+    `  ${a}: number`,
+    `  ${b}: number`,
+    "}",
+    "",
+    `export function ${fn}(input: ${type}): number {`,
+    `  return input.${a} * ${n1} + input.${b} * ${n2};`,
+    "}",
+    "```",
+  ].join("\n");
+}
+
+function codeBlockRust(rng: () => number): string {
+  const struct = capitalize(pick(TYPE_PARTS, rng)) + capitalize(pick(TYPE_PARTS, rng));
+  const a = pick(FIELD_NAMES, rng);
+  let b = pick(FIELD_NAMES, rng);
+  while (b === a) b = pick(FIELD_NAMES, rng);
+  const method = pick(FUNC_NAMES, rng);
+  return [
+    "```rust",
+    "#[derive(Debug, Clone)]",
+    `pub struct ${struct} {`,
+    `    pub ${a}: f32,`,
+    `    pub ${b}: usize,`,
+    "}",
+    "",
+    `impl ${struct} {`,
+    `    pub fn ${method}(&self) -> f32 {`,
+    `        self.${a} * self.${b} as f32`,
+    "    }",
+    "}",
+    "```",
+  ].join("\n");
+}
+
+function codeBlockPython(rng: () => number): string {
+  const cls = capitalize(pick(TYPE_PARTS, rng)) + capitalize(pick(TYPE_PARTS, rng));
+  const a = pick(FIELD_NAMES, rng);
+  let b = pick(FIELD_NAMES, rng);
+  while (b === a) b = pick(FIELD_NAMES, rng);
+  const method = pick(FUNC_NAMES, rng);
+  const defA = rollInt(rng, 10, 999);
+  const defB = (rng() * 10).toFixed(2);
+  return [
+    "```python",
+    "@dataclass(frozen=True)",
+    `class ${cls}:`,
+    `    ${a}: int = ${defA}`,
+    `    ${b}: float = ${defB}`,
+    "",
+    `    def ${method}(self) -> float:`,
+    `        return self.${a} * self.${b}`,
+    "```",
+  ].join("\n");
+}
+
+const CODE_BLOCK_FLAVORS = [codeBlockTs, codeBlockRust, codeBlockPython];
+
+function codeBlock(rng: () => number): string {
+  return pick(CODE_BLOCK_FLAVORS, rng)(rng);
+}
+
+function tableBlock(rng: () => number): string {
+  const colCount = rollInt(rng, 3, 4);
+  const cols = sampleN(TABLE_COLS, colCount, rng);
+  const header = `| ${cols.join(" | ")} |`;
+  const sep = `| ${cols.map(() => ":---").join(" | ")} |`;
+  const rowCount = rollInt(rng, 3, 5);
+  const labels = sampleN(TABLE_ROW_LABELS, rowCount, rng);
+  const units = ["ms", "KB", "%", "px", "fps"];
+  const rows: string[] = [];
+  for (let i = 0; i < rowCount; i += 1) {
+    const cells: string[] = [labels[i]!];
+    for (let c = 1; c < colCount; c += 1) {
+      if (rng() < 0.5) {
+        cells.push(`${rollInt(rng, 1, 99)}${pick(units, rng)}`);
+      } else {
+        cells.push((rng() * 10).toFixed(rng() < 0.5 ? 1 : 2));
+      }
     }
+    rows.push(`| ${cells.join(" | ")} |`);
+  }
+  return [header, sep, ...rows].join("\n");
 }
-\`\`\`
 
-Streaming layout in Rust mirrors the TypeScript engine closely.
-`,
+interface TemplateShape {
+  size: TileSize;
+  build: (rng: () => number, title: string) => string;
+}
+
+const TEMPLATES: TemplateShape[] = [
+  // xs — one-liner
+  {
+    size: "xs",
+    build: (rng, title) => `# ${title}\n\n${quoteBlock(rng)}\n`,
   },
   {
-    key: "code-py-l",
-    title: "Python",
+    size: "xs",
+    build: (rng, title) => `# ${title}\n\n${inlineTags(rng)}\n`,
+  },
+  // s — short paragraph
+  {
+    size: "s",
+    build: (rng, title) => `# ${title}\n\n${paragraph(rng, 2)}\n`,
+  },
+  {
+    size: "s",
+    build: (rng, title) => `# ${title}\n\n${paragraph(rng, 1)}\n\n${quoteBlock(rng)}\n`,
+  },
+  // m — prose + code / bullets / checklist
+  {
+    size: "m",
+    build: (rng, title) => `# ${title}\n\n${paragraph(rng, 2)}\n\n${codeBlock(rng)}\n`,
+  },
+  {
+    size: "m",
+    build: (rng, title) => `# ${title}\n\n${paragraph(rng, 1)}\n\n${bulletList(rng, 4)}\n`,
+  },
+  {
+    size: "m",
+    build: (rng, title) => `# ${title}\n\n${paragraph(rng, 1)}\n\n${checklist(rng, 4)}\n`,
+  },
+  // l — table + prose, or long code + prose
+  {
     size: "l",
-    build: () => `# Python
-
-\`\`\`python
-from dataclasses import dataclass
-
-@dataclass(frozen=True)
-class TileSpec:
-    width: int = 625
-    height: int = 625
-    pixel_ratio: float = 1.0
-
-    def memory_bytes(self) -> int:
-        w = self.width * self.pixel_ratio
-        h = self.height * self.pixel_ratio
-        return int(w * h * 4)
-\`\`\`
-
-Back-of-envelope memory math when you scale tile count into the thousands.
-`,
-  },
-  // ── extra-large: long-form article with table + code ─────
-  {
-    key: "design-xl",
-    title: "Design Notes",
-    size: "xl",
-    build: () => `# Design Notes
-
-Tiles as a substrate.
-
-The canvas is unbounded; pan/zoom uses a single \`Container\` for the world. Each tile is positioned absolutely, with curve edges drawn between centroids.
-
-- Tile width: **625px** (fixed)
-- Tile height: **measured from content** (180–900px)
-- Padding: 28px gutter inside each card
-- Title bar: traffic-light dots + filename
-- Edges: indigo curves at 13% opacity
-
-## Masonry
-
-Each tile drops into the shortest column. Small jitter on both axes keeps the grid from looking like a spreadsheet.
-
-\`\`\`ts
-const placements = layoutMasonry(tiles, {
-  gap: 140,
-  jitterX: 40,
-  jitterY: 45,
-  aspect: 1.6,
-})
-\`\`\`
-
-## Tables
-
-| Length | Content | Feels |
-| :--- | :--- | :--- |
-| xs | one-liner quote | punctuation |
-| s  | short paragraph | breath |
-| m  | snippet + prose | comfy |
-| l  | table + code | meaty |
-| xl | this very note | long read |
-
-Influences: Premark, Obsidian's graph view, Figma's infinite canvas.
-`,
+    build: (rng, title) =>
+      `# ${title}\n\n${paragraph(rng, 2)}\n\n${tableBlock(rng)}\n\n${quoteBlock(rng)}\n`,
   },
   {
-    key: "essay-xl",
-    title: "Essay",
-    size: "xl",
-    build: () => `# Essay
-
-A thousand notes can look like a city from the sky.
-
-At the smallest zoom, the grid is texture — a starfield of rectangles, lit by the occasional accent. Zoom in one click and the shapes resolve into cards. Zoom again and each card resolves into text: headings, bullets, the little red of a keyword in a code block.
-
-The trick is that nothing on the page is an image. Every tile is a \`DocumentLayout\` produced by the same engine that drives your HTML output — rendered once to a Canvas2D bitmap, then shipped to the GPU as a PIXI sprite.
-
-## Why tiles?
-
-A linear list of notes always loses the shape of the thing you're writing. Graphs make the shape visible, but graph layout is slow and fiddly at scale.
-
-Masonry splits the difference: it preserves **reading order** (columns run top-to-bottom) while letting heights vary so the eye has something to follow.
-
-> Dense at a glance. Readable up close. Explorable by hand.
-
-## Links
-
-The \`[[wikilinks]]\` in these bodies are ground truth. The scanner resolves each one to a real node id and draws a curve between the centers. At 1000 nodes with ~3 outbound links each we cap the edge count so the picture doesn't fill with noise.
-
-The edges you see at max-zoom-out are the skeleton of the graph. Zoom in and they fade into the background.
-`,
+    size: "l",
+    build: (rng, title) =>
+      `# ${title}\n\n${paragraph(rng, 1)}\n\n${codeBlock(rng)}\n\n${paragraph(rng, 1)}\n`,
   },
-  // ── extra-extra-large: exceeds the 1000px cap so the fade shows ─────
+  // xl — long-form article
   {
-    key: "manifesto-xxl",
-    title: "Manifesto",
     size: "xl",
-    build: () => `# Manifesto
-
-Every tool we build for reading is secretly a tool for _thinking_. The shape of the canvas decides the shape of the thought.
-
-## Premise
-
-A document is not a page. A page is an accident of paper. The page has been the only window we had onto a document for 500 years because glass screens inherited the shape of the thing they replaced. But a screen does not need to be a page. A screen can be anything we want.
-
-> A note-taking app is a tool for thinking. A thinking-tool's constraints become the thinker's constraints.
-
-## Four constraints we refuse
-
-1. **One note at a time.** The sidebar tree is a queue, not a map. You can only see the note you clicked on, and the one you just left is already gone.
-2. **Fixed height.** Every note in most viewers is the same height, regardless of whether it's a one-line quote or a 3000-word essay. Information density is erased.
-3. **Invisible relationships.** Links exist in the markdown but not in the layout. Two notes that reference each other sit on opposite ends of an alphabetical list.
-4. **Unbounded scroll.** The page scrolls forever, and the reader never gets a sense of _where_ they are in the graph.
-
-## What we do instead
-
-### Layout preserves content shape
-
-Each note is rendered at its natural height, clamped between a floor and a ceiling. A quote takes 180px. An essay takes 900px. A manifesto like this one takes 1000px and fades at the bottom so the reader knows there's more when they click in.
-
-### Links are drawn
-
-Every \`[[wikilink]]\` becomes a curve on the canvas. At the smallest zoom the curves _are_ the graph — a hairball that happens to pass through every article.
-
-\`\`\`ts
-gfx.moveTo(x1, y1)
-   .quadraticCurveTo(cx, cy, x2, y2)
-   .stroke({ color: accent, width: 3, alpha: 0.08 })
-\`\`\`
-
-### The whole graph fits in one picture
-
-No tree, no list, no infinite scroll. Pan to move laterally. Zoom to change scale. The map is always visible; the territory is always one gesture away.
-
-## What this costs
-
-- A commitment to real font metrics so every tile matches its eventual HTML
-- A streaming layout engine so large graphs don't block the main thread
-- Texture dedupe so 10,000 sprites don't melt the GPU
-
-We think it's worth it.
-`,
+    build: (rng, title) =>
+      `# ${title}\n\n${paragraph(rng, 3)}\n\n## ${pick(SUBHEADINGS, rng)}\n\n${bulletList(rng, 5)}\n\n## ${pick(SUBHEADINGS, rng)}\n\n${paragraph(rng, 2)}\n\n${codeBlock(rng)}\n\n${tableBlock(rng)}\n\n${paragraph(rng, 2)}\n`,
   },
   {
-    key: "changelog-xxl",
-    title: "Changelog",
     size: "xl",
-    build: () => `# Changelog
-
-A (fictional) history of this viewer, to stretch a tile to its tallest shape.
-
-## 0.6.0 — The 10k release
-
-- **Masonry layout.** Tiles now measure themselves and stack into the shortest column, with deterministic jitter so the columns don't look like a spreadsheet.
-- **Height cap at 1000px** with a fade gradient for anything that overflows. You can still read the top of the note; the "more" is implicit.
-- **Texture dedupe** via \`cacheKey\`. 10k sprites use ~15 unique bitmaps.
-- **DPR 2 by default** so the text stays crisp on Retina displays.
-
-## 0.5.0 — Wikilink routing
-
-Every \`[[target]]\` now resolves into a real node id. The edge cap is tunable per graph.
-
-| Option | Default | Notes |
-| :--- | :---: | :--- |
-| \`maxEdges\` | 900 (masonry) | Higher caps start looking like noise |
-| \`edgeAlpha\` | 0.08 @ 400+ nodes | Scales inversely with count |
-| \`edgeWidth\` | 3px @ 400+ nodes | Thicker past zoom 1.0 |
-
-## 0.4.0 — Scatter mode
-
-Jittered grid for when your content has no inherent graph structure.
-
-## 0.3.0 — Pan and zoom
-
-- Drag to pan (mouse, trackpad, touch)
-- Scroll or pinch to zoom (with ctrlKey detection for trackpad gestures)
-- R key resets the view
-- Zoom range 0.015–2.5
-
-## 0.2.0 — CLI
-
-\`pnpm wiki-canvas <path>\` scans a folder for markdown, extracts wikilinks, and serves the viewer on a local port. \`--demo\` uses the bundled vault.
-
-## 0.1.0 — First tile
-
-One canvas, one markdown file, one sprite.
-
-> Everything since has been about making that sprite multiply.
-`,
+    build: (rng, title) =>
+      `# ${title}\n\n${paragraph(rng, 3)}\n\n${quoteBlock(rng)}\n\n## ${pick(SUBHEADINGS, rng)}\n\n${paragraph(rng, 3)}\n\n${codeBlock(rng)}\n\n## ${pick(SUBHEADINGS, rng)}\n\n${paragraph(rng, 2)}\n\n${bulletList(rng, 5)}\n`,
   },
 ];
 
@@ -383,30 +663,29 @@ function buildNotes(count: number, seed = 42): GeneratedNode[] {
   // Pick templates with a bias towards medium/short notes so the page has
   // breathing room instead of a wall of long articles.
   const WEIGHTS: Record<TileSize, number> = { xs: 3, s: 4, m: 4, l: 2, xl: 1 };
-  const bag: Template[] = [];
+  const bag: TemplateShape[] = [];
   for (const t of TEMPLATES) {
     const w = WEIGHTS[t.size];
     for (let i = 0; i < w; i += 1) bag.push(t);
   }
 
   for (let i = 0; i < count; i += 1) {
-    const template = bag[Math.floor(rng() * bag.length)];
+    const template = bag[Math.floor(rng() * bag.length)]!;
     const id = `note-${i.toString().padStart(4, "0")}`;
-    // Three random outbound links per node, no self-references.
+    const title = randomTitle(rng);
+    const markdown = template.build(rng, title);
+
     const linkTargets: string[] = [];
     for (let j = 0; j < 3; j += 1) {
       let target = Math.floor(rng() * count);
       if (target === i) target = (target + 1) % count;
       linkTargets.push(`note-${target.toString().padStart(4, "0")}`);
     }
+
     nodes.push({
       id,
-      // Tile title is the template name only — every sprite sharing a
-      // `cacheKey` must display the exact same bitmap, so we keep the
-      // per-note number out of the bar to avoid a lie at the pixel level.
-      title: template.title,
-      markdown: template.build(),
-      cacheKey: template.key,
+      title,
+      markdown,
       linkTargets,
     });
   }
@@ -532,10 +811,11 @@ function autoCleanup(root: HTMLElement, controller: WikiCanvasController) {
 
 // ── Stories ───────────────────────────────────────────────
 
-// The default note count for the procedural showcase. Change this const to
-// rebuild the story at a different size, OR drag the `noteCount` slider in
-// Storybook's Controls panel to tweak it live.
-const NOTE_COUNT = 1000;
+// The default note count for the procedural showcase. Each tile gets its own
+// unique markdown, so every node triggers a fresh parse+layout+rasterization
+// on the main thread. Keeping this modest so the page opens quickly; the
+// `noteCount` slider in Storybook's Controls panel lets you push it up.
+const NOTE_COUNT = 250;
 
 interface MasonryStoryArgs {
   /** How many tiles to drop on the canvas. */
@@ -575,7 +855,7 @@ export const ThousandNotes = {
     }).then((controller) => {
       hud.uniqueBadge.textContent = `${controller.uniqueTileCount} unique tiles`;
       hud.edgeBadge.textContent = `${controller.edgeCount} wikilinks`;
-      hud.renderBadge.textContent = `${controller.renderTimeMs.toFixed(1)}ms render`;
+      hud.renderBadge.textContent = `${controller.renderTimeMs.toFixed(1)}ms layout · paint streaming`;
       hud.fitBtn.addEventListener("click", () => controller.fit());
       window.addEventListener("keydown", (event) => {
         if (event.key === "r" || event.key === "R") controller.fit();
@@ -594,8 +874,9 @@ export const ThousandNotes = {
   },
   argTypes: {
     noteCount: {
-      control: { type: "range", min: 50, max: 10000, step: 50 },
-      description: "How many markdown tiles to generate.",
+      control: { type: "range", min: 50, max: 2000, step: 50 },
+      description:
+        "How many markdown tiles to generate. Every tile is unique, so this is a main-thread parse+layout+raster cost.",
     },
     maxTileHeight: {
       control: { type: "range", min: 400, max: 1500, step: 50 },
@@ -692,7 +973,7 @@ export const HandCraftedGraph = () => {
   }).then((controller) => {
     hud.uniqueBadge.textContent = `${controller.uniqueTileCount} unique bitmaps`;
     hud.edgeBadge.textContent = `${controller.edgeCount} wikilinks`;
-    hud.renderBadge.textContent = `${controller.renderTimeMs.toFixed(1)}ms render`;
+    hud.renderBadge.textContent = `${controller.renderTimeMs.toFixed(1)}ms layout · paint streaming`;
     hud.fitBtn.addEventListener("click", () => controller.fit());
     autoCleanup(root, controller);
   });

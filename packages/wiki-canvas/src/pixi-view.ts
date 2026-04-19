@@ -1,7 +1,13 @@
 import { Application, Container, Graphics, Sprite, Text, Texture } from "pixi.js";
 
 import { createHighlighter } from "@pretext-md/highlight";
-import { createLayoutEngine, type LayoutEngine } from "@pretext-md/layout";
+import {
+  createLayoutEngine,
+  resolveFonts,
+  type DocumentLayout,
+  type LayoutEngine,
+  type ResolvedFonts,
+} from "@pretext-md/layout";
 
 import { darkTilePalette, drawTile, type TilePalette } from "./canvas-draw.ts";
 import {
@@ -66,13 +72,17 @@ export interface WikiCanvasController {
   app: Application;
   /** Number of cross-tile edges drawn. */
   edgeCount: number;
-  /** Number of tile bitmaps actually rasterized (`<= nodes.length` thanks to cacheKey dedupe). */
+  /** Number of unique tile bitmaps needed (`<= nodes.length` thanks to cacheKey dedupe). */
   uniqueTileCount: number;
   /** Total node count. */
   nodeCount: number;
   /** Sum of placement bounds: { width, height }. */
   worldSize: { width: number; height: number };
-  /** Time spent rendering the unique tile bitmaps, in ms. */
+  /**
+   * Time spent on the synchronous layout pass (time to first interactive
+   * sprite). Actual tile rasterization streams in progressively after this
+   * and is not included in the number.
+   */
   renderTimeMs: number;
 }
 
@@ -81,8 +91,8 @@ interface PreparedNode extends WikiNodeInput {
   cacheKey: string;
 }
 
-interface TileBitmap {
-  canvas: HTMLCanvasElement;
+interface TileLayout {
+  layout: DocumentLayout;
   width: number;
   height: number;
 }
@@ -107,8 +117,6 @@ export async function mountWikiCanvas(
   // Render tile bitmaps at the device pixel ratio (capped at 2) so text stays
   // crisp on Retina/4K displays. CSS still displays each sprite at its logical
   // 1x size — the DPR only scales the off-screen canvas' backing store.
-  // Safe at scale because we dedupe tiles via `cacheKey`, so VRAM is tied to
-  // *unique* content, not node count.
   const pixelRatio = options.pixelRatio ?? Math.min(window.devicePixelRatio || 1, 2);
   const maxEdges =
     options.maxEdges ??
@@ -117,6 +125,16 @@ export async function mountWikiCanvas(
       : layoutMode === "scatter"
         ? DEFAULT_MAX_EDGES_SCATTER
         : DEFAULT_MAX_EDGES_GRAPH);
+
+  // 0. Ensure the themed fonts are fully loaded before the layout engine
+  // measures text. `canvas.measureText` returns fallback-font widths if the
+  // real font (e.g. Inter) is still downloading, and the rasterizer paints
+  // later when the font is ready — producing text that no longer matches the
+  // layout, with visible overflow or clipping. `document.fonts.ready` alone
+  // can resolve before Inter has even been requested, so we kick off loads
+  // for each canvas-font string the engine will use.
+  const resolvedFonts: ResolvedFonts = resolveFonts("modern");
+  await preloadCanvasFonts(resolvedFonts);
 
   // 1. Build node + link metadata.
   const prepared: PreparedNode[] = options.nodes.map((node) => {
@@ -131,23 +149,21 @@ export async function mountWikiCanvas(
   });
   const nodeIds = new Set(prepared.map((node) => node.id));
 
-  // 2. Render unique tile bitmaps. cacheKey collisions reuse a single bitmap,
-  // and each unique bitmap discovers its own height from the premark layout.
+  // 2. Phase A: layout every unique cacheKey. This gives us tile heights
+  // (needed for placement) and a reusable DocumentLayout for the paint phase.
+  // No canvas rasterization happens here — that's deferred to Phase C so the
+  // viewer can show sprites as soon as possible.
   const highlighter = createHighlighter();
   const engine: LayoutEngine = createLayoutEngine({
     fontTheme: "modern",
     highlighter,
   });
   const innerWidth = tileWidth - TILE_CONTENT_PADDING * 2;
-  const renderStart = performance.now();
-  const bitmapByCacheKey = new Map<string, TileBitmap>();
-  let layoutMs = 0;
-  let drawMs = 0;
+  const layoutByCacheKey = new Map<string, TileLayout>();
+  const layoutStart = performance.now();
   for (const node of prepared) {
-    if (bitmapByCacheKey.has(node.cacheKey)) continue;
-    const t0 = performance.now();
+    if (layoutByCacheKey.has(node.cacheKey)) continue;
     const premarkLayout = engine.layout(node.markdown, innerWidth);
-    const t1 = performance.now();
     let height: number;
     if (layoutMode === "masonry") {
       const natural = premarkLayout.totalHeight + TILE_CONTENT_PADDING * 2 + TILE_TITLE_HEIGHT;
@@ -155,27 +171,17 @@ export async function mountWikiCanvas(
     } else {
       height = tileHeight;
     }
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.round(tileWidth * pixelRatio);
-    canvas.height = Math.round(height * pixelRatio);
-    const ctx = canvas.getContext("2d");
-    if (!ctx) continue;
-    ctx.scale(pixelRatio, pixelRatio);
-    drawTile(ctx, premarkLayout, tileWidth, height, {
-      title: node.title,
-      palette,
+    layoutByCacheKey.set(node.cacheKey, {
+      layout: premarkLayout,
+      width: tileWidth,
+      height,
     });
-    const t2 = performance.now();
-    layoutMs += t1 - t0;
-    drawMs += t2 - t1;
-    bitmapByCacheKey.set(node.cacheKey, { canvas, width: tileWidth, height });
   }
-  const renderTimeMs = performance.now() - renderStart;
-  const uniqueTileCount = bitmapByCacheKey.size;
-  engine.dispose();
+  const renderTimeMs = performance.now() - layoutStart;
+  const uniqueTileCount = layoutByCacheKey.size;
   // eslint-disable-next-line no-console
   console.debug(
-    `[wiki-canvas] ${prepared.length} nodes · ${uniqueTileCount} unique tiles → layout ${layoutMs.toFixed(2)}ms · draw ${drawMs.toFixed(2)}ms · total ${renderTimeMs.toFixed(2)}ms`,
+    `[wiki-canvas] ${prepared.length} nodes · ${uniqueTileCount} unique tiles · layout ${renderTimeMs.toFixed(2)}ms (paint runs progressively)`,
   );
 
   // 3. Compute placements according to the chosen layout mode. Masonry
@@ -183,11 +189,11 @@ export async function mountWikiCanvas(
   let placements: SizedPlacement[];
   if (layoutMode === "masonry") {
     const masonryTiles = prepared.map((node) => {
-      const bitmap = bitmapByCacheKey.get(node.cacheKey);
+      const tl = layoutByCacheKey.get(node.cacheKey);
       return {
         id: node.id,
-        width: bitmap?.width ?? tileWidth,
-        height: bitmap?.height ?? tileHeight,
+        width: tl?.width ?? tileWidth,
+        height: tl?.height ?? tileHeight,
       };
     });
     placements = layoutMasonry(masonryTiles, {
@@ -252,17 +258,16 @@ export async function mountWikiCanvas(
   const edgesGfx = new Graphics();
   world.addChild(edgesGfx);
 
-  // 6. Build textures (one per cacheKey) and place a sprite per node.
-  const textures = new Map<string, Texture>();
-  for (const [key, bitmap] of bitmapByCacheKey) {
-    textures.set(key, Texture.from(bitmap.canvas));
-  }
+  // 6. Phase B: place a sprite per node using a shared placeholder texture.
+  // The viewer is interactive immediately — real tile bitmaps stream in
+  // during Phase C, prioritized by distance to the viewport center.
+  const placeholderTexture = createPlaceholderTexture(palette);
+  const spriteByNodeId = new Map<string, Sprite>();
 
   for (const node of prepared) {
-    const texture = textures.get(node.cacheKey);
     const placement = placementById.get(node.id);
-    if (!texture || !placement) continue;
-    const sprite = new Sprite(texture);
+    if (!placement) continue;
+    const sprite = new Sprite(placeholderTexture);
     sprite.position.set(placement.x, placement.y);
     sprite.width = placement.width;
     sprite.height = placement.height;
@@ -272,6 +277,7 @@ export async function mountWikiCanvas(
       sprite.on("pointertap", () => options.onSelect?.(node.id));
     }
     world.addChild(sprite);
+    spriteByNodeId.set(node.id, sprite);
   }
 
   // 7. Draw edges between linked tiles. Big graphs get thinner, fainter strokes
@@ -313,8 +319,116 @@ export async function mountWikiCanvas(
   });
   view.fit();
 
+  // 9. Phase C: progressive rasterization, prioritized by distance to the
+  // current viewport center. Each iteration paints one unique cacheKey,
+  // yielding to the main thread whenever the frame budget is exceeded.
+  let cancelled = false;
+  const paintBudgetMs = 12;
+
+  interface PendingMember {
+    nodeId: string;
+    cx: number;
+    cy: number;
+    width: number;
+    height: number;
+    title: string;
+  }
+  interface PendingEntry {
+    cacheKey: string;
+    members: PendingMember[];
+  }
+  const pendingByCacheKey = new Map<string, PendingEntry>();
+  for (const node of prepared) {
+    const placement = placementById.get(node.id);
+    if (!placement) continue;
+    const member: PendingMember = {
+      nodeId: node.id,
+      cx: placement.x + placement.width / 2,
+      cy: placement.y + placement.height / 2,
+      width: placement.width,
+      height: placement.height,
+      title: node.title,
+    };
+    const existing = pendingByCacheKey.get(node.cacheKey);
+    if (existing) {
+      existing.members.push(member);
+    } else {
+      pendingByCacheKey.set(node.cacheKey, {
+        cacheKey: node.cacheKey,
+        members: [member],
+      });
+    }
+  }
+
+  const paintPromise = (async () => {
+    let frameStart = performance.now();
+    while (!cancelled && pendingByCacheKey.size > 0) {
+      const center = viewportCenterInWorld(app, world);
+      // Scan every pending member to find the one nearest the viewport.
+      // O(n) per pick, O(n²) overall — fine for node counts in the low thousands
+      // and keeps the ordering responsive to mid-paint pans.
+      let bestKey: string | null = null;
+      let bestDist = Infinity;
+      for (const entry of pendingByCacheKey.values()) {
+        for (const m of entry.members) {
+          const dx = m.cx - center.x;
+          const dy = m.cy - center.y;
+          const d = dx * dx + dy * dy;
+          if (d < bestDist) {
+            bestDist = d;
+            bestKey = entry.cacheKey;
+          }
+        }
+      }
+      if (!bestKey) break;
+
+      const entry = pendingByCacheKey.get(bestKey)!;
+      pendingByCacheKey.delete(bestKey);
+
+      const tl = layoutByCacheKey.get(bestKey);
+      if (!tl) continue;
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(tl.width * pixelRatio);
+      canvas.height = Math.round(tl.height * pixelRatio);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) continue;
+      ctx.scale(pixelRatio, pixelRatio);
+      drawTile(ctx, tl.layout, tl.width, tl.height, {
+        title: entry.members[0]?.title,
+        palette,
+      });
+      const texture = Texture.from(canvas);
+
+      for (const m of entry.members) {
+        const sprite = spriteByNodeId.get(m.nodeId);
+        if (!sprite) continue;
+        // PIXI caches sprite.scale from the placeholder texture's dimensions;
+        // re-assigning width/height after the texture swap recomputes it for
+        // the real (DPR-scaled) bitmap so the tile renders at its placement.
+        sprite.texture = texture;
+        sprite.width = m.width;
+        sprite.height = m.height;
+      }
+
+      if (performance.now() - frameStart > paintBudgetMs) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        if (cancelled) return;
+        frameStart = performance.now();
+      }
+    }
+    if (!cancelled) {
+      engine.dispose();
+      placeholderTexture.destroy(true);
+    }
+  })();
+  // Swallow unhandled rejections — the caller can observe state via the
+  // controller, and we don't want a late destroy() to surface as a log error.
+  void paintPromise.catch(() => {});
+
   return {
     destroy: () => {
+      cancelled = true;
+      engine.dispose();
       app.destroy(true, { children: true, texture: true });
       view.destroy();
     },
@@ -347,6 +461,57 @@ function drawEdge(
 
 function dedupe(values: string[]): string[] {
   return [...new Set(values)];
+}
+
+async function preloadCanvasFonts(fonts: ResolvedFonts): Promise<void> {
+  if (typeof document === "undefined" || !("fonts" in document)) return;
+  const canvasFonts = [
+    fonts.body,
+    fonts.bodyBold,
+    fonts.bodyItalic,
+    fonts.bodyBoldItalic,
+    fonts.inlineCode,
+    fonts.code,
+    fonts.heading1,
+    fonts.heading2,
+    fonts.heading3,
+    fonts.heading4,
+    fonts.heading5,
+    fonts.heading6,
+  ];
+  try {
+    await Promise.all(canvasFonts.map((spec) => document.fonts.load(spec)));
+    await document.fonts.ready;
+  } catch {
+    // Ignore — fall back to whatever the browser resolves.
+  }
+}
+
+function createPlaceholderTexture(palette: TilePalette): Texture {
+  // 64×64 stretched to every tile — loses the rounded corners during loading
+  // but the gradient reads as a card at a glance and costs one canvas upload.
+  const size = 64;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  if (ctx) {
+    const gradient = ctx.createLinearGradient(0, 0, size, size);
+    gradient.addColorStop(0, palette.background);
+    gradient.addColorStop(1, palette.backgroundEnd);
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, size, size);
+  }
+  return Texture.from(canvas);
+}
+
+function viewportCenterInWorld(app: Application, world: Container): { x: number; y: number } {
+  const screen = app.screen;
+  const scale = world.scale.x || 1;
+  return {
+    x: (screen.width / 2 - world.position.x) / scale,
+    y: (screen.height / 2 - world.position.y) / scale,
+  };
 }
 
 interface PanZoomOptions {
