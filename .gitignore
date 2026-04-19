@@ -23,5 +23,6 @@ dist-ssr
 *.sln
 *.sw?
 examples/rendered
+artifacts/
 .gstack/
 .vite-cache/

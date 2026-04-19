@@ -80,6 +80,7 @@ export function extractTopLevelBlockEntries(
       span: {
         from: child.from,
         to: child.to,
+        id: createBlockId(blockType, markdown, child.from, child.to),
         type: blockType,
         signature: hashTextRangeWithPrefix(markdown, child.from, child.to, blockType),
       },
@@ -724,4 +725,8 @@ function hashTextRangeWithPrefix(text: string, from: number, to: number, prefix:
   }
 
   return hash >>> 0;
+}
+
+function createBlockId(text: string, markdown: string, from: number, to: number): string {
+  return `b:${text}:${hashTextRangeWithPrefix(markdown, from, to, text).toString(36)}`;
 }
