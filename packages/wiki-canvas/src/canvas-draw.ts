@@ -360,17 +360,23 @@ function drawCheckbox(
   checked: boolean,
   palette: TilePalette,
 ): void {
-  // Fixed-size glyph left-aligned at `x`. Align its vertical *visual* center
-  // with the text's x-height midline (not the font's bounding-box center),
-  // so the box sits where the eye reads as "middle of the text" instead of
-  // floating a bit above the lowercase letters.
+  // Fixed-size glyph left-aligned at `x`. Center the box on the text's
+  // optical midline — halfway between cap top and baseline — so the box
+  // doesn't dip into the descender zone for descender-less text nor sit
+  // above the cap letters. Measure an actual glyph for cap height so this
+  // stays honest across fonts and sizes.
   const boxSize = CHECKBOX_SIZE;
   const size = fontSize(textFont);
   const ascent = size * 0.8;
   const descent = size * 0.2;
   const baseline = lineTop + (lineHeight - (ascent + descent)) / 2 + ascent;
-  const xHeight = size * 0.5;
-  const midline = baseline - xHeight / 2;
+  ctx.save();
+  ctx.font = textFont;
+  ctx.textBaseline = "alphabetic";
+  const capMetrics = ctx.measureText("H");
+  ctx.restore();
+  const capHeight = capMetrics.actualBoundingBoxAscent || size * 0.72;
+  const midline = baseline - capHeight / 2;
   const bx = x;
   const by = midline - boxSize / 2;
 
