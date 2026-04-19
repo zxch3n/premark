@@ -261,6 +261,104 @@ The \`[[wikilinks]]\` in these bodies are ground truth. The scanner resolves eac
 The edges you see at max-zoom-out are the skeleton of the graph. Zoom in and they fade into the background.
 `,
   },
+  // ── extra-extra-large: exceeds the 1000px cap so the fade shows ─────
+  {
+    key: "manifesto-xxl",
+    title: "Manifesto",
+    size: "xl",
+    build: () => `# Manifesto
+
+Every tool we build for reading is secretly a tool for _thinking_. The shape of the canvas decides the shape of the thought.
+
+## Premise
+
+A document is not a page. A page is an accident of paper. The page has been the only window we had onto a document for 500 years because glass screens inherited the shape of the thing they replaced. But a screen does not need to be a page. A screen can be anything we want.
+
+> A note-taking app is a tool for thinking. A thinking-tool's constraints become the thinker's constraints.
+
+## Four constraints we refuse
+
+1. **One note at a time.** The sidebar tree is a queue, not a map. You can only see the note you clicked on, and the one you just left is already gone.
+2. **Fixed height.** Every note in most viewers is the same height, regardless of whether it's a one-line quote or a 3000-word essay. Information density is erased.
+3. **Invisible relationships.** Links exist in the markdown but not in the layout. Two notes that reference each other sit on opposite ends of an alphabetical list.
+4. **Unbounded scroll.** The page scrolls forever, and the reader never gets a sense of _where_ they are in the graph.
+
+## What we do instead
+
+### Layout preserves content shape
+
+Each note is rendered at its natural height, clamped between a floor and a ceiling. A quote takes 180px. An essay takes 900px. A manifesto like this one takes 1000px and fades at the bottom so the reader knows there's more when they click in.
+
+### Links are drawn
+
+Every \`[[wikilink]]\` becomes a curve on the canvas. At the smallest zoom the curves _are_ the graph — a hairball that happens to pass through every article.
+
+\`\`\`ts
+gfx.moveTo(x1, y1)
+   .quadraticCurveTo(cx, cy, x2, y2)
+   .stroke({ color: accent, width: 3, alpha: 0.08 })
+\`\`\`
+
+### The whole graph fits in one picture
+
+No tree, no list, no infinite scroll. Pan to move laterally. Zoom to change scale. The map is always visible; the territory is always one gesture away.
+
+## What this costs
+
+- A commitment to real font metrics so every tile matches its eventual HTML
+- A streaming layout engine so large graphs don't block the main thread
+- Texture dedupe so 10,000 sprites don't melt the GPU
+
+We think it's worth it.
+`,
+  },
+  {
+    key: "changelog-xxl",
+    title: "Changelog",
+    size: "xl",
+    build: () => `# Changelog
+
+A (fictional) history of this viewer, to stretch a tile to its tallest shape.
+
+## 0.6.0 — The 10k release
+
+- **Masonry layout.** Tiles now measure themselves and stack into the shortest column, with deterministic jitter so the columns don't look like a spreadsheet.
+- **Height cap at 1000px** with a fade gradient for anything that overflows. You can still read the top of the note; the "more" is implicit.
+- **Texture dedupe** via \`cacheKey\`. 10k sprites use ~15 unique bitmaps.
+- **DPR 2 by default** so the text stays crisp on Retina displays.
+
+## 0.5.0 — Wikilink routing
+
+Every \`[[target]]\` now resolves into a real node id. The edge cap is tunable per graph.
+
+| Option | Default | Notes |
+| :--- | :---: | :--- |
+| \`maxEdges\` | 900 (masonry) | Higher caps start looking like noise |
+| \`edgeAlpha\` | 0.08 @ 400+ nodes | Scales inversely with count |
+| \`edgeWidth\` | 3px @ 400+ nodes | Thicker past zoom 1.0 |
+
+## 0.4.0 — Scatter mode
+
+Jittered grid for when your content has no inherent graph structure.
+
+## 0.3.0 — Pan and zoom
+
+- Drag to pan (mouse, trackpad, touch)
+- Scroll or pinch to zoom (with ctrlKey detection for trackpad gestures)
+- R key resets the view
+- Zoom range 0.015–2.5
+
+## 0.2.0 — CLI
+
+\`pnpm wiki-canvas <path>\` scans a folder for markdown, extracts wikilinks, and serves the viewer on a local port. \`--demo\` uses the bundled vault.
+
+## 0.1.0 — First tile
+
+One canvas, one markdown file, one sprite.
+
+> Everything since has been about making that sprite multiply.
+`,
+  },
 ];
 
 // ── Procedural note generator ─────────────────────────────
@@ -434,40 +532,88 @@ function autoCleanup(root: HTMLElement, controller: WikiCanvasController) {
 
 // ── Stories ───────────────────────────────────────────────
 
-export const ThousandNotes = () => {
-  const { root, stage } = buildShell();
-  const hud = buildOverlay(root);
-  hud.titleEl.textContent = "Wiki Canvas · 1000 notes (masonry)";
-  hud.hintEl.textContent =
-    "1000 notes · masonry of variable-height tiles · drag to pan · scroll or pinch to zoom · R to reset.";
+// The default note count for the procedural showcase. Change this const to
+// rebuild the story at a different size, OR drag the `noteCount` slider in
+// Storybook's Controls panel to tweak it live.
+const NOTE_COUNT = 1000;
 
-  const NOTE_COUNT = 1000;
-  const nodes = buildNotes(NOTE_COUNT);
+interface MasonryStoryArgs {
+  /** How many tiles to drop on the canvas. */
+  noteCount: number;
+  /** Max tile height in px — content taller than this gets clipped with a fade. */
+  maxTileHeight: number;
+  /** Min tile height in px — keeps one-liner notes from collapsing to a strip. */
+  minTileHeight: number;
+  /** Gap between tiles in px. */
+  tileGap: number;
+  /** Hard cap on cross-tile edges drawn. */
+  maxEdges: number;
+}
 
-  hud.countBadge.textContent = `${NOTE_COUNT} notes · width 625`;
-  hud.uniqueBadge.textContent = `…`;
-  hud.edgeBadge.textContent = `…`;
-  hud.renderBadge.textContent = `rendering…`;
+export const ThousandNotes = {
+  render: (args: MasonryStoryArgs) => {
+    const { root, stage } = buildShell();
+    const hud = buildOverlay(root);
+    hud.titleEl.textContent = `Wiki Canvas · ${args.noteCount} notes (masonry)`;
+    hud.hintEl.textContent =
+      "Masonry of variable-height tiles · drag to pan · scroll or pinch to zoom · R to reset · tweak count in Controls →";
 
-  void mountWikiCanvas(stage, {
-    nodes,
-    layoutMode: "masonry",
-    tileHeight: 900,
+    const nodes = buildNotes(args.noteCount);
+
+    hud.countBadge.textContent = `${args.noteCount} notes · width 625`;
+    hud.uniqueBadge.textContent = `…`;
+    hud.edgeBadge.textContent = `…`;
+    hud.renderBadge.textContent = `rendering…`;
+
+    void mountWikiCanvas(stage, {
+      nodes,
+      layoutMode: "masonry",
+      tileHeight: args.maxTileHeight,
+      minTileHeight: args.minTileHeight,
+      tileGap: args.tileGap,
+      maxEdges: args.maxEdges,
+    }).then((controller) => {
+      hud.uniqueBadge.textContent = `${controller.uniqueTileCount} unique tiles`;
+      hud.edgeBadge.textContent = `${controller.edgeCount} wikilinks`;
+      hud.renderBadge.textContent = `${controller.renderTimeMs.toFixed(1)}ms render`;
+      hud.fitBtn.addEventListener("click", () => controller.fit());
+      window.addEventListener("keydown", (event) => {
+        if (event.key === "r" || event.key === "R") controller.fit();
+      });
+      autoCleanup(root, controller);
+    });
+
+    return root;
+  },
+  args: {
+    noteCount: NOTE_COUNT,
+    maxTileHeight: 1000,
     minTileHeight: 170,
     tileGap: 180,
     maxEdges: 900,
-  }).then((controller) => {
-    hud.uniqueBadge.textContent = `${controller.uniqueTileCount} unique tiles`;
-    hud.edgeBadge.textContent = `${controller.edgeCount} wikilinks`;
-    hud.renderBadge.textContent = `${controller.renderTimeMs.toFixed(1)}ms render`;
-    hud.fitBtn.addEventListener("click", () => controller.fit());
-    window.addEventListener("keydown", (event) => {
-      if (event.key === "r" || event.key === "R") controller.fit();
-    });
-    autoCleanup(root, controller);
-  });
-
-  return root;
+  },
+  argTypes: {
+    noteCount: {
+      control: { type: "range", min: 50, max: 10000, step: 50 },
+      description: "How many markdown tiles to generate.",
+    },
+    maxTileHeight: {
+      control: { type: "range", min: 400, max: 1500, step: 50 },
+      description: "Tile height ceiling — taller content is clipped with a fade.",
+    },
+    minTileHeight: {
+      control: { type: "range", min: 100, max: 400, step: 10 },
+      description: "Tile height floor so one-liners still have presence.",
+    },
+    tileGap: {
+      control: { type: "range", min: 40, max: 400, step: 10 },
+      description: "Gap between tiles in px.",
+    },
+    maxEdges: {
+      control: { type: "range", min: 0, max: 3000, step: 50 },
+      description: "Hard cap on the curves drawn between linked tiles.",
+    },
+  },
 };
 
 // ── Hand-crafted small graph (kept for design clarity) ────
