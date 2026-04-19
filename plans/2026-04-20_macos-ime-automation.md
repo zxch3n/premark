@@ -16,6 +16,7 @@ Last Updated: 2026-04-20
 - Chromium CDP `Input.insertText` is useful for IME/emoji-style commit coverage. CDP `Input.imeSetComposition` is Chromium-only, experimental, and currently trips CodeMirror 6 composition/tile state in this overlay, so it is tracked as a blocker instead of a green CI gate.
 - macOS real IME automation must drive the focused browser through `System Events`; the runner has to be headed and serial.
 - Input source switching is the least portable part on macOS. The runner supports `im-select` when available and an override command for local machines.
+- The current machine has Apple Pinyin enabled and Swift available, but `System Events` automation hangs without Accessibility permission. The runner now has a preflight timeout so this fails clearly instead of stalling.
 
 ## Phase 1: Synthetic Browser Coverage
 
@@ -52,11 +53,16 @@ Acceptance:
 Goal: make real OS IME smoke reproducible on a local or self-hosted macOS machine.
 
 - [x] Add a headed macOS Playwright config.
-- [x] Add an opt-in macOS real IME test using `osascript`.
+- [x] Add opt-in macOS real IME tests using `osascript`.
 - [x] Support a default Chinese Pinyin scenario.
 - [x] Support a default Japanese Romaji scenario.
 - [x] Support custom text/expected/key-code scenarios through environment variables.
-- [x] Support input source switching through `im-select` or a custom shell command.
+- [x] Support input source switching through `im-select`, Swift/TIS, or a custom shell command.
+- [x] Add preflight timeout for missing Accessibility permission.
+- [x] Add selected-range replacement coverage.
+- [x] Add preedit cancellation coverage.
+- [x] Add rerender/other-document stream during composition coverage.
+- [x] Add undo/redo after IME commit coverage.
 - [ ] Run Chinese Pinyin on a real macOS input source.
 - [ ] Run Japanese Romaji on a real macOS input source.
 - [ ] Add a Korean scenario after choosing the target input source and expected key sequence.
@@ -92,9 +98,14 @@ Acceptance:
 - Added `playwright.macos-ime.config.ts` and a real macOS IME smoke test.
 - The macOS test is intentionally opt-in because it needs a headed browser and Accessibility permission.
 - Real OS Pinyin/Japanese smoke has not yet been run on this machine after the harness was added.
+- Expanded the macOS runner from a single smoke test to cover selected-range replacement, cancel, rerender/stream during composition, and undo/redo after IME commit.
+- Added Swift/TIS input source switching fallback because `im-select` is not installed on the current machine.
+- Tried direct `System Events` automation on this machine; it hung until killed, consistent with missing Accessibility permission for the current runner.
+- Ran the opt-in Pinyin command with `PREMARK_RUN_MACOS_IME=1 PREMARK_MACOS_IME_INPUT_SOURCE_ID=com.apple.inputmethod.SCIM.ITABC`; it failed immediately in preflight because `System Events` is not authorized for the current runner. This confirms the suite now fails clearly instead of hanging.
 - Validation:
   - `vp run test:ime:browser` passed with 3 passing tests and 1 explicit CDP preedit fixme.
-  - `vp run test:ime:macos` skipped cleanly without `PREMARK_RUN_MACOS_IME=1`.
+  - `vp run test:ime:macos` skipped cleanly without `PREMARK_RUN_MACOS_IME=1`; 5 opt-in macOS real IME tests are registered.
+  - `PREMARK_RUN_MACOS_IME=1 PREMARK_MACOS_IME_INPUT_SOURCE_ID=com.apple.inputmethod.SCIM.ITABC vp run test:ime:macos` failed at preflight due to missing Accessibility permission for `System Events`.
   - `vp run test:browser` passed with 10 passing tests and 1 explicit CDP preedit fixme.
   - `vp check --fix` passed with the two unrelated existing wiki-canvas warnings.
   - `vp run build` passed with the existing large playground chunk warning.
