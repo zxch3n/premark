@@ -22,24 +22,37 @@ export type MarkdownInline =
   | ImageNode
   | HtmlNode;
 
-export interface HeadingNode {
+export interface SourceRange {
+  readonly from: number;
+  readonly to: number;
+}
+
+export interface MarkdownNodeSource {
+  readonly source?: SourceRange;
+}
+
+export interface MarkdownBlockSource extends MarkdownNodeSource {
+  readonly id?: string;
+}
+
+export interface HeadingNode extends MarkdownBlockSource {
   readonly type: "heading";
   readonly level: 1 | 2 | 3 | 4 | 5 | 6;
   readonly children: readonly MarkdownInline[];
 }
 
-export interface ParagraphNode {
+export interface ParagraphNode extends MarkdownBlockSource {
   readonly type: "paragraph";
   readonly children: readonly MarkdownInline[];
 }
 
-export interface CodeBlockNode {
+export interface CodeBlockNode extends MarkdownBlockSource {
   readonly type: "code-block";
   readonly content: string;
   readonly info?: string;
 }
 
-export interface ListNode {
+export interface ListNode extends MarkdownBlockSource {
   readonly type: "list";
   readonly kind: "ordered" | "unordered";
   readonly start: number;
@@ -53,12 +66,12 @@ export interface ListItemNode {
   readonly children: readonly MarkdownBlock[];
 }
 
-export interface BlockquoteNode {
+export interface BlockquoteNode extends MarkdownBlockSource {
   readonly type: "blockquote";
   readonly children: readonly MarkdownBlock[];
 }
 
-export interface TableNode {
+export interface TableNode extends MarkdownBlockSource {
   readonly type: "table";
   readonly head: {
     readonly cells: readonly TableCellNode[];
@@ -77,63 +90,63 @@ export interface TableCellNode {
   readonly children: readonly MarkdownInline[];
 }
 
-export interface HtmlBlockNode {
+export interface HtmlBlockNode extends MarkdownBlockSource {
   readonly type: "html-block";
   readonly content: string;
 }
 
-export interface ThematicBreakNode {
+export interface ThematicBreakNode extends MarkdownBlockSource {
   readonly type: "thematic-break";
 }
 
-export interface TextNode {
+export interface TextNode extends MarkdownNodeSource {
   readonly type: "text";
   readonly text: string;
 }
 
-export interface SoftBreakNode {
+export interface SoftBreakNode extends MarkdownNodeSource {
   readonly type: "softbreak";
 }
 
-export interface HardBreakNode {
+export interface HardBreakNode extends MarkdownNodeSource {
   readonly type: "hardbreak";
 }
 
-export interface StrongNode {
+export interface StrongNode extends MarkdownNodeSource {
   readonly type: "strong";
   readonly children: readonly MarkdownInline[];
 }
 
-export interface EmphasisNode {
+export interface EmphasisNode extends MarkdownNodeSource {
   readonly type: "emphasis";
   readonly children: readonly MarkdownInline[];
 }
 
-export interface StrikethroughNode {
+export interface StrikethroughNode extends MarkdownNodeSource {
   readonly type: "strikethrough";
   readonly children: readonly MarkdownInline[];
 }
 
-export interface CodeSpanNode {
+export interface CodeSpanNode extends MarkdownNodeSource {
   readonly type: "code-span";
   readonly text: string;
 }
 
-export interface LinkNode {
+export interface LinkNode extends MarkdownNodeSource {
   readonly type: "link";
   readonly href: string;
   readonly title?: string;
   readonly children: readonly MarkdownInline[];
 }
 
-export interface ImageNode {
+export interface ImageNode extends MarkdownNodeSource {
   readonly type: "image";
   readonly href: string;
   readonly title?: string;
   readonly children: readonly MarkdownInline[];
 }
 
-export interface HtmlNode {
+export interface HtmlNode extends MarkdownNodeSource {
   readonly type: "html";
   readonly content: string;
 }
@@ -141,8 +154,40 @@ export interface HtmlNode {
 export interface BlockSpan {
   readonly from: number;
   readonly to: number;
+  readonly id: string;
   readonly type: string;
   readonly signature: number;
+}
+
+export interface MarkdownInlineSourceRecord {
+  readonly blockId: string;
+  readonly type: MarkdownInline["type"];
+  readonly source: SourceRange;
+  readonly sourceText: string;
+  readonly renderedText: string;
+}
+
+export interface HeadingPathEntry {
+  readonly id: string;
+  readonly level: 1 | 2 | 3 | 4 | 5 | 6;
+  readonly text: string;
+}
+
+export interface LinkRef {
+  readonly href: string;
+  readonly title?: string;
+  readonly text: string;
+  readonly kind: "link" | "image";
+}
+
+export interface MarkdownBlockRecord {
+  readonly id: string;
+  readonly index: number;
+  readonly type: MarkdownBlock["type"];
+  readonly source: SourceRange;
+  readonly renderedText: string;
+  readonly headingPath: readonly HeadingPathEntry[];
+  readonly links: readonly LinkRef[];
 }
 
 export interface TextChange {
@@ -177,6 +222,7 @@ export interface IncrementalParseResult extends StreamParseSnapshot {
   readonly state: IncrementalParseState;
   readonly mode: "full" | "incremental";
   readonly change: TextChange | null;
+  readonly blockDirtyRanges: readonly BlockDirtyRange[];
   readonly dirtyFromBlock: number;
   readonly dirtyToBlock: number;
   readonly reusedPrefixCount: number;
@@ -199,6 +245,12 @@ export interface BlockDiffEntry<T> {
   readonly index: number;
   readonly previous?: T;
   readonly next?: T;
+}
+
+export interface BlockDirtyRange {
+  readonly kind: "content" | "layout";
+  readonly fromBlock: number;
+  readonly toBlock: number;
 }
 
 export interface BlockDiffResult<T> {

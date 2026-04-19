@@ -10,6 +10,7 @@ import {
 } from "./lezer-adapter.ts";
 
 import type {
+  BlockDirtyRange,
   BlockSpan,
   IncrementalParseOptions,
   IncrementalParseResult,
@@ -73,6 +74,7 @@ export function appendIncrementalParse(
     state: nextState,
     mode: "incremental",
     change,
+    blockDirtyRanges: createBlockDirtyRanges(reusedPrefixCount, nextBlocks.length, 0),
     dirtyFromBlock: reusedPrefixCount,
     dirtyToBlock: nextBlocks.length,
     reusedPrefixCount,
@@ -123,6 +125,7 @@ function fullParseResult(
     state: nextState,
     mode: "full",
     change,
+    blockDirtyRanges: createBlockDirtyRanges(0, nextState.blocks.length, 0),
     dirtyFromBlock: 0,
     dirtyToBlock: nextState.blocks.length,
     reusedPrefixCount: 0,
@@ -140,6 +143,7 @@ function unchangedParseResult(previousState: IncrementalParseState): Incremental
     state: previousState,
     mode: "incremental",
     change: null,
+    blockDirtyRanges: [],
     dirtyFromBlock: previousState.blocks.length,
     dirtyToBlock: previousState.blocks.length,
     reusedPrefixCount: previousState.blocks.length,
@@ -202,6 +206,7 @@ function parseWithChange(
     state: nextState,
     mode: "incremental",
     change,
+    blockDirtyRanges: createBlockDirtyRanges(middleStart, middleEnd, nextBlocks.length),
     dirtyFromBlock: middleStart,
     dirtyToBlock: middleEnd,
     reusedPrefixCount,
@@ -310,6 +315,31 @@ function isClosedFencedCode(source: string): boolean {
     closingFence[1][0] === fence[0] &&
     closingFence[1].length >= fence.length
   );
+}
+
+function createBlockDirtyRanges(
+  contentFromBlock: number,
+  contentToBlock: number,
+  layoutToBlock: number,
+): readonly BlockDirtyRange[] {
+  const ranges: BlockDirtyRange[] = [];
+  if (contentFromBlock < contentToBlock) {
+    ranges.push({
+      kind: "content",
+      fromBlock: contentFromBlock,
+      toBlock: contentToBlock,
+    });
+  }
+
+  if (contentToBlock < layoutToBlock) {
+    ranges.push({
+      kind: "layout",
+      fromBlock: contentToBlock,
+      toBlock: layoutToBlock,
+    });
+  }
+
+  return Object.freeze(ranges);
 }
 
 function createAppendChange(oldLength: number, chunk: string): TextChange {

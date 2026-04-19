@@ -3,6 +3,11 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   appendIncrementalParse,
   createIncrementalParseState,
+  createMarkdownInlineSourceMap,
+  createMarkdownBlockRecords,
+  findBlockSpanAtOffset,
+  findBlockSpanById,
+  findInlineSourceRecordsAtOffset,
   incrementalParse,
   parseMarkdown,
   StreamParser,
@@ -236,6 +241,182 @@ describe("StreamParser", () => {
 });
 
 describe("incrementalParse", () => {
+  it("tracks source ranges and stable content ids in block spans", () => {
+    const oldText = "# Title\n\nAlpha paragraph.\n\nBeta paragraph.";
+    const newText = "# Title\n\nAlpha paragraph updated.\n\nBeta paragraph.";
+    const oldState = createIncrementalParseState(oldText);
+    const result = incrementalParse(oldState, newText);
+    const betaSpan = result.state.blockSpans.at(-1);
+
+    expect(result.state.blockSpans[0]).toMatchObject({
+      from: 0,
+      to: 7,
+      type: "heading",
+    });
+    expect(result.state.blockSpans[0]?.id).toBe(oldState.blockSpans[0]?.id);
+    expect(betaSpan?.id).toBe(oldState.blockSpans.at(-1)?.id);
+    expect(betaSpan).toMatchObject({
+      from: 35,
+      to: 50,
+      type: "paragraph",
+    });
+    expect(findBlockSpanAtOffset(result.state, 36)?.id).toBe(betaSpan?.id);
+    expect(findBlockSpanById(result.state, betaSpan!.id)).toEqual(betaSpan);
+  });
+
+  it("derives rendered block records for search and canvas indexing", () => {
+    const state = createIncrementalParseState(
+      [
+        "# Guide",
+        "",
+        "Paragraph with [docs](https://example.com) and ![image](./asset.png).",
+        "",
+        "## Details",
+        "",
+        "- task item",
+      ].join("\n"),
+    );
+    const records = createMarkdownBlockRecords(state);
+
+    expect(records).toHaveLength(4);
+    expect(records[0]).toMatchObject({
+      type: "heading",
+      renderedText: "Guide",
+      headingPath: [{ level: 1, text: "Guide" }],
+    });
+    expect(records[1]).toMatchObject({
+      type: "paragraph",
+      renderedText: "Paragraph with docs and image.",
+      headingPath: [{ level: 1, text: "Guide" }],
+      links: [
+        { href: "https://example.com", text: "docs", kind: "link" },
+        { href: "./asset.png", text: "image", kind: "image" },
+      ],
+    });
+    expect(records[2].headingPath.map((entry) => entry.text)).toEqual(["Guide", "Details"]);
+    expect(records[3].headingPath.map((entry) => entry.text)).toEqual(["Guide", "Details"]);
+  });
+
+  it("tracks block and inline source ranges across Markdown structures", () => {
+    const markdown = [
+      "# Heading with `code`",
+      "",
+      "Paragraph with **strong** and [docs](https://example.com).",
+      "",
+      "- [x] done",
+      "- nested [item](./item.md)",
+      "",
+      "> quote *emphasis*",
+      "",
+      "| A | B |",
+      "| - | - |",
+      "| cell `code` | [link](./table.md) |",
+      "",
+      "```ts",
+      "const x = 1",
+      "```",
+    ].join("\n");
+    const state = createIncrementalParseState(markdown);
+    const inlineSources = createMarkdownInlineSourceMap(state);
+    const blockSources = state.blockSpans.map((span) => markdown.slice(span.from, span.to));
+
+    expect(blockSources).toEqual([
+      "# Heading with `code`",
+      "Paragraph with **strong** and [docs](https://example.com).",
+      "- [x] done\n- nested [item](./item.md)",
+      "> quote *emphasis*",
+      "| A | B |\n| - | - |\n| cell `code` | [link](./table.md) |",
+      "```ts\nconst x = 1\n```",
+    ]);
+
+    expect(findInlineSourceRecordsAtOffset(inlineSources, markdown.indexOf("Heading"))).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "text",
+          sourceText: "Heading with ",
+          blockId: state.blockSpans[0]?.id,
+        }),
+      ]),
+    );
+    expect(findInlineSourceRecordsAtOffset(inlineSources, markdown.indexOf("code"))).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "code-span",
+          sourceText: "`code`",
+        }),
+      ]),
+    );
+    expect(findInlineSourceRecordsAtOffset(inlineSources, markdown.indexOf("strong"))).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "strong", sourceText: "**strong**" }),
+        expect.objectContaining({ type: "text", sourceText: "strong" }),
+      ]),
+    );
+    expect(findInlineSourceRecordsAtOffset(inlineSources, markdown.indexOf("docs"))).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "link", sourceText: "[docs](https://example.com)" }),
+        expect.objectContaining({ type: "text", sourceText: "docs" }),
+      ]),
+    );
+    expect(inlineSources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "text", sourceText: "[x]", renderedText: "[x]" }),
+      ]),
+    );
+    expect(findInlineSourceRecordsAtOffset(inlineSources, markdown.indexOf("emphasis"))).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "emphasis", sourceText: "*emphasis*" }),
+      ]),
+    );
+    expect(findInlineSourceRecordsAtOffset(inlineSources, markdown.indexOf("./table.md"))).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "link", sourceText: "[link](./table.md)" }),
+      ]),
+    );
+    expect(findInlineSourceRecordsAtOffset(inlineSources, markdown.indexOf("const x"))).toEqual([]);
+  });
+
+  it("distinguishes content dirty blocks from reused blocks that only need layout movement", () => {
+    const oldState = createIncrementalParseState("# Title\n\nAlpha\n\nBeta\n\nGamma");
+    const result = incrementalParse(
+      oldState,
+      "# Title\n\nAlpha changed\n\nBeta\n\nGamma",
+      forceIncrementalOptions,
+    );
+
+    expect(result.blockDirtyRanges).toEqual([
+      { kind: "content", fromBlock: 1, toBlock: 2 },
+      { kind: "layout", fromBlock: 2, toBlock: 4 },
+    ]);
+    expect(result.state.blocks[0]).toBe(oldState.blocks[0]);
+    expect(result.state.blocks[2]).toBe(oldState.blocks[2]);
+    expect(result.state.blocks[3]).toBe(oldState.blocks[3]);
+  });
+
+  it("keeps block ids stable across insertion, deletion, append and structural edits", () => {
+    const base = createIncrementalParseState("# Title\n\nAlpha\n\nBeta");
+    const inserted = incrementalParse(base, "# Title\n\nAlpha\n\nInserted\n\nBeta");
+
+    expect(inserted.state.blockSpans[0]?.id).toBe(base.blockSpans[0]?.id);
+    expect(inserted.state.blockSpans[1]?.id).toBe(base.blockSpans[1]?.id);
+    expect(inserted.state.blockSpans[3]?.id).toBe(base.blockSpans[2]?.id);
+
+    const deleted = incrementalParse(inserted.state, "# Title\n\nAlpha\n\nBeta");
+    expect(deleted.state.blockSpans.map((span) => span.id)).toEqual(
+      base.blockSpans.map((span) => span.id),
+    );
+
+    const appended = appendIncrementalParse(base, "\n\nGamma");
+    expect(appended.state.blockSpans.slice(0, 3).map((span) => span.id)).toEqual(
+      base.blockSpans.map((span) => span.id),
+    );
+
+    const structural = incrementalParse(base, "# Title\n\n## Alpha\n\nBeta");
+    expect(structural.state.blockSpans[0]?.id).toBe(base.blockSpans[0]?.id);
+    expect(structural.state.blockSpans[1]?.id).not.toBe(base.blockSpans[1]?.id);
+    expect(structural.state.blockSpans[2]?.id).toBe(base.blockSpans[2]?.id);
+  });
+
   it("reuses unchanged prefix and suffix blocks for a middle edit", () => {
     const oldText = "# Title\n\nAlpha paragraph.\n\nBeta paragraph.\n\n```ts\nconst x = 1\n```";
     const newText =

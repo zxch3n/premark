@@ -3,6 +3,11 @@ import { renderToHtml } from "@pretext-md/html-renderer";
 import { createLayoutEngine } from "@pretext-md/layout";
 
 import "./style.css";
+import { mountCanvasEditorApp } from "./canvas-editor/index.ts";
+import { mountVisualParityApp } from "./visual-parity/index.ts";
+
+const appRoot = document.querySelector<HTMLDivElement>("#app")!;
+const mode = new URLSearchParams(window.location.search).get("mode");
 
 const sampleMarkdown = `# @pretext-md
 
@@ -33,7 +38,8 @@ const engine = createLayoutEngine({
   highlighter,
 });
 
-document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
+function mountPlayground(root: HTMLDivElement) {
+  root.innerHTML = `
   <div class="shell">
     <aside class="controls">
       <div>
@@ -84,35 +90,44 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
   </div>
 `;
 
-const markdownInput = document.querySelector<HTMLTextAreaElement>("#markdown")!;
-const widthInput = document.querySelector<HTMLInputElement>("#width")!;
-const widthValue = document.querySelector<HTMLOutputElement>("#width-value")!;
-const heightValue = document.querySelector<HTMLElement>("#height")!;
-const blocksValue = document.querySelector<HTMLElement>("#blocks")!;
-const linesValue = document.querySelector<HTMLElement>("#lines")!;
-const canvas = document.querySelector<HTMLDivElement>("#canvas")!;
-const json = document.querySelector<HTMLPreElement>("#json")!;
+  const markdownInput = root.querySelector<HTMLTextAreaElement>("#markdown")!;
+  const widthInput = root.querySelector<HTMLInputElement>("#width")!;
+  const widthValue = root.querySelector<HTMLOutputElement>("#width-value")!;
+  const heightValue = root.querySelector<HTMLElement>("#height")!;
+  const blocksValue = root.querySelector<HTMLElement>("#blocks")!;
+  const linesValue = root.querySelector<HTMLElement>("#lines")!;
+  const canvas = root.querySelector<HTMLDivElement>("#canvas")!;
+  const json = root.querySelector<HTMLPreElement>("#json")!;
 
-markdownInput.value = sampleMarkdown;
+  markdownInput.value = sampleMarkdown;
 
-function render() {
-  const width = Number(widthInput.value);
-  widthValue.value = `${width}px`;
+  function render() {
+    const width = Number(widthInput.value);
+    widthValue.value = `${width}px`;
 
-  const layout = engine.layout(markdownInput.value, width);
-  const rendered = renderToHtml(layout, {
-    codeThemeCss: highlighter.getThemeCss("dark"),
-  });
+    const layout = engine.layout(markdownInput.value, width);
+    const rendered = renderToHtml(layout, {
+      codeThemeCss: highlighter.getThemeCss("dark"),
+    });
 
-  canvas.style.width = `${width}px`;
-  canvas.innerHTML = `<style>${rendered.css}</style>${rendered.html}`;
-  json.textContent = JSON.stringify(layout, null, 2);
-  heightValue.textContent = `${Math.round(layout.totalHeight)}px`;
-  blocksValue.textContent = String(layout.blocks.length);
-  linesValue.textContent = String(layout.lines.length);
+    canvas.style.width = `${width}px`;
+    canvas.innerHTML = `<style>${rendered.css}</style>${rendered.html}`;
+    json.textContent = JSON.stringify(layout, null, 2);
+    heightValue.textContent = `${Math.round(layout.totalHeight)}px`;
+    blocksValue.textContent = String(layout.blocks.length);
+    linesValue.textContent = String(layout.lines.length);
+  }
+
+  markdownInput.addEventListener("input", render);
+  widthInput.addEventListener("input", render);
+
+  render();
 }
 
-markdownInput.addEventListener("input", render);
-widthInput.addEventListener("input", render);
-
-render();
+if (mode === "visual-parity") {
+  mountVisualParityApp(appRoot);
+} else if (mode === "canvas-editor") {
+  mountCanvasEditorApp(appRoot);
+} else {
+  mountPlayground(appRoot);
+}
