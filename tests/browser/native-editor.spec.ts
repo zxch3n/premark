@@ -38,4 +38,24 @@ test.describe("Premark native editor story", () => {
     await expect(source).toContainText("X");
     await editor.screenshot({ path: testInfo.outputPath("native-editor-after-replace.png") });
   });
+
+  test("commits synthetic composition events through the hidden textarea bridge", async ({
+    page,
+  }) => {
+    await page.goto(storyUrl);
+
+    const surface = page.locator("[data-editor-surface]");
+    const bridge = page.locator("[data-input-bridge]");
+    const source = page.locator("[data-debug-source]");
+    await expect(surface).toContainText("Native rendered Markdown");
+
+    await surface.click({ position: { x: 118, y: 86 } });
+    await bridge.evaluate((element) => {
+      element.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+      element.dispatchEvent(new CompositionEvent("compositionupdate", { data: "shi" }));
+      element.dispatchEvent(new CompositionEvent("compositionend", { data: "世界" }));
+    });
+
+    await expect(source).toContainText("世界");
+  });
 });

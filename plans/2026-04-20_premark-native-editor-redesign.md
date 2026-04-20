@@ -33,6 +33,7 @@ Last Updated: 2026-04-20
 - The first Storybook prototype can reuse the HTML renderer for visible Markdown while Premark editor core owns selection, caret, hit-test, hidden textarea sync, and source operations. This is still a DOM debug renderer, not the final Canvas renderer.
 - Browser automation must set `NO_PROXY=127.0.0.1,localhost` in this environment; otherwise Playwright's local web-server readiness probe can be routed through the proxy and time out.
 - Screenshot review caught a real bug: pointer hit-test could land inside an emoji ZWJ sequence and leave a stale suffix after replacement. Pointer selection now snaps hit-test offsets to grapheme boundaries before updating source selection.
+- Synthetic browser composition events are useful as a fast guard for DOM event wiring, but they are not a substitute for real macOS IME automation because they do not exercise OS candidate windows or native event ordering.
 
 ## Removed From This Branch
 
@@ -145,7 +146,7 @@ Acceptance:
 
 Goal: support real composition without hiding behind CodeMirror.
 
-- [ ] Track `compositionstart/update/end` as a composing source range.
+- [x] Track `compositionstart/update/end` as a composing source range.
 - [ ] Render preedit text in Premark with underline/style matching platform expectation as closely as practical.
 - [ ] Commit and cancel composition without losing source selection.
 - [ ] Run macOS Pinyin real IME tests.
@@ -187,6 +188,7 @@ Goal: convert the research checklist into automated coverage and visual review g
 - [ ] Create `tests/editor/pitfalls/README.md` with every known pitfall, source, automation status, and owner.
 - [x] Create first Playwright suite for the native editor Storybook desktop pointer/input flow and screenshot crops.
 - [ ] Expand Playwright suites for desktop keyboard selection, clipboard, visual viewport, DOM debug renderer, Canvas renderer, and more screenshot crops.
+- [x] Add first browser composition suite using synthetic `composition*` events against the Storybook hidden textarea.
 - [ ] Create macOS-only IME suite using real OS input where possible and clear skips where CI cannot provide the OS permission or input source.
 - [ ] Create mobile-emulation suite for touch, visual viewport, soft keyboard modeling, and selection geometry; record gaps requiring real-device validation.
 - [ ] Create screenshot review artifacts with one small crop per scenario and a Codex-reviewed `review.md` that records pass/fail and visual notes.
@@ -222,3 +224,4 @@ Acceptance:
 - Added core clipboard intent handling. Paste chooses Markdown before plain text before a simple HTML-to-text fallback; cut uses the same source edit path. Tests cover selection paste, HTML fallback, cross-block paste, and cross-block cut.
 - Added Storybook `Editing/Premark Native Editor`. It renders Markdown through Premark HTML layout, paints Premark selection/caret overlays, anchors a hidden textarea near the caret, wires pointer drag and keyboard/input/beforeinput events into editor core, and records textarea edits in `LocalUndoManager`. `vp run storybook:build` passes; screenshot tests are still open.
 - Added Playwright browser coverage for the native editor Storybook. The test builds Storybook, serves the static output, clicks the rendered surface, types through the hidden textarea, drags a rendered selection, replaces the selected range, and saves small screenshots for manual review. Codex reviewed the generated screenshots on 2026-04-20 and accepted idle, typing, selection, and replacement crops after fixing grapheme snapping.
+- Wired Storybook hidden textarea `compositionstart/update/end` events into `applyInputIntent` and added a Playwright synthetic composition test. Real macOS IME testing remains open.
