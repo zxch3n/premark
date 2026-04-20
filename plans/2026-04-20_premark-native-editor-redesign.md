@@ -1,13 +1,13 @@
 # Premark Native Editor Redesign Plan
 
-Status: Phase 12 in progress; OS IME deferred
+Status: Phase 12 complete; Phase 13 next; OS IME deferred
 Owner: Codex / Zixuan
 Last Updated: 2026-04-21
 Compaction Rule: after memory reload or compaction, reread this whole file before continuing.
 
 ## Current Objective
 
-- Continue Phase 12 Markdown editing behavior; links/images/headings and boundary deletes remain.
+- Start Phase 13 selection and mobile hardening.
 - Keep the native Premark-rendered editor as the product path; CodeMirror overlay remains removed.
 - Do not run macOS HID/IME tests while the machine is actively used unless Zixuan explicitly asks.
 
@@ -24,6 +24,7 @@ Compaction Rule: after memory reload or compaction, reread this whole file befor
 - Most text-geometry bugs should be caught without Browser. Browser tests should prove Storybook wiring, font loading, Canvas paint, and visual baselines.
 - Control-adjacent editing should stay source-exact. If the caret is inside a revealed Markdown marker or link suffix, insert/delete/paste/Enter edits that source position only; replacing rendered inline content should leave its surrounding controls intact.
 - Enter in the native editor now means one source newline. Browser `insertParagraph` and textarea `insertLineBreak` both normalize to the same source operation because editor layout preserves every `\n`.
+- Common Markdown structure editing now has explicit behavior: list/quote continuation, empty-prefix exits, task toggles, code source exactness, heading boundary Backspace, link/image label replacement, and source-exact inline-control deletes.
 - Phase 9 benchmarks show the core layout engine is already incremental for local edit, remote edit, and AI append, but editable sidecar rebuild is still full-document and dominates large editor updates. The next architecture step is dirty-block/viewport editable indexing, not more CodeMirror fallback.
 - macOS IME automation can be prepared without posting OS events: dry-run now validates helpers/input sources and scenario selection for Pinyin, Japanese, and Korean. Real IME correctness still requires foreground HID.
 
@@ -223,13 +224,13 @@ Goal: make common Markdown structures feel correct under source-exact editing.
 - [x] Task lists: checkbox toggles source without breaking selection.
 - [x] Blockquotes: Enter continues quote, empty quote exits.
 - [x] Fenced code: Enter, Tab, paste, and multi-line selection remain source-exact.
-- [ ] Links/images/headings: control-marker editing, rendered text replacement, and Backspace rules are covered.
-- [ ] Delete behavior across block and inline control boundaries is deterministic.
+- [x] Links/images/headings: control-marker editing, rendered text replacement, and Backspace rules are covered.
+- [x] Delete behavior across block and inline control boundaries is deterministic.
 
 Acceptance:
 
-- [ ] Each structure has pure state tests and at least one browser interaction test.
-- [ ] Active control reveal rules remain correct after behavior additions.
+- [x] Each structure has pure state tests and at least one browser interaction test.
+- [x] Active control reveal rules remain correct after behavior additions.
 
 ## Phase 13: Selection And Mobile Hardening
 
@@ -318,6 +319,9 @@ Acceptance:
 - Fixed notable geometry failures: parser block index mismatch, proportional inline x, heading marker reveal drift, active reveal index mismatch in Canvas story, wrapped-line affinity/y boundary, multiline code-block y, source newline gaps, font-load stale widths, internal revealed-control caret placement, editable-run source maps, bare URL visibility, and repeated ZWJ emoji Canvas drift.
 - Current verification baseline after emoji Canvas fix: `vp check --fix` passes with two existing warnings, `vp test` passes 166 tests, `vp run build` passes, and `vp run test:browser` passes 18 Playwright tests.
 - Existing warnings are unrelated: `tools/wiki-canvas/src/cli.ts` unused `ScannedNote`, and `packages/wiki-canvas/src/layout.ts` `new Array<number>(cols).fill(0)`.
+
+### 2026-04-21
+
 - Assumption: Phase 7 should be completed before adding new editing behavior because geometry/renderer mismatch can invalidate higher-level behavior tests.
 - Possible plan change: if Phase 7 exposes renderer limits in Canvas text shaping, introduce a shared text-run paint abstraction rather than patching `drawTile` locally.
 - Prepared experiments: compare editable boundary tables, fresh Canvas measurements, and recorded Canvas `fillText` positions across the fixture matrix.
@@ -339,3 +343,8 @@ Acceptance:
 - Added Phases 11-17 to keep the plan moving from prototype toward product integration, Markdown behavior, viewport performance, visual parity, collaboration/AI, and final OS IME gates.
 - Completed Phase 11. Added `PremarkEditorController` as the product-facing API for markdown, selection, edits, input intents, undo/redo, composition, resize, subscriptions, and render snapshots. Render snapshots now own active Markdown control reveal and virtual composition render views, so DOM and Canvas stories no longer rebuild those views locally. Verification on 2026-04-21: `vp check --fix`, `vp test` passed 186 tests, `vp run test:browser` passed 25 Playwright tests, and `vp run build` passed.
 - Phase 12 started. Added Markdown-aware Enter for unordered, ordered, task-list, and blockquote lines; empty list/quote lines exit their structure. Added Tab/Shift+Tab line indent/outdent intent from keydown, source-exact Tab/Enter/paste behavior inside fenced code, and task checkbox toggles through both helper and controller APIs while preserving selection. Browser coverage now exercises list continuation, list indent/outdent, and blockquote continuation/exit through the real hidden textarea path. Verification on 2026-04-21: `vp check --fix`, `vp test` passed 194 tests, `vp run test:browser` passed 26 Playwright tests, and `vp run build` passed.
+- Completed Phase 12 Markdown editing behavior: list/blockquote continuation and exit, task checkbox toggles, fenced-code source exact edits, heading boundary Backspace, link/image rendered-label replacement, and deterministic source-exact deletes near inline controls.
+- Added browser coverage through the native Storybook editor for heading marker deletion, list indentation/continuation, quote continuation/exit, link label replacement, and image alt replacement.
+- Current verification for Phase 12 completion: `vp test packages/editor/tests/input-commands.test.ts` passes 30 tests, `vp check --fix` passes, `vp test` passes 198 tests, `vp run test:browser` passes 26 Playwright tests, and `vp run build` passes.
+- Assumption remains unchanged: real macOS HID/IME validation is deferred until the machine is free and Zixuan explicitly allows OS-level input.
+- Next planned experiments: Phase 13 selection hardening, especially cross-block/reversed drag, keyboard Shift variants, Page/Home/End behavior, CJK/emoji/link double-click boundaries, touch-event automation, and small DOM/Canvas screenshot crops.

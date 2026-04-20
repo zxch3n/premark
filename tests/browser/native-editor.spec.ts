@@ -1114,6 +1114,11 @@ test.describe("Premark native editor story", () => {
     const source = page.locator("[data-debug-source]");
     await expect(surface).toContainText("Native rendered Markdown");
 
+    await setSourceCaret(page, await sourceOffset(page, "Native rendered Markdown"));
+    await bridge.focus();
+    await page.keyboard.press("Backspace");
+    expect(await editorMarkdown(page)).toMatch(/^Native rendered Markdown\n\n/u);
+
     await setSourceCaret(page, await sourceOffset(page, "source offsets.", "end"));
     await bridge.focus();
     await page.keyboard.press("Enter");
@@ -1152,6 +1157,29 @@ test.describe("Premark native editor story", () => {
     await page.keyboard.press("Enter");
     expect(await editorMarkdown(page)).toContain("> quoted\n");
     expect(await editorMarkdown(page)).not.toContain("> quoted\n> ");
+
+    const linkLabel = await sourceOffset(page, "docs");
+    await setSourceSelection(page, linkLabel, linkLabel + "docs".length);
+    await bridge.focus();
+    await page.keyboard.type("guide");
+    expect(await editorMarkdown(page)).toContain("[guide](https://example.com)");
+
+    const imageMarkdown =
+      "\n\n![alt](data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==)";
+    await page.evaluate(
+      ({ offset, markdown }) =>
+        (
+          window as typeof window & {
+            __premarkNativeEditor?: { insertRemote(offset: number, text: string): void };
+          }
+        ).__premarkNativeEditor?.insertRemote(offset, markdown),
+      { offset: (await editorMarkdown(page)).length, markdown: imageMarkdown },
+    );
+    const imageAlt = await sourceOffset(page, "alt");
+    await setSourceSelection(page, imageAlt, imageAlt + "alt".length);
+    await bridge.focus();
+    await page.keyboard.type("caption");
+    expect(await editorMarkdown(page)).toContain("![caption](data:image/gif");
   });
 
   test("supports browser paste and cut events through clipboard intents", async ({ page }) => {

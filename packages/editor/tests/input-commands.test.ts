@@ -242,6 +242,116 @@ describe("applyInputIntent", () => {
     });
   });
 
+  it("applies heading Backspace rules only at the heading content boundary", () => {
+    for (let level = 2; level <= 6; level += 1) {
+      const editor = createInMemoryEditorDocumentState(`${"#".repeat(level)} Heading`, 600);
+      const headingStart = editor.markdown.indexOf("Heading");
+      editor.setSelection(headingStart, headingStart);
+
+      applyInputIntent(editor, { type: "delete", direction: "backward" });
+
+      const nextPrefix = `${"#".repeat(level - 1)} `;
+      expect(editor.markdown).toBe(`${nextPrefix}Heading`);
+      expect(editor.selectionSourceRange).toEqual({
+        from: nextPrefix.length,
+        to: nextPrefix.length,
+      });
+    }
+
+    const levelOne = createInMemoryEditorDocumentState("# Heading", 600);
+    levelOne.setSelection(
+      levelOne.markdown.indexOf("Heading"),
+      levelOne.markdown.indexOf("Heading"),
+    );
+
+    applyInputIntent(levelOne, { type: "delete", direction: "backward" });
+
+    expect(levelOne.markdown).toBe("Heading");
+    expect(levelOne.selectionSourceRange).toEqual({ from: 0, to: 0 });
+
+    const quoted = createInMemoryEditorDocumentState("> ## Heading", 600);
+    quoted.setSelection(quoted.markdown.indexOf("Heading"), quoted.markdown.indexOf("Heading"));
+
+    applyInputIntent(quoted, { type: "delete", direction: "backward" });
+
+    expect(quoted.markdown).toBe("> # Heading");
+    expect(quoted.selectionSourceRange).toEqual({ from: "> # ".length, to: "> # ".length });
+
+    const markerInternal = createInMemoryEditorDocumentState("### Heading", 600);
+    markerInternal.setSelection(2, 2);
+
+    applyInputIntent(markerInternal, { type: "delete", direction: "backward" });
+
+    expect(markerInternal.markdown).toBe("## Heading");
+    expect(markerInternal.selectionSourceRange).toEqual({ from: 1, to: 1 });
+  });
+
+  it("removes list and blockquote prefixes at source line content boundaries", () => {
+    const list = createInMemoryEditorDocumentState("- item", 600);
+    list.setSelection(list.markdown.indexOf("item"), list.markdown.indexOf("item"));
+
+    applyInputIntent(list, { type: "delete", direction: "backward" });
+
+    expect(list.markdown).toBe("item");
+    expect(list.selectionSourceRange).toEqual({ from: 0, to: 0 });
+
+    const indented = createInMemoryEditorDocumentState("  - item", 600);
+    indented.setSelection(indented.markdown.indexOf("item"), indented.markdown.indexOf("item"));
+
+    applyInputIntent(indented, { type: "delete", direction: "backward" });
+
+    expect(indented.markdown).toBe("- item");
+    expect(indented.selectionSourceRange).toEqual({ from: "- ".length, to: "- ".length });
+
+    const quote = createInMemoryEditorDocumentState("> quoted", 600);
+    quote.setSelection(quote.markdown.indexOf("quoted"), quote.markdown.indexOf("quoted"));
+
+    applyInputIntent(quote, { type: "delete", direction: "backward" });
+
+    expect(quote.markdown).toBe("quoted");
+    expect(quote.selectionSourceRange).toEqual({ from: 0, to: 0 });
+
+    const quoteList = createInMemoryEditorDocumentState("> - item", 600);
+    quoteList.setSelection(quoteList.markdown.indexOf("item"), quoteList.markdown.indexOf("item"));
+
+    applyInputIntent(quoteList, { type: "delete", direction: "backward" });
+
+    expect(quoteList.markdown).toBe("> item");
+    expect(quoteList.selectionSourceRange).toEqual({ from: "> ".length, to: "> ".length });
+  });
+
+  it("preserves link and image syntax when replacing rendered labels", () => {
+    const link = createInMemoryEditorDocumentState("[docs](https://example.com)", 600);
+    const docsFrom = link.markdown.indexOf("docs");
+    link.setSelection(docsFrom, docsFrom + "docs".length);
+
+    applyInputIntent(link, { type: "insert-text", text: "site" });
+
+    expect(link.markdown).toBe("[site](https://example.com)");
+
+    const image = createInMemoryEditorDocumentState("![alt](image.png)", 600);
+    const altFrom = image.markdown.indexOf("alt");
+    image.setSelection(altFrom, altFrom + "alt".length);
+
+    applyInputIntent(image, { type: "insert-text", text: "caption" });
+
+    expect(image.markdown).toBe("![caption](image.png)");
+  });
+
+  it("keeps inline-control boundary deletes deterministic", () => {
+    const strong = createInMemoryEditorDocumentState("A **bold** Z", 600);
+    const boldStart = strong.markdown.indexOf("bold");
+    strong.setSelection(boldStart, boldStart);
+
+    applyInputIntent(strong, { type: "delete", direction: "backward" });
+
+    expect(strong.markdown).toBe("A *bold** Z");
+    expect(strong.selectionSourceRange).toEqual({
+      from: boldStart - 1,
+      to: boldStart - 1,
+    });
+  });
+
   it("indents and outdents selected list lines through Tab key intents", () => {
     const editor = createInMemoryEditorDocumentState("- one\n- two", 600);
     const twoStart = editor.markdown.indexOf("- two");

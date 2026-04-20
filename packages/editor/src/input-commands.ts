@@ -239,6 +239,24 @@ function applyDeleteIntent(
     return replaceSelection(editor, "", options);
   }
 
+  const boundaryEdit = markdownBoundaryDelete(editor.markdown, selection.from, direction);
+  if (boundaryEdit !== null) {
+    const applied = applySourceEdit(
+      editor,
+      {
+        type: "replace",
+        range: boundaryEdit.range,
+        insert: boundaryEdit.insert,
+      },
+      options,
+    );
+    editor.setSelection(boundaryEdit.caret, boundaryEdit.caret);
+    return {
+      type: "edit",
+      applied,
+    };
+  }
+
   const range = deleteRange(editor.markdown, selection.from, direction);
   if (range.from === range.to) {
     return { type: "ignored" };
@@ -336,6 +354,12 @@ interface ListMarkerContext {
   readonly checkboxOffsetInMarker?: number;
 }
 
+interface BoundaryDelete {
+  readonly range: SourceRange;
+  readonly insert: string;
+  readonly caret: number;
+}
+
 function lineAtOffset(text: string, offset: number): SourceLine {
   const safeOffset = Math.max(0, Math.min(offset, text.length));
   const lineStart = text.lastIndexOf("\n", Math.max(0, safeOffset - 1)) + 1;
@@ -375,6 +399,106 @@ function markdownLineContext(line: string): MarkdownLineContext | null {
 
 function quotePrefixOf(line: string): string {
   return /^(?:(?: {0,3}> ?)+)/u.exec(line)?.[0] ?? "";
+}
+
+function markdownBoundaryDelete(
+  markdown: string,
+  offset: number,
+  direction: "backward" | "forward",
+): BoundaryDelete | null {
+  if (direction !== "backward") {
+    return null;
+  }
+
+  return headingBoundaryDelete(markdown, offset) ?? linePrefixBoundaryDelete(markdown, offset);
+}
+
+function headingBoundaryDelete(markdown: string, offset: number): BoundaryDelete | null {
+  const line = lineAtOffset(markdown, offset);
+  const quotePrefix = quotePrefixOf(line.text);
+  const rest = line.text.slice(quotePrefix.length);
+  const match = /^([ \t]{0,3})(#{1,6})([ \t]+)/u.exec(rest);
+  if (match === null) {
+    return null;
+  }
+
+  const indent = match[1] ?? "";
+  const markers = match[2] ?? "";
+  const markerStart = line.start + quotePrefix.length + indent.length;
+  const contentStart = line.start + quotePrefix.length + match[0].length;
+  if (offset !== contentStart) {
+    return null;
+  }
+
+  if (markers.length > 1) {
+    return {
+      range: {
+        from: markerStart,
+        to: markerStart + 1,
+      },
+      insert: "",
+      caret: offset - 1,
+    };
+  }
+
+  return {
+    range: {
+      from: markerStart,
+      to: contentStart,
+    },
+    insert: "",
+    caret: markerStart,
+  };
+}
+
+function linePrefixBoundaryDelete(markdown: string, offset: number): BoundaryDelete | null {
+  const line = lineAtOffset(markdown, offset);
+  const quotePrefix = quotePrefixOf(line.text);
+  const quoteContent = line.text.slice(quotePrefix.length);
+  const list = listMarkerContext(quoteContent);
+  if (list !== null) {
+    const contentStart = line.start + quotePrefix.length + list.full.length;
+    if (offset !== contentStart) {
+      return null;
+    }
+
+    const prefixStart = line.start + quotePrefix.length;
+    if (list.indent.length > 0) {
+      const deleteTo = outdentDeleteTo(markdown, prefixStart);
+      if (deleteTo > prefixStart) {
+        return {
+          range: {
+            from: prefixStart,
+            to: deleteTo,
+          },
+          insert: "",
+          caret: offset - (deleteTo - prefixStart),
+        };
+      }
+    }
+
+    return {
+      range: {
+        from: prefixStart,
+        to: contentStart,
+      },
+      insert: "",
+      caret: prefixStart,
+    };
+  }
+
+  if (quotePrefix.length === 0 || offset !== line.start + quotePrefix.length) {
+    return null;
+  }
+
+  return {
+    range: {
+      from: line.start,
+      to: line.start + quotePrefix.length,
+    },
+    insert: "",
+    caret: line.start,
+  };
 }
 
 function listMarkerContext(line: string): ListMarkerContext | null {
