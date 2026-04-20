@@ -5,6 +5,11 @@ export {
   insertTextOperation,
   replaceRangeOperation,
 } from "./edit-ops.ts";
+export {
+  createEditorDocumentState,
+  createInMemoryEditorDocumentState,
+  EditorDocumentState,
+} from "./editor-state.ts";
 export { createEditableLayoutIndex, EditableLayoutIndex } from "./editable-layout.ts";
 export {
   createInMemoryTextDocumentAdapter,
