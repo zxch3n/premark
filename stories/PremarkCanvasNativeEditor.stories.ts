@@ -1,16 +1,10 @@
 import { createHighlighter } from "../packages/highlight/src/index.ts";
-import { createLayoutEngine } from "../packages/layout/src/index.ts";
-import {
-  createIncrementalParseState,
-  createMarkdownInlineSourceMap,
-} from "../packages/parser/src/index.ts";
 import {
   applyInputIntent,
   applyTextareaBridgeChange,
   beginPointerSelection,
-  createActiveMarkerRevealMarkdown,
-  createEditableLayoutIndex,
   createInMemoryEditorDocumentState,
+  createPremarkEditorController,
   createSelectionGeometry,
   createTextareaBridgeSnapshot,
   LocalUndoManager,
@@ -179,17 +173,12 @@ export const InteractiveCanvasNativeEditor = () => {
   async function initialize() {
     await waitForPremarkStoryFonts();
     root.dataset.fontsReady = "1";
-    const previewLayoutEngine = createLayoutEngine({
-      fontTheme: "modern",
-      highlighter,
-      lineBreakMode: "source",
-    });
-
     const editor = createInMemoryEditorDocumentState(initialMarkdown(), editorWidth, {
       fontTheme: "modern",
       highlighter,
     });
     const undoManager = new LocalUndoManager();
+    const controller = createPremarkEditorController({ state: editor, undoManager });
     let bridgeSnapshot: TextareaBridgeSnapshot = createTextareaBridgeSnapshot(editor);
     let pointerSession: PointerSelectionSession | null = null;
     let composing = false;
@@ -201,63 +190,8 @@ export const InteractiveCanvasNativeEditor = () => {
       readonly y: number;
     } | null = null;
 
-    function activeRenderView(): {
-      layout: ReturnType<typeof previewLayoutEngine.layout>;
-      editableIndex: EditableLayoutIndex;
-      compositionRects: readonly { x: number; y: number; width: number; height: number }[];
-    } {
-      const compositionView = editor.compositionView;
-      if (compositionView === null) {
-        const reveal = createActiveMarkerRevealMarkdown({
-          markdown: editor.markdown,
-          inlineSources: editor.inlineSources,
-          blockSpans: editor.parseState.blockSpans,
-          selectionRange: editor.selectionSourceRange,
-        });
-        if (reveal.markerState === "active") {
-          const layout = previewLayoutEngine.layout(reveal.markdown, editorWidth);
-          return {
-            layout,
-            editableIndex: createEditableLayoutIndex({
-              markdown: editor.markdown,
-              layout,
-              blockSpans: editor.parseState.blockSpans,
-              inlineSources: editor.inlineSources,
-              sourceMap: reveal.sourceMap,
-            }),
-            compositionRects: [],
-          };
-        }
-        return {
-          layout: editor.layout,
-          editableIndex: editor.editableIndex,
-          compositionRects: [],
-        };
-      }
-
-      const layout = previewLayoutEngine.layout(compositionView.virtualText, editorWidth);
-      const parseState = createIncrementalParseState(compositionView.virtualText);
-      const editableIndex = createEditableLayoutIndex({
-        markdown: compositionView.virtualText,
-        layout,
-        blockSpans: parseState.blockSpans,
-        inlineSources: createMarkdownInlineSourceMap(parseState),
-      });
-      return {
-        layout,
-        editableIndex,
-        compositionRects:
-          compositionView.preeditText.length === 0
-            ? []
-            : editableIndex.sourceRangeToSelectionRects({
-                from: compositionView.replacementRange.from,
-                to: compositionView.replacementRange.from + compositionView.preeditText.length,
-              }),
-      };
-    }
-
     function render() {
-      const view = activeRenderView();
+      const view = controller.renderSnapshot();
       activeEditableIndex = view.editableIndex;
       const geometry =
         editor.compositionView === null
@@ -275,7 +209,7 @@ export const InteractiveCanvasNativeEditor = () => {
         palette: darkTilePalette,
       });
       debugSelection.textContent = JSON.stringify(geometry, null, 2);
-      debugSource.textContent = editor.markdown;
+      debugSource.textContent = controller.markdown();
       syncTextareaBridge(geometry.caret?.rect ?? geometry.headCaret.rect);
     }
 
@@ -503,13 +437,13 @@ export const InteractiveCanvasNativeEditor = () => {
         };
       }
     ).__premarkCanvasNativeEditor = {
-      markdown: () => editor.markdown,
+      markdown: () => controller.markdown(),
       selection: () => {
-        const resolved = editor.adapter.resolveRange(editor.selection.range);
+        const selection = controller.selection();
         return {
-          anchorOffset: resolved.anchor,
-          headOffset: resolved.head,
-          isCollapsed: resolved.isCollapsed,
+          anchorOffset: selection.anchorOffset,
+          headOffset: selection.headOffset,
+          isCollapsed: selection.isCollapsed,
         };
       },
       pointForText(text, edge = "start") {
@@ -540,11 +474,11 @@ export const InteractiveCanvasNativeEditor = () => {
         };
       },
       setCaret(offset) {
-        editor.setSelection(offset, offset);
+        controller.setCaret(offset);
         render();
       },
       setSelection(anchor, head) {
-        editor.setSelection(anchor, head);
+        controller.setSelection(anchor, head);
         render();
       },
     };

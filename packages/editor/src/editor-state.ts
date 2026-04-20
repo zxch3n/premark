@@ -84,6 +84,16 @@ export class EditorDocumentState {
     return this.adapter.getText();
   }
 
+  get version(): number {
+    return this.adapter.getVersion();
+  }
+
+  get viewport(): { readonly containerWidth: number } {
+    return {
+      containerWidth: this.containerWidth,
+    };
+  }
+
   get selection(): EditorSelection {
     const resolved = this.adapter.resolveRange(this.selectionRange);
     return {
@@ -175,6 +185,10 @@ export class EditorDocumentState {
     this.containerWidth = containerWidth;
     this.layout = this.layoutEngine.resize(this.layout, containerWidth);
     this.editableIndex = this.createEditableIndex();
+  }
+
+  layoutMarkdownView(markdown: string): DocumentLayout {
+    return this.layoutEngine.layout(markdown, this.containerWidth);
   }
 
   refresh(): void {

@@ -1,13 +1,13 @@
 # Premark Native Editor Redesign Plan
 
-Status: non-OS phases complete; OS IME deferred
+Status: Phase 11 complete; Phase 12 next; OS IME deferred
 Owner: Codex / Zixuan
 Last Updated: 2026-04-21
 Compaction Rule: after memory reload or compaction, reread this whole file before continuing.
 
 ## Current Objective
 
-- Keep non-OS native editor path verified and ready.
+- Start Phase 12 Markdown editing behavior after the Phase 11 controller API baseline.
 - Keep the native Premark-rendered editor as the product path; CodeMirror overlay remains removed.
 - Do not run macOS HID/IME tests while the machine is actively used unless Zixuan explicitly asks.
 
@@ -199,6 +199,114 @@ Acceptance:
 - [x] Reused editable fragments keep caret, hit-test, and selection geometry equivalent to a fresh full index.
 - [x] Browser Storybook behavior remains unchanged after enabling incremental sidecar updates.
 
+## Phase 11: Editor Core API
+
+Goal: expose a stable product-facing editor API while keeping layout/editable internals replaceable.
+
+- [x] Define a public controller API for markdown, selection, edit, input intent, undo/redo, composition, resize, and subscriptions.
+- [x] Expose read-only render snapshots for layout, editable index, active controls, composition view, and viewport metadata.
+- [x] Emit document, selection, composition, and viewport events without making browser DOM selection authoritative.
+- [x] Migrate Storybook/debug handles to use the public controller API where practical.
+- [x] Add API-level tests that do not depend on React, DOM rendering, Canvas, or Browser.
+
+Acceptance:
+
+- [x] A product integration can drive editing through public API only.
+- [x] Existing DOM/Canvas stories keep their behavior after API migration.
+- [x] `vp check --fix` and `vp test` pass.
+
+## Phase 12: Markdown Editing Behavior
+
+Goal: make common Markdown structures feel correct under source-exact editing.
+
+- [ ] Lists: Enter creates next item, empty item exits, Tab/Shift+Tab changes indentation.
+- [ ] Task lists: checkbox toggles source without breaking selection.
+- [ ] Blockquotes: Enter continues quote, empty quote exits.
+- [ ] Fenced code: Enter, Tab, paste, and multi-line selection remain source-exact.
+- [ ] Links/images/headings: control-marker editing, rendered text replacement, and Backspace rules are covered.
+- [ ] Delete behavior across block and inline control boundaries is deterministic.
+
+Acceptance:
+
+- [ ] Each structure has pure state tests and at least one browser interaction test.
+- [ ] Active control reveal rules remain correct after behavior additions.
+
+## Phase 13: Selection And Mobile Hardening
+
+Goal: broaden selection correctness before relying on native editing in a product surface.
+
+- [ ] Mouse drag selection covers cross-block, reversed, code/list, and drag-outside-viewport cases.
+- [ ] Keyboard selection covers Shift arrows, Option/Alt word, Command document, Home/End, and Page keys.
+- [ ] Double/triple click rules cover CJK, emoji, links, and inline code.
+- [ ] Touch automation covers viewport/touch events and documents OS selection-handle gaps.
+- [ ] Selection screenshots cover DOM and Canvas small crops.
+
+Acceptance:
+
+- [ ] Pure geometry and browser tests cover all listed selection shapes.
+- [ ] Mobile automation avoids OS-only interactions unless explicitly allowed.
+
+## Phase 14: Viewport And Incremental Rendering
+
+Goal: make benchmark wins visible in the real editor loop.
+
+- [ ] Add viewport-aware editable indexing with overscan.
+- [ ] Connect Canvas dirty tile cache to editor state, not just benchmarks.
+- [ ] Rebuild active-marker and composition views locally where safe, with conservative fallback.
+- [ ] Add dirty-region debug overlay and large-document Storybook fixtures.
+- [ ] Verify AI append and remote patch do not force full editable rebuild when editing elsewhere.
+
+Acceptance:
+
+- [ ] 100KB typing stays on incremental path in tests/benchmarks.
+- [ ] AI streaming append plus user editing remains responsive in Storybook.
+
+## Phase 15: Visual Parity Harness
+
+Goal: keep DOM, Canvas, and rendered Markdown behavior aligned by fixture instead of manual guessing.
+
+- [ ] Build a fixture gallery for headings, lists, quotes, code, tables, links, images, emoji, CJK, and bidi.
+- [ ] Render each fixture through Premark DOM and Canvas paths with stable small screenshot crops.
+- [ ] Diff text/caret/selection geometry and classify expected vs unexpected differences.
+- [ ] Keep fixing until no new non-expected mismatch is found in the current fixture matrix.
+
+Acceptance:
+
+- [ ] Fixture screenshots are deterministic and small enough to review.
+- [ ] New mismatches identify whether layout, paint, editable sidecar, or input state is responsible.
+
+## Phase 16: Collaboration And AI Streaming
+
+Goal: prove the Premark-native path supports the intended collaboration and AI behavior.
+
+- [ ] Define a remote source patch API suitable for later CRDT integration.
+- [ ] Rebase local caret/selection through remote patches deterministically.
+- [ ] Define composition behavior when remote patches arrive.
+- [ ] Add AI append and same-block modification simulations.
+- [ ] Add a Storybook demo where AI streams while the user edits another block.
+
+Acceptance:
+
+- [ ] Remote patches do not interrupt local input.
+- [ ] AI append avoids full layout/editable rebuild when possible.
+- [ ] Selection rebasing is deterministic under tests.
+
+## Phase 17: Real macOS IME Final Gate
+
+Goal: finish the OS-only validation when the machine is available.
+
+- [ ] Run Pinyin commit/cancel/replacement/cross-block/undo.
+- [ ] Review candidate-window anchoring screenshot artifacts.
+- [ ] Enable and run Japanese commit/cancel/replacement.
+- [ ] Enable and run Korean commit/cancel/replacement.
+- [ ] Record OS limitations and reproducible setup steps.
+
+Acceptance:
+
+- [ ] Pinyin scenarios pass on real macOS HID.
+- [ ] Japanese/Korean pass the prepared scenario sets.
+- [ ] Failure artifacts are sufficient to debug regressions.
+
 ## Iteration Log
 
 ### 2026-04-20
@@ -228,3 +336,5 @@ Acceptance:
 - Added a non-interactive macOS IME dry-run path. `vp run test:macos-ime:dry-run` checks Swift helpers and input-source availability, records likely Pinyin/Japanese/Korean candidates, and writes `test-results/macos-ime/dry-run.*` without launching a browser or posting keyboard/HID events. Local dry run on 2026-04-21 found Pinyin and US sources available, current input source was WeType Pinyin, and no Japanese/Korean source candidates were enabled.
 - Expanded the real macOS Pinyin runner into explicit scenarios for commit, cancel, rendered-text replacement, cross-block replacement, and undo. These scenarios remain gated behind the existing foreground/HID checks and were not run because they would post global HID events.
 - Generalized the macOS IME runner into `pinyin`, `japanese`, and `korean` scenario sets, added a Pinyin candidate-window screen artifact path, and documented `PREMARK_MACOS_IME_SCENARIO_SET`. Dry-run verification passed for all three sets without launching a browser or posting HID; current system still has no Japanese/Korean input-source candidates enabled.
+- Added Phases 11-17 to keep the plan moving from prototype toward product integration, Markdown behavior, viewport performance, visual parity, collaboration/AI, and final OS IME gates.
+- Completed Phase 11. Added `PremarkEditorController` as the product-facing API for markdown, selection, edits, input intents, undo/redo, composition, resize, subscriptions, and render snapshots. Render snapshots now own active Markdown control reveal and virtual composition render views, so DOM and Canvas stories no longer rebuild those views locally. Verification on 2026-04-21: `vp check --fix`, `vp test` passed 186 tests, `vp run test:browser` passed 25 Playwright tests, and `vp run build` passed.
