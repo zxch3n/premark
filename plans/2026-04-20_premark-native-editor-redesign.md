@@ -36,8 +36,8 @@ Last Updated: 2026-04-20
 - Synthetic browser composition events are useful as a fast guard for DOM event wiring, but they are not a substitute for real macOS IME automation because they do not exercise OS candidate windows or native event ordering.
 - The DOM prototype now renders composition preedit with a lightweight Premark overlay underline. It is acceptable for the debug renderer but still needs real OS IME screenshots before claiming platform parity.
 - Hidden textarea anchoring needs browser-level checks because pure geometry tests cannot catch focus loss or wrong absolute positioning after scrolling.
-- macOS automation has two separate layers: targeted `CGEventPostToPid` can prove real OS key events reach the browser process and hidden textarea, but it bypasses macOS input-method composition. Real Pinyin/candidate-window coverage must use System Events or HID events with the browser as the foreground app.
-- The current Codex host cannot make Chrome the foreground app; the macOS runner records this as a skip artifact by default and can be made strict with `PREMARK_MACOS_IME_STRICT=1`.
+- macOS automation has three separate layers: targeted `CGEventPostToPid` can prove real OS key events reach the browser process and hidden textarea, but it bypasses macOS input-method composition; browser foregrounding is required for real IME; global HID/System Events key routing must reach the focused hidden textarea before Pinyin can be trusted.
+- The current Codex host can foreground Chrome, but global HID key events route to `body` instead of the focused hidden textarea. The macOS runner records this as a skip artifact by default and can be made strict with `PREMARK_MACOS_IME_STRICT=1`.
 - Screenshot mode exposed a real source-map bug: layout `blockIndex` is the normalized layout-block index, not the parser source-block index. Editable source mapping now scans rendered fragments in source order and then resolves the containing parser block span.
 - Mobile selection behavior is now split into two claims: Playwright mobile emulation covers Premark touch pointer selection, soft-keyboard-style `input` events, visual viewport shrink, and overlay geometry; OS long-press handles, magnifier behavior, native selection affordances, and real soft-keyboard candidate bars remain a documented real-device gap.
 
@@ -170,7 +170,7 @@ Acceptance:
 
 - [ ] macOS Pinyin commit, cancel, selected replacement, undo/redo, and cross-block selection pass.
 - [ ] Composition does not replace or remount the rendered surface.
-- [ ] Codex has reviewed saved IME screenshots or documented why a specific OS-level candidate window cannot be captured automatically.
+- [x] Codex has reviewed saved IME screenshots or documented why a specific OS-level candidate window cannot be captured automatically.
 
 ## Phase 5: Prototype Story
 
@@ -267,3 +267,4 @@ Acceptance:
 - Verification for browser reporting: `vp check --fix` passes with existing warnings, `vp run test:browser` passes 11 Playwright tests, generated screenshot crops are present under `artifacts/playwright-browser`, and the HTML report exists under `artifacts/playwright-browser-html`.
 - Added strict selection geometry threshold tests that compare selection rect edges to source caret positions for inline text, wrapped text, and code blocks. Added and reviewed a code-block selection screenshot crop, closing the DOM debug renderer selection acceptance items while Canvas screenshots remain separate.
 - Verification for the selection geometry iteration: `vp check --fix` passes with existing warnings, `vp test` passes 118 tests, and `vp run test:browser` passes 11 Playwright tests.
+- Re-ran macOS IME automation. Chrome foregrounding now works and targeted process key events can pass the US focus probe, but global HID key events target `body` instead of the focused hidden textarea. The runner now performs a required global HID US probe before real Pinyin, records `hid-probe-failed.png/json` plus `pinyin-skip.txt`, and exits successfully unless strict mode is enabled.

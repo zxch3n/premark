@@ -19,7 +19,8 @@ Status legend:
 | Non-cancelable composition updates        | Composition virtual patch tests assert source and undo are unchanged until commit                 | logic          |
 | DOM/selection mutation aborts composition | Browser test asserts browser selection is not touched during composition                          | browser        |
 | Hidden textarea drift                     | Input bridge trace compares textarea state, Premark selection, and source                         | browser        |
-| macOS foreground activation               | Browser must be the foreground app before System Events can exercise real IME composition         | gap            |
+| macOS foreground activation               | Browser must be the foreground app before System Events can exercise real IME composition         | macos-ime      |
+| macOS global HID key routing              | Foreground global key events must reach the hidden textarea before real IME can be trusted        | gap            |
 | Candidate window bounds                   | macOS IME screenshots or documented capture gap                                                   | gap            |
 | Cross-block composition replacement       | Pinyin replacement over cross-block selection                                                     | planned        |
 | Soft keyboard input without keydown       | Synthetic mobile input operation tests plus mobile browser coverage                               | logic+browser  |
