@@ -177,7 +177,10 @@ export class EditableLayoutIndex {
     return {
       ...hit,
       granularity,
-      range: this.sourceRangeAtOffset(hit.offset, granularity, hit.affinity),
+      range:
+        granularity === "word" && hit.fragment !== null
+          ? wordRangeAtPoint(this.markdown, hit.fragment, x, hit.offset, hit.affinity)
+          : this.sourceRangeAtOffset(hit.offset, granularity, hit.affinity),
     };
   }
 
@@ -305,6 +308,31 @@ function wordRangeAtOffset(
   offset: number,
   affinity: "before" | "after",
 ): SourceRange {
+  return (
+    wordLikeRangeAtOffset(markdown, offset, affinity) ??
+    nonWhitespaceGraphemeRangeAtOffset(markdown, clampOffset(offset, markdown.length), affinity)
+  );
+}
+
+function wordRangeAtPoint(
+  markdown: string,
+  fragment: EditableFragment,
+  x: number,
+  offset: number,
+  affinity: "before" | "after",
+): SourceRange {
+  return (
+    wordLikeRangeAtOffset(markdown, offset, affinity) ??
+    nonWhitespaceGraphemeRangeAtPoint(markdown, fragment, x) ??
+    collapsedRange(clampOffset(offset, markdown.length))
+  );
+}
+
+function wordLikeRangeAtOffset(
+  markdown: string,
+  offset: number,
+  affinity: "before" | "after",
+): SourceRange | null {
   const bounded = clampOffset(offset, markdown.length);
   for (const segment of createWordSegments(markdown)) {
     if (!segment.isWordLike) continue;
@@ -321,7 +349,61 @@ function wordRangeAtOffset(
       };
     }
   }
-  return collapsedRange(bounded);
+  return null;
+}
+
+function nonWhitespaceGraphemeRangeAtOffset(
+  markdown: string,
+  offset: number,
+  affinity: "before" | "after",
+): SourceRange {
+  for (const segment of createGraphemeSegments(markdown)) {
+    const contains =
+      offset > segment.from && offset < segment.to
+        ? true
+        : affinity === "before"
+          ? offset === segment.to
+          : offset === segment.from;
+    if (contains && /\S/u.test(markdown.slice(segment.from, segment.to))) {
+      return {
+        from: segment.from,
+        to: segment.to,
+      };
+    }
+  }
+
+  return collapsedRange(offset);
+}
+
+function nonWhitespaceGraphemeRangeAtPoint(
+  markdown: string,
+  fragment: EditableFragment,
+  x: number,
+): SourceRange | null {
+  const textStartX = fragment.rect.x + fragment.textInsetX;
+  const textEndX = textStartX + visibleTextWidth(fragment);
+  const clampedX = Math.min(Math.max(x, textStartX), textEndX);
+  const localX = clampedX - textStartX;
+  const boundaries = textBoundaryXs(fragment);
+
+  for (const segment of createGraphemeSegments(fragment.text)) {
+    const end = boundaries[segment.to] ?? boundaries[segment.from] ?? 0;
+    if (localX > end) continue;
+    if (!/\S/u.test(fragment.text.slice(segment.from, segment.to))) {
+      return null;
+    }
+
+    const from = sourceOffsetAtTextOffset(fragment, segment.from);
+    const to = sourceOffsetAtTextOffset(fragment, segment.to);
+    return to > from
+      ? {
+          from,
+          to,
+        }
+      : null;
+  }
+
+  return null;
 }
 
 function collapsedRange(offset: number): SourceRange {

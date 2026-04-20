@@ -460,6 +460,7 @@ export const InteractiveNativePrototype = () => {
           markdown(): string;
           insertRemote(offset: number, text: string): void;
           resize(width: number): void;
+          pointForSourceRange(from: number, to: number): { x: number; y: number };
           setSelection(anchor: number, head: number): void;
           setCaret(offset: number): void;
         };
@@ -473,6 +474,14 @@ export const InteractiveNativePrototype = () => {
       resize(width) {
         controller.resize(width);
         render();
+      },
+      pointForSourceRange(from, to) {
+        const fromCaret = currentEditableIndex.sourceOffsetToCaretRect(from);
+        const toCaret = currentEditableIndex.sourceOffsetToCaretRect(to, "before");
+        return {
+          x: (fromCaret.rect.x + toCaret.rect.x) / 2,
+          y: (fromCaret.rect.y + toCaret.rect.y) / 2 + fromCaret.rect.height / 2,
+        };
       },
       setSelection(anchor, head) {
         controller.setSelection(anchor, head);

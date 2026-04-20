@@ -76,6 +76,60 @@ describe("selection commands", () => {
     });
   });
 
+  it("selects CJK, emoji, link labels and inline code from word pointer granularity", () => {
+    const emoji = "👨‍👩‍👧‍👦";
+    const markdown = `Try 中文输入 ${emoji}, [docs](https://example.com), and \`inline code\`.`;
+    const editor = createInMemoryEditorDocumentState(markdown, 600);
+
+    const cjkFrom = markdown.indexOf("中文输入");
+    selectPointerRangeInsideSourceRange(editor, cjkFrom, cjkFrom + "中文输入".length, "word");
+    expect(editor.selectionSourceRange.from).toBeGreaterThanOrEqual(cjkFrom);
+    expect(editor.selectionSourceRange.to).toBeLessThanOrEqual(cjkFrom + "中文输入".length);
+    expect(editor.selectionSourceRange.to).toBeGreaterThan(editor.selectionSourceRange.from);
+
+    const emojiFrom = markdown.indexOf(emoji);
+    selectPointerRangeInsideSourceRange(editor, emojiFrom, emojiFrom + emoji.length, "word");
+    expect(editor.selectionSourceRange).toEqual({
+      from: emojiFrom,
+      to: emojiFrom + emoji.length,
+    });
+
+    const docsFrom = markdown.indexOf("docs");
+    selectPointerRangeInsideSourceRange(editor, docsFrom, docsFrom + "docs".length, "word");
+    expect(editor.selectionSourceRange).toEqual({
+      from: docsFrom,
+      to: docsFrom + "docs".length,
+    });
+
+    const inlineFrom = markdown.indexOf("inline code");
+    selectPointerRangeInsideSourceRange(editor, inlineFrom, inlineFrom + "inline".length, "word");
+    expect(editor.selectionSourceRange).toEqual({
+      from: inlineFrom,
+      to: inlineFrom + "inline".length,
+    });
+  });
+
+  it("selects the hit emoji grapheme for word granularity even near trailing punctuation", () => {
+    const emoji = "👨‍👩‍👧‍👦";
+    const markdown = `emoji ${emoji}.`;
+    const editor = createInMemoryEditorDocumentState(markdown, 600);
+    const emojiFrom = markdown.indexOf(emoji);
+    const emojiTo = emojiFrom + emoji.length;
+    const fromCaret = editor.editableIndex.sourceOffsetToCaretRect(emojiFrom);
+    const toCaret = editor.editableIndex.sourceOffsetToCaretRect(emojiTo, "before");
+
+    const hit = editor.editableIndex.hitTestSourceRange(
+      fromCaret.rect.x + (toCaret.rect.x - fromCaret.rect.x) * 0.75,
+      fromCaret.rect.y + fromCaret.rect.height / 2,
+      "word",
+    );
+
+    expect(hit.range).toEqual({
+      from: emojiFrom,
+      to: emojiTo,
+    });
+  });
+
   it("moves by grapheme clusters for ArrowLeft and ArrowRight", () => {
     const text = "A👨‍👩‍👧‍👦B";
     const editor = createInMemoryEditorDocumentState(text, 600);
@@ -124,6 +178,19 @@ describe("selection commands", () => {
     expect(geometry.anchorOffset).toBe(2);
     expect(geometry.headOffset).toBe(4);
     expect(geometry.range).toEqual({ from: 2, to: 4 });
+
+    editor.setSelection(4, 4);
+    applyKeyboardSelectionIntent(editor, {
+      type: "keyboard-selection",
+      key: "ArrowLeft",
+      by: "character",
+      extend: true,
+    });
+
+    const backwardGeometry = createSelectionGeometry(editor);
+    expect(backwardGeometry.anchorOffset).toBe(4);
+    expect(backwardGeometry.headOffset).toBe(3);
+    expect(backwardGeometry.range).toEqual({ from: 3, to: 4 });
   });
 
   it("moves by word and line boundary granularities", () => {
@@ -231,3 +298,19 @@ describe("selection commands", () => {
     expect(editor.selectionSourceRange.from).toBeLessThan(pageDownOffset);
   });
 });
+
+function selectPointerRangeInsideSourceRange(
+  editor: ReturnType<typeof createInMemoryEditorDocumentState>,
+  from: number,
+  to: number,
+  granularity: "word" | "block",
+): void {
+  const fromCaret = editor.editableIndex.sourceOffsetToCaretRect(from);
+  const toCaret = editor.editableIndex.sourceOffsetToCaretRect(to, "before");
+  selectPointerRange(
+    editor,
+    (fromCaret.rect.x + toCaret.rect.x) / 2,
+    (fromCaret.rect.y + toCaret.rect.y) / 2 + fromCaret.rect.height / 2,
+    granularity,
+  );
+}

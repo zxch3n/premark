@@ -1,13 +1,13 @@
 # Premark Native Editor Redesign Plan
 
-Status: Phase 12 complete; Phase 13 next; OS IME deferred
+Status: Phase 13 complete; Phase 14 next; OS IME deferred
 Owner: Codex / Zixuan
 Last Updated: 2026-04-21
 Compaction Rule: after memory reload or compaction, reread this whole file before continuing.
 
 ## Current Objective
 
-- Start Phase 13 selection and mobile hardening.
+- Start Phase 14 viewport and incremental rendering.
 - Keep the native Premark-rendered editor as the product path; CodeMirror overlay remains removed.
 - Do not run macOS HID/IME tests while the machine is actively used unless Zixuan explicitly asks.
 
@@ -25,6 +25,7 @@ Compaction Rule: after memory reload or compaction, reread this whole file befor
 - Control-adjacent editing should stay source-exact. If the caret is inside a revealed Markdown marker or link suffix, insert/delete/paste/Enter edits that source position only; replacing rendered inline content should leave its surrounding controls intact.
 - Enter in the native editor now means one source newline. Browser `insertParagraph` and textarea `insertLineBreak` both normalize to the same source operation because editor layout preserves every `\n`.
 - Common Markdown structure editing now has explicit behavior: list/quote continuation, empty-prefix exits, task toggles, code source exactness, heading boundary Backspace, link/image label replacement, and source-exact inline-control deletes.
+- Word hit-test fallback must be point-aware, not just source-offset/affinity-aware. Caret placement can legitimately resolve to the end of a grapheme, while double-click word selection should still select the grapheme that visually received the hit.
 - Phase 9 benchmarks show the core layout engine is already incremental for local edit, remote edit, and AI append, but editable sidecar rebuild is still full-document and dominates large editor updates. The next architecture step is dirty-block/viewport editable indexing, not more CodeMirror fallback.
 - macOS IME automation can be prepared without posting OS events: dry-run now validates helpers/input sources and scenario selection for Pinyin, Japanese, and Korean. Real IME correctness still requires foreground HID.
 
@@ -236,16 +237,16 @@ Acceptance:
 
 Goal: broaden selection correctness before relying on native editing in a product surface.
 
-- [ ] Mouse drag selection covers cross-block, reversed, code/list, and drag-outside-viewport cases.
-- [ ] Keyboard selection covers Shift arrows, Option/Alt word, Command document, Home/End, and Page keys.
-- [ ] Double/triple click rules cover CJK, emoji, links, and inline code.
-- [ ] Touch automation covers viewport/touch events and documents OS selection-handle gaps.
-- [ ] Selection screenshots cover DOM and Canvas small crops.
+- [x] Mouse drag selection covers cross-block, reversed, code/list, and drag-outside-viewport cases.
+- [x] Keyboard selection covers Shift arrows, Option/Alt word, Command document, Home/End, and Page keys.
+- [x] Double/triple click rules cover CJK, emoji, links, and inline code.
+- [x] Touch automation covers viewport/touch events and documents OS selection-handle gaps.
+- [x] Selection screenshots cover DOM and Canvas small crops.
 
 Acceptance:
 
-- [ ] Pure geometry and browser tests cover all listed selection shapes.
-- [ ] Mobile automation avoids OS-only interactions unless explicitly allowed.
+- [x] Pure geometry and browser tests cover all listed selection shapes.
+- [x] Mobile automation avoids OS-only interactions unless explicitly allowed.
 
 ## Phase 14: Viewport And Incremental Rendering
 
@@ -348,3 +349,8 @@ Acceptance:
 - Current verification for Phase 12 completion: `vp test packages/editor/tests/input-commands.test.ts` passes 30 tests, `vp check --fix` passes, `vp test` passes 198 tests, `vp run test:browser` passes 26 Playwright tests, and `vp run build` passes.
 - Assumption remains unchanged: real macOS HID/IME validation is deferred until the machine is free and Zixuan explicitly allows OS-level input.
 - Next planned experiments: Phase 13 selection hardening, especially cross-block/reversed drag, keyboard Shift variants, Page/Home/End behavior, CJK/emoji/link double-click boundaries, touch-event automation, and small DOM/Canvas screenshot crops.
+- Completed Phase 13 selection hardening. Added pure and browser coverage for Shift+Arrow left/right/up/down, Shift+Alt word movement, Shift+Meta document movement, PageUp/PageDown, code/list drags, drag outside the rendered surface, and double-click selection for CJK, emoji, links, and inline code.
+- Fixed a real double-click bug near emoji punctuation: word granularity now uses the hit point for non-word grapheme fallback, so clicking the right half of `👨‍👩‍👧‍👦` selects that grapheme instead of the following `.` while normal caret placement can still land after the emoji.
+- Storybook now exposes a read-only `pointForSourceRange` test helper for stable rendered-surface interaction tests without making DOM selection authoritative.
+- Current verification for Phase 13 completion: `vp check --fix` passes, `vp test` passes 200 tests, `vp run build` passes, and `vp run test:browser` passes 28 Playwright tests.
+- Next planned experiments: Phase 14 viewport-aware editable indexing, Canvas dirty tile integration in the live editor loop, large-document Storybook fixtures, and AI append plus user editing without full editable rebuilds.
