@@ -3,7 +3,7 @@ import { installNodeCanvas } from "../../layout/src/node-canvas.ts";
 import { createIncrementalParseState, createMarkdownInlineSourceMap } from "@pretext-md/parser";
 import { describe, expect, it } from "vite-plus/test";
 
-import { createEditableLayoutIndex } from "../src/index.ts";
+import { createActiveMarkerRevealMarkdown, createEditableLayoutIndex } from "../src/index.ts";
 
 installNodeCanvas();
 
@@ -140,6 +140,94 @@ describe("EditableLayoutIndex", () => {
     expect(hiddenCaret.fragment?.text).toContain("hidden textarea");
     expect(boldCaret.fragment?.text).toBe("bold text");
     expect(boldCaret.rect.y).toBeGreaterThan(hiddenCaret.rect.y);
+  });
+
+  it("maps hidden marker source offsets to visible token edges", () => {
+    const markdown = "Hello **bold** and `code` plus [docs](https://example.com).";
+    const state = createIncrementalParseState(markdown);
+    const inlineSources = createMarkdownInlineSourceMap(state);
+    const layout = createLayoutEngine({ fontTheme: "github" }).layout(markdown, 800);
+    const index = createEditableLayoutIndex({
+      markdown,
+      layout,
+      blockSpans: state.blockSpans,
+      inlineSources,
+    });
+
+    const bold = index.fragments.find((fragment) => fragment.text === "bold");
+    const code = index.fragments.find((fragment) => fragment.text === "code");
+    const docs = index.fragments.find((fragment) => fragment.text === "docs");
+    const strongToken = inlineSources.find((record) => record.type === "strong");
+    const codeToken = inlineSources.find((record) => record.type === "code-span");
+    const linkToken = inlineSources.find((record) => record.type === "link");
+
+    expect(bold).toBeDefined();
+    expect(code).toBeDefined();
+    expect(docs).toBeDefined();
+    expect(strongToken).toBeDefined();
+    expect(codeToken).toBeDefined();
+    expect(linkToken).toBeDefined();
+
+    const hiddenStrongOpening = index.sourceOffsetToCaretRect(strongToken!.source.from + 1);
+    const hiddenCodeOpening = index.sourceOffsetToCaretRect(codeToken!.source.from);
+    const hiddenLinkUrl = index.sourceOffsetToCaretRect(markdown.indexOf("https://example.com"));
+
+    expect(hiddenStrongOpening.rect.x).toBeCloseTo(bold!.rect.x, 0);
+    expect(hiddenCodeOpening.rect.x).toBeCloseTo(code!.rect.x, 0);
+    expect(hiddenLinkUrl.rect.x).toBeCloseTo(docs!.rect.x + docs!.rect.width, 0);
+  });
+
+  it("reveals active strong, code and link markers with source-addressable hit-test", () => {
+    const markdown = "Hello **bold** and `code` plus [docs](https://example.com).";
+    const state = createIncrementalParseState(markdown);
+    const inlineSources = createMarkdownInlineSourceMap(state);
+    const layoutEngine = createLayoutEngine({ fontTheme: "github" });
+
+    for (const [type, visibleSource] of [
+      ["strong", "**bold**"],
+      ["code-span", "`code`"],
+      ["link", "[docs](https://example.com)"],
+    ] as const) {
+      const token = inlineSources.find((record) => record.type === type);
+      expect(token, `token for ${type}`).toBeDefined();
+      const markerOffset = type === "strong" ? token!.source.from + 1 : token!.source.from;
+      const reveal = createActiveMarkerRevealMarkdown({
+        markdown,
+        inlineSources,
+        selectionRange: {
+          from: markerOffset,
+          to: markerOffset,
+        },
+      });
+      const layout = layoutEngine.layout(reveal.markdown, 800);
+      const index = createEditableLayoutIndex({
+        markdown,
+        layout,
+        blockSpans: state.blockSpans,
+        inlineSources,
+      });
+      const fragment = index.fragments.find((candidate) => candidate.text.includes(visibleSource));
+      expect(reveal.activeToken?.type).toBe(type);
+      expect(fragment, `visible fragment for ${visibleSource}`).toBeDefined();
+      expect(markdown.slice(fragment!.sourceRange.from, fragment!.sourceRange.to)).toContain(
+        visibleSource,
+      );
+
+      const contentStart =
+        type === "link"
+          ? markdown.indexOf("docs")
+          : type === "code-span"
+            ? markdown.indexOf("code")
+            : markdown.indexOf("bold");
+      const markerCaret = index.sourceOffsetToCaretRect(markerOffset);
+      const contentCaret = index.sourceOffsetToCaretRect(contentStart);
+      expect(markerCaret.fragment?.text).toContain(visibleSource);
+      expect(markerCaret.rect.x).toBeLessThan(contentCaret.rect.x);
+
+      const hit = index.hitTest(markerCaret.rect.x + 0.5, markerCaret.rect.y + 1);
+      expect(hit.offset).toBeGreaterThanOrEqual(token!.source.from);
+      expect(hit.offset).toBeLessThan(contentStart);
+    }
   });
 
   it("records limited bidi hit-test behavior with logical source offsets", () => {

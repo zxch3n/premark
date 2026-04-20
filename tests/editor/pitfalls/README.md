@@ -34,5 +34,5 @@ Status legend:
 | DOM mutation by extensions                | Mutation-injection tests prove source of truth remains Premark state                              | browser        |
 | Accessibility                             | Label, focus, multiline textbox semantics, hidden textarea behavior                               | planned        |
 | Screenshot stability                      | Small deterministic crops, actual/expected/diff, event trace, review log                          | planned        |
-| Active marker reflow                      | Before/after marker reveal screenshots and source offset assertions                               | planned        |
+| Active marker reflow                      | Before/after marker reveal screenshots and source offset assertions                               | logic+browser  |
 | Remote/AI active range movement           | Stable range transform tests for before/after/inside/overlap edits                                | logic          |

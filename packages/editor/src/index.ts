@@ -31,6 +31,12 @@ export {
   createInMemoryTextDocumentAdapter,
   InMemoryTextDocumentAdapter,
 } from "./memory-adapter.ts";
+export { createActiveMarkerRevealMarkdown, findActiveMarkerToken } from "./marker-reveal.ts";
+export type {
+  ActiveMarkerRevealMarkdown,
+  ActiveMarkerRevealMarkdownInput,
+  RevealedMarkerType,
+} from "./marker-reveal.ts";
 export {
   createGraphemeSegments,
   graphemeDeleteBackwardRange,

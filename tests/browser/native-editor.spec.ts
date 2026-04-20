@@ -3,6 +3,7 @@ import { test, expect, type Page } from "@playwright/test";
 const storyUrl =
   "/iframe.html?id=editing-premark-native-editor--interactive-native-prototype&viewMode=story";
 const screenshotStoryUrl = `${storyUrl}&screenshot=1`;
+const activeMarkerScreenshotStoryUrl = `${screenshotStoryUrl}&marker=active`;
 const canvasSelectionStoryUrl =
   "/iframe.html?id=editing-premark-canvas-selection--canvas-selection&viewMode=story";
 
@@ -188,7 +189,17 @@ test.describe("Premark native editor story", () => {
     await setSourceSelection(page, boldStart, boldEnd);
     await editor.screenshot({ path: testInfo.outputPath("native-editor-shot-inline-token.png") });
 
-    await setSourceCaret(page, boldStart);
+    await page.goto(activeMarkerScreenshotStoryUrl);
+    await expect(surface).toContainText("Native rendered Markdown");
+    const activeBoldStart = await sourceOffset(page, "bold text");
+    await setSourceCaret(page, activeBoldStart + 2);
+    await expect(surface).toContainText("**bold text**");
+    await editor.screenshot({ path: testInfo.outputPath("native-editor-shot-active-marker.png") });
+
+    await page.goto(screenshotStoryUrl);
+    await expect(surface).toContainText("Native rendered Markdown");
+    const compositionBoldStart = await sourceOffset(page, "bold text");
+    await setSourceCaret(page, compositionBoldStart);
     await bridge.evaluate((element) => {
       element.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
       element.dispatchEvent(new CompositionEvent("compositionupdate", { data: "ni" }));
