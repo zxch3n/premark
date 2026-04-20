@@ -25,6 +25,7 @@ Last Updated: 2026-04-20
 - Selection testing must be much broader than basic drag selection: mouse drag/reversal, Arrow navigation, Shift+Arrow, Shift+Command+Arrow, cross-block ranges, and mobile touch selection all need coverage.
 - External research confirms the main risk areas: IME event order differs across specs/browsers, composition can abort if DOM/selection around it is changed, soft keyboards may not produce reliable keydown events, Selection API focus behavior varies, and mobile visual viewports change under OS keyboards.
 - Screenshot testing must be part of acceptance, not just a debugging aid. Screenshots should be small deterministic crops, stored as artifacts/baselines, and reviewed by Codex before claiming a phase is visually correct.
+- The hidden textarea bridge should first be a pure model: active same-block selections mirror only the current block source, cross-block selections keep an empty bridge value and route replacement/deletion through the editor source selection.
 
 ## Removed From This Branch
 
@@ -116,7 +117,7 @@ Goal: receive real OS text input while keeping Premark as the visible editor.
 - [ ] Keep platform focus in the bridge while visible caret/selection are Premark-rendered.
 - [ ] Convert `beforeinput` / `input` / keyboard commands into source operations.
 - [ ] Handle delete/backspace, Enter, paste, undo/redo.
-- [ ] Keep bridge content minimal to avoid DOM editor behavior becoming the product.
+- [x] Keep bridge content minimal to avoid DOM editor behavior becoming the product.
 - [x] Add an input event trace recorder for `keydown`, `beforeinput`, `input`, `keyup`, `selectionchange`, `composition*`, `paste`, `copy`, and `cut`.
 - [x] Add tests proving text insertion does not rely on keydown, so mobile autocorrect/autosuggest/swipe-like input can be modeled as input operations.
 - [ ] Add clipboard tests for Markdown, plain text, HTML, cross-block cut, cross-block paste, and paste while a selection is active.
@@ -200,3 +201,4 @@ Acceptance:
 - Added input event trace normalization for composition event-order variants, soft-keyboard-style input without keydown, clipboard events, selectionchange events, and Shift/Command arrow keyboard selection intents.
 - Added `EditorDocumentState` to tie the in-memory adapter, parser state, inline source map, layout, editable index, selection, and composition session into one reusable core object for later DOM/Canvas editor views.
 - Added grapheme sidecar helpers for segmentation, caret snapping, and delete backward/forward ranges over combining marks, emoji ZWJ sequences, flags, skin tones, and CJK text.
+- Added a pure textarea bridge snapshot/diff model. Active-block input maps textarea offsets back to source ranges, cross-block replacement/deletion routes through the editor selection, and tests cover collapsed caret at a next-block boundary so it is not misclassified as cross-block.

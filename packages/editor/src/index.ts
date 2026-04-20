@@ -21,6 +21,19 @@ export {
   graphemeDeleteForwardRange,
   snapOffsetToGraphemeBoundary,
 } from "./grapheme.ts";
+export {
+  applyTextareaBridgeChange,
+  createTextareaBridgeSnapshot,
+  deriveTextareaBridgeEdit,
+  sourceOffsetToTextareaOffset,
+  textareaOffsetToSourceOffset,
+} from "./input-bridge.ts";
+export type {
+  ApplyTextareaBridgeChangeOptions,
+  TextareaBridgeEdit,
+  TextareaBridgeMode,
+  TextareaBridgeSnapshot,
+} from "./input-bridge.ts";
 export { InputEventTraceRecorder, normalizeInputTrace } from "./input-trace.ts";
 export {
   createResolvedRange,
