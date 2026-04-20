@@ -133,6 +133,35 @@ describe("applyInputIntent", () => {
     });
   });
 
+  it("replaces cross-block selections through composition intents", () => {
+    const editor = createInMemoryEditorDocumentState("First paragraph\n\n- Second item", 600);
+    const from = editor.markdown.indexOf("paragraph");
+    const to = editor.markdown.indexOf("Second") + "Second".length;
+    editor.setSelection(from, to);
+
+    applyInputIntent(editor, { type: "composition-start" });
+    const update = applyInputIntent(editor, {
+      type: "composition-update",
+      text: "跨块",
+    });
+
+    expect(update.type).toBe("composition-update");
+    expect(editor.markdown).toBe("First paragraph\n\n- Second item");
+    expect(editor.compositionView?.virtualText).toBe("First 跨块 item");
+
+    const commit = applyInputIntent(editor, {
+      type: "composition-commit",
+      text: "完成",
+    });
+
+    expect(commit.type).toBe("composition-commit");
+    expect(editor.markdown).toBe("First 完成 item");
+    expect(editor.selectionSourceRange).toEqual({
+      from: "First ".length + "完成".length,
+      to: "First ".length + "完成".length,
+    });
+  });
+
   it("cancels composition without changing source, selection, or undo history", () => {
     const editor = createInMemoryEditorDocumentState("Hello world", 600);
     const undoManager = new LocalUndoManager();
