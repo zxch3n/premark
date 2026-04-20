@@ -7,6 +7,7 @@ import {
   createActiveMarkerRevealMarkdown,
   createEditableLayoutIndex,
   createGraphemeSegments,
+  createInMemoryEditorDocumentState,
   type EditableFragment,
   type EditableLayoutIndex,
 } from "../src/index.ts";
@@ -226,5 +227,39 @@ describe("text geometry invariants", () => {
         `${text} hit returned hidden marker offset ${hit.offset}`,
       ).toBe(false);
     }
+  });
+
+  it("rebuilds geometry after active reveal switches and layout resize", () => {
+    const markdown = "Try **bold** now";
+    const markerStart = markdown.indexOf("**");
+    const hidden = createFixtureIndex({ name: "hidden", markdown }).index;
+    const hiddenMarker = hidden.sourceOffsetToCaretRect(markerStart + 1, "before");
+
+    const active = createFixtureIndex({
+      name: "active",
+      markdown,
+      activeNeedle: "bold",
+    }).index;
+    const activeOpenStart = active.sourceOffsetToCaretRect(markerStart, "after");
+    const activeOpenMiddle = active.sourceOffsetToCaretRect(markerStart + 1, "after");
+    const activeOpenEnd = active.sourceOffsetToCaretRect(markerStart + 2, "before");
+    expect(activeOpenMiddle.rect.x).toBeGreaterThan(activeOpenStart.rect.x);
+    expect(activeOpenEnd.rect.x).toBeGreaterThan(activeOpenMiddle.rect.x);
+
+    const hiddenAgain = createFixtureIndex({ name: "hidden again", markdown }).index;
+    expect(hiddenAgain.sourceOffsetToCaretRect(markerStart + 1, "before").rect.x).toBeCloseTo(
+      hiddenMarker.rect.x,
+      5,
+    );
+
+    const wrappingMarkdown = "alpha beta gamma delta epsilon zeta eta theta WWWW suffix";
+    const editor = createInMemoryEditorDocumentState(wrappingMarkdown, 720, {
+      fontTheme: "github",
+    });
+    const targetOffset = wrappingMarkdown.indexOf("WWWW");
+    const wideCaret = editor.editableIndex.sourceOffsetToCaretRect(targetOffset);
+    editor.resize(140);
+    const narrowCaret = editor.editableIndex.sourceOffsetToCaretRect(targetOffset);
+    expect(narrowCaret.rect.y).toBeGreaterThan(wideCaret.rect.y);
   });
 });

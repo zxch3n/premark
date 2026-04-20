@@ -126,16 +126,16 @@ Goal: make text geometry and renderer paint share one boundary contract.
 - [x] Add a reusable fixture matrix: Latin, variable-width, CJK, repeated emoji ZWJ, flags, skin tones, combining marks, VS16, ZWSP, inline code, link suffix, revealed controls, heading markers, code blocks, source newlines.
 - [x] For every fixture, assert caret x/y, hit-test, and selection rects use the same boundary table.
 - [x] Assert hit-test never returns offsets inside a grapheme cluster or hidden non-addressable span.
-- [ ] Assert Canvas text paint positions for source-addressable glyph clusters match editable geometry for emoji-like and control-reveal runs.
+- [x] Assert Canvas text paint positions for source-addressable glyph clusters match editable geometry for emoji-like and control-reveal runs.
 - [x] Add Canvas-native browser acceptance for repeated emoji, revealed controls, and link suffix positions.
-- [ ] Review cache invalidation for font load, layout rebuild, active marker reveal switch, and fragment boundary cache.
+- [x] Review cache invalidation for font load, layout rebuild, active marker reveal switch, and fragment boundary cache.
 
 Acceptance:
 
 - [x] `👨‍👩‍👧‍👦`.repeat(7) and similar cluster-heavy fixtures do not drift in DOM or Canvas.
 - [x] Any fixture source boundary can be represented by caret, hit-test, and selection geometry.
-- [ ] Canvas paint does not use a different text advance as the authority for editable text.
-- [ ] `vp test`, `vp run build`, and `vp run test:browser` pass.
+- [x] Canvas paint does not use a different text advance as the authority for editable text.
+- [x] `vp test`, `vp run build`, and `vp run test:browser` pass.
 
 ## Phase 8: Editing Behavior Polish
 
@@ -184,3 +184,4 @@ Acceptance:
 - Prepared experiments: compare editable boundary tables, fresh Canvas measurements, and recorded Canvas `fillText` positions across the fixture matrix.
 - Phase 7 started. Added a pure text-geometry invariant matrix and a Canvas-native repeated emoji browser fixture. The matrix immediately found a real active-marker source-map bug: exact revealed boundaries shared by adjacent runs were always mapped to the smaller source offset, so `before` caret positions at the end of visible controls could jump backward. Boundary mapping is now side-aware: the first boundary maps as `start`, later boundaries map as `end`.
 - Verification after the first Phase 7 batch: `vp check --fix` passes with the two existing warnings, targeted geometry/reveal tests pass 40 tests, full `vp test` passes 168 tests, `vp run build` passes, and `vp run test:browser` passes 19 Playwright tests.
+- Completed Phase 7. Canvas drawing now treats emoji and Markdown/link control punctuation as boundary-sensitive: normal text still draws in chunks, while boundary-sensitive graphemes are placed at `measureGraphemeBoundaryXs` positions. Added draw tests for repeated emoji, revealed `**` controls, and link suffix controls. Cache review result: font loading is gated before Storybook layout construction, editable boundary caches are WeakMap-keyed by fragment objects, active reveal creates new editable indexes, and resize/refresh rebuild layout plus editable index. Added a regression that switches hidden/revealed indexes and resizes a document after measuring.
