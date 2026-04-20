@@ -42,6 +42,7 @@ export const InteractiveNativePrototype = () => {
 
   let bridgeSnapshot: TextareaBridgeSnapshot = createTextareaBridgeSnapshot(editor);
   let pointerSession: PointerSelectionSession | null = null;
+  let composing = false;
 
   root.innerHTML = `
     <style>${storyCss}</style>
@@ -189,7 +190,31 @@ export const InteractiveNativePrototype = () => {
     render();
   });
 
+  textarea.addEventListener("compositionstart", (event) => {
+    composing = true;
+    applyInputIntent(editor, { type: "composition-start" }, { undoManager });
+    render();
+    event.preventDefault();
+  });
+
+  textarea.addEventListener("compositionupdate", (event) => {
+    if (!composing) {
+      return;
+    }
+    applyInputIntent(editor, { type: "composition-update", text: event.data }, { undoManager });
+    render();
+  });
+
+  textarea.addEventListener("compositionend", (event) => {
+    composing = false;
+    applyInputIntent(editor, { type: "composition-commit", text: event.data }, { undoManager });
+    render();
+  });
+
   textarea.addEventListener("input", () => {
+    if (composing) {
+      return;
+    }
     const applied = applyTextareaBridgeChange(editor, bridgeSnapshot, textarea.value, {
       nextSelectionStart: textarea.selectionStart,
       nextSelectionEnd: textarea.selectionEnd,
