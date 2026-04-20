@@ -6,6 +6,7 @@ import {
   beginPointerSelection,
   createInMemoryEditorDocumentState,
   createSelectionGeometry,
+  selectPointerRange,
   updatePointerSelection,
 } from "../src/index.ts";
 
@@ -52,6 +53,27 @@ describe("selection commands", () => {
     beginPointerSelection(editor, insideEmoji.rect.x, insideEmoji.rect.y + 1);
 
     expect([emojiFrom, emojiTo]).toContain(editor.selectionSourceRange.from);
+  });
+
+  it("selects word and block ranges from pointer granularity", () => {
+    const markdown = "alpha beta gamma\n\n- list item text";
+    const editor = createInMemoryEditorDocumentState(markdown, 600);
+    const betaOffset = markdown.indexOf("beta");
+    const betaCaret = editor.editableIndex.sourceOffsetToCaretRect(betaOffset + 1);
+
+    selectPointerRange(editor, betaCaret.rect.x, betaCaret.rect.y + 1, "word");
+    expect(createSelectionGeometry(editor).range).toEqual({
+      from: betaOffset,
+      to: betaOffset + "beta".length,
+    });
+
+    const listOffset = markdown.indexOf("list item");
+    const listCaret = editor.editableIndex.sourceOffsetToCaretRect(listOffset);
+    selectPointerRange(editor, listCaret.rect.x, listCaret.rect.y + 1, "block");
+    expect(createSelectionGeometry(editor).range).toEqual({
+      from: markdown.indexOf("- list item text"),
+      to: markdown.length,
+    });
   });
 
   it("moves by grapheme clusters for ArrowLeft and ArrowRight", () => {

@@ -15,6 +15,7 @@ import {
   createTextareaBridgeSnapshot,
   LocalUndoManager,
   normalizeInputTrace,
+  selectPointerRange,
   updatePointerSelection,
   type EditableLayoutIndex,
   type PointerSelectionSession,
@@ -95,6 +96,7 @@ export const InteractiveCanvasNativeEditor = () => {
       .pcne-input-bridge {
         position: absolute;
         z-index: 2;
+        pointer-events: none;
         width: 2px;
         min-width: 2px;
         padding: 0;
@@ -192,6 +194,12 @@ export const InteractiveCanvasNativeEditor = () => {
     let pointerSession: PointerSelectionSession | null = null;
     let composing = false;
     let activeEditableIndex: EditableLayoutIndex = editor.editableIndex;
+    let pointerClickCount = 0;
+    let lastPointerClick: {
+      readonly time: number;
+      readonly x: number;
+      readonly y: number;
+    } | null = null;
 
     function activeRenderView(): {
       layout: ReturnType<typeof previewLayoutEngine.layout>;
@@ -300,7 +308,7 @@ export const InteractiveCanvasNativeEditor = () => {
       textarea.style.height = `${Math.max(16, caretRect.height)}px`;
     }
 
-    function canvasPointFromEvent(event: PointerEvent): { x: number; y: number } {
+    function canvasPointFromEvent(event: MouseEvent): { x: number; y: number } {
       const rect = canvas.getBoundingClientRect();
       return {
         x: event.clientX - rect.left - contentPadding,
@@ -308,10 +316,60 @@ export const InteractiveCanvasNativeEditor = () => {
       };
     }
 
+    function clickCountFromPointer(event: PointerEvent, point: { x: number; y: number }): number {
+      if (
+        lastPointerClick !== null &&
+        event.timeStamp - lastPointerClick.time < 500 &&
+        Math.hypot(point.x - lastPointerClick.x, point.y - lastPointerClick.y) < 6
+      ) {
+        pointerClickCount += 1;
+      } else {
+        pointerClickCount = 1;
+      }
+      lastPointerClick = {
+        time: event.timeStamp,
+        x: point.x,
+        y: point.y,
+      };
+      return Math.max(event.detail, pointerClickCount);
+    }
+
     canvas.addEventListener("pointerdown", (event) => {
       event.preventDefault();
       const point = canvasPointFromEvent(event);
+      const clickCount = clickCountFromPointer(event, point);
+      if (clickCount >= 3) {
+        selectPointerRange(editor, point.x, point.y, "block", activeEditableIndex);
+        pointerSession = null;
+        textarea.focus();
+        render();
+        return;
+      }
+      if (clickCount === 2) {
+        selectPointerRange(editor, point.x, point.y, "word", activeEditableIndex);
+        pointerSession = null;
+        textarea.focus();
+        render();
+        return;
+      }
       pointerSession = beginPointerSelection(editor, point.x, point.y, activeEditableIndex);
+      textarea.focus();
+      render();
+    });
+
+    canvas.addEventListener("click", (event) => {
+      if (event.detail < 2) {
+        return;
+      }
+      const point = canvasPointFromEvent(event);
+      selectPointerRange(
+        editor,
+        point.x,
+        point.y,
+        event.detail >= 3 ? "block" : "word",
+        activeEditableIndex,
+      );
+      pointerSession = null;
       textarea.focus();
       render();
     });
