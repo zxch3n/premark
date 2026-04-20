@@ -265,19 +265,24 @@ function buildEditableFragments(input: EditableLayoutIndexInput): EditableFragme
   const tokenRecords = input.inlineSources.filter(
     (record) => record.type === "strong" || record.type === "code-span" || record.type === "link",
   );
-  const sourceCursors = new Map<string, number>();
   const output: EditableFragment[] = [];
+  let sourceCursor = 0;
 
   for (const line of input.layout.lines) {
     if (line.kind === "opaque" && line.content.type === "code_block") {
-      const blockSpan = input.blockSpans[line.blockIndex];
-      if (blockSpan === undefined || line.content.code.length === 0) continue;
+      if (line.content.code.length === 0) continue;
       const sourceFrom = findFragmentSource(
         input.markdown,
         line.content.code,
-        blockSpan.from,
-        blockSpan.to,
+        sourceCursor,
+        input.markdown.length,
       );
+      const sourceRange = {
+        from: sourceFrom,
+        to: sourceFrom + line.content.code.length,
+      };
+      const blockSpan = findBlockSpanForRange(input.blockSpans, sourceRange);
+      if (blockSpan === undefined) continue;
       output.push({
         blockId: blockSpan.id,
         blockIndex: line.blockIndex,
@@ -285,10 +290,7 @@ function buildEditableFragments(input: EditableLayoutIndexInput): EditableFragme
         fragmentIndex: 0,
         text: line.content.code,
         type: "code_block",
-        sourceRange: {
-          from: sourceFrom,
-          to: sourceFrom + line.content.code.length,
-        },
+        sourceRange,
         rect: {
           x: line.x + line.content.padding.left,
           y: line.y + line.content.padding.top,
@@ -299,14 +301,11 @@ function buildEditableFragments(input: EditableLayoutIndexInput): EditableFragme
           ),
         },
       });
+      sourceCursor = Math.max(sourceRange.to, blockSpan.to);
       continue;
     }
 
     if (line.kind !== "text") continue;
-    const blockSpan = input.blockSpans[line.blockIndex];
-    if (blockSpan === undefined) continue;
-    const blockId = blockSpan.id;
-    let sourceCursor = sourceCursors.get(blockId) ?? blockSpan.from;
 
     line.fragments.forEach((fragment, fragmentIndex) => {
       if (fragment.text.length === 0) return;
@@ -314,21 +313,26 @@ function buildEditableFragments(input: EditableLayoutIndexInput): EditableFragme
         input.markdown,
         fragment.text,
         sourceCursor,
-        blockSpan.to,
+        input.markdown.length,
       );
       const sourceRange = {
         from: sourceFrom,
         to: sourceFrom + fragment.text.length,
       };
+      const blockSpan = findBlockSpanForRange(input.blockSpans, sourceRange);
+      if (blockSpan === undefined) {
+        sourceCursor = sourceRange.to;
+        return;
+      }
       output.push({
-        blockId,
+        blockId: blockSpan.id,
         blockIndex: line.blockIndex,
         lineIndex: line.index,
         fragmentIndex,
         text: fragment.text,
         type: fragment.type,
         sourceRange,
-        tokenRange: findSmallestContainingTokenRange(blockId, sourceRange, tokenRecords),
+        tokenRange: findSmallestContainingTokenRange(blockSpan.id, sourceRange, tokenRecords),
         rect: {
           x: line.x + fragment.x,
           y: line.y,
@@ -338,11 +342,19 @@ function buildEditableFragments(input: EditableLayoutIndexInput): EditableFragme
       });
       sourceCursor = sourceRange.to;
     });
-
-    sourceCursors.set(blockId, sourceCursor);
   }
 
   return output;
+}
+
+function findBlockSpanForRange(
+  blockSpans: readonly BlockSpan[],
+  sourceRange: SourceRange,
+): BlockSpan | undefined {
+  return (
+    blockSpans.find((span) => sourceRange.from >= span.from && sourceRange.to <= span.to) ??
+    blockSpans.find((span) => sourceRange.from >= span.from && sourceRange.from < span.to)
+  );
 }
 
 function findSmallestContainingTokenRange(
