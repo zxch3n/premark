@@ -322,6 +322,109 @@ describe("EditableLayoutIndex", () => {
     }
   });
 
+  it("places carets inside revealed wrapping marker characters", () => {
+    const markdown = "**abc**";
+    const state = createIncrementalParseState(markdown);
+    const inlineSources = createMarkdownInlineSourceMap(state);
+    const reveal = createActiveMarkerRevealMarkdown({
+      markdown,
+      inlineSources,
+      blockSpans: state.blockSpans,
+      selectionRange: { from: 1, to: 1 },
+    });
+    const layout = createLayoutEngine({ fontTheme: "github" }).layout(reveal.markdown, 800);
+    const index = createEditableLayoutIndex({
+      markdown,
+      layout,
+      blockSpans: state.blockSpans,
+      inlineSources,
+      sourceMap: reveal.sourceMap,
+    });
+
+    const openingStart = index.sourceOffsetToCaretRect(0);
+    const openingMiddle = index.sourceOffsetToCaretRect(1);
+    const contentStart = index.sourceOffsetToCaretRect(2);
+    const closingStart = index.sourceOffsetToCaretRect(5);
+    const closingMiddle = index.sourceOffsetToCaretRect(6);
+    const closingEnd = index.sourceOffsetToCaretRect(7);
+
+    expect(openingStart.fragment?.text).toBe("**");
+    expect(openingMiddle.fragment?.text).toBe("**");
+    expect(openingMiddle.rect.x).toBeGreaterThan(openingStart.rect.x);
+    expect(contentStart.rect.x).toBeGreaterThan(openingMiddle.rect.x);
+
+    expect(closingStart.fragment?.text).toBe("**");
+    expect(closingMiddle.fragment?.text).toBe("**");
+    expect(closingMiddle.rect.x).toBeGreaterThan(closingStart.rect.x);
+    expect(closingEnd.rect.x).toBeGreaterThan(closingMiddle.rect.x);
+  });
+
+  it("places carets inside revealed link suffix characters", () => {
+    const markdown = "[hello](https://example.com)";
+    const state = createIncrementalParseState(markdown);
+    const inlineSources = createMarkdownInlineSourceMap(state);
+    const reveal = createActiveMarkerRevealMarkdown({
+      markdown,
+      inlineSources,
+      blockSpans: state.blockSpans,
+      selectionRange: { from: markdown.indexOf("https") + 1, to: markdown.indexOf("https") + 1 },
+    });
+    const layout = createLayoutEngine({ fontTheme: "github" }).layout(reveal.markdown, 800);
+    const index = createEditableLayoutIndex({
+      markdown,
+      layout,
+      blockSpans: state.blockSpans,
+      inlineSources,
+      sourceMap: reveal.sourceMap,
+    });
+
+    const suffixStart = markdown.indexOf("]");
+    const suffixCarets = Array.from({ length: markdown.length - suffixStart + 1 }, (_, offset) =>
+      index.sourceOffsetToCaretRect(suffixStart + offset, "before"),
+    );
+
+    for (let index = 1; index < suffixCarets.length; index += 1) {
+      expect(suffixCarets[index]?.fragment?.text, `suffix offset ${index}`).toBe(
+        "](https://example.com)",
+      );
+      if (index > 1) {
+        expect(suffixCarets[index]!.rect.x, `suffix offset ${index}`).toBeGreaterThan(
+          suffixCarets[index - 1]!.rect.x,
+        );
+      }
+    }
+  });
+
+  it("places carets inside revealed link suffix after preceding inline content", () => {
+    const markdown =
+      "Try **bold text**, `inline code`, [docs](https://example.com), 中文输入, and emoji";
+    const state = createIncrementalParseState(markdown);
+    const inlineSources = createMarkdownInlineSourceMap(state);
+    const suffixStart = markdown.indexOf("](https://example.com)");
+    const reveal = createActiveMarkerRevealMarkdown({
+      markdown,
+      inlineSources,
+      blockSpans: state.blockSpans,
+      selectionRange: { from: suffixStart + 9, to: suffixStart + 9 },
+    });
+    const layout = createLayoutEngine({ fontTheme: "modern", lineBreakMode: "source" }).layout(
+      reveal.markdown,
+      724,
+    );
+    const index = createEditableLayoutIndex({
+      markdown,
+      layout,
+      blockSpans: state.blockSpans,
+      inlineSources,
+      sourceMap: reveal.sourceMap,
+    });
+
+    const firstSlash = index.sourceOffsetToCaretRect(suffixStart + 9, "before");
+    const secondSlash = index.sourceOffsetToCaretRect(suffixStart + 10, "before");
+    expect(secondSlash.fragment?.text).toContain("](https://example.com)");
+    expect(secondSlash.rect.x).toBeGreaterThan(firstSlash.rect.x);
+  });
+
   it("keeps heading caret positions aligned after H1-H6 block control reveal", () => {
     for (const level of [1, 2, 3, 4, 5, 6] as const) {
       const marker = "#".repeat(level);

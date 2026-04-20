@@ -568,8 +568,11 @@ function findFragmentSourceMapping(
       findRenderedTextInMarkdown(input.sourceMap.markdown, renderedText, layoutCursor) ??
       findRenderedTextInMarkdown(input.sourceMap.markdown, renderedText, 0);
     if (revealedMatch !== null) {
-      const sourceOffsets = revealedMatch.boundaries.map((offset) =>
-        mapRevealedOffsetToSource(input.sourceMap!, offset),
+      const sourceOffsets = normalizeMappedSourceOffsets(
+        renderedText,
+        revealedMatch.boundaries.map((offset) =>
+          mapRevealedOffsetToSource(input.sourceMap!, offset),
+        ),
       );
       if (sourceOffsets.length > 0) {
         return {
@@ -637,6 +640,36 @@ function findRenderedTextInMarkdown(
   }
 
   return null;
+}
+
+function normalizeMappedSourceOffsets(
+  renderedText: string,
+  sourceOffsets: readonly number[],
+): readonly number[] {
+  if (sourceOffsets.length !== renderedText.length + 1 || sourceOffsets.length === 0) {
+    return sourceOffsets;
+  }
+
+  const first = sourceOffsets[0]!;
+  const last = sourceOffsets[sourceOffsets.length - 1]!;
+  if (sourceOffsets.length > 1 && first > sourceOffsets[1]!) {
+    const inferredFirst = sourceOffsets[1]! - 1;
+    if (last - inferredFirst === renderedText.length) {
+      return createLinearSourceOffsets(renderedText, inferredFirst);
+    }
+  }
+
+  if (last - first !== renderedText.length) {
+    return sourceOffsets;
+  }
+
+  for (let index = 1; index < sourceOffsets.length; index += 1) {
+    if (sourceOffsets[index]! < sourceOffsets[index - 1]!) {
+      return sourceOffsets;
+    }
+  }
+
+  return createLinearSourceOffsets(renderedText, first);
 }
 
 function mapRevealedOffsetToSource(sourceMap: EditableLayoutSourceMap, offset: number): number {
