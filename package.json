@@ -25,6 +25,10 @@
     "prepare": "vp config"
   },
   "devDependencies": {
+    "@codemirror/commands": "catalog:",
+    "@codemirror/lang-markdown": "catalog:",
+    "@codemirror/state": "catalog:",
+    "@codemirror/view": "catalog:",
     "@napi-rs/canvas": "catalog:",
     "@playwright/test": "catalog:",
     "@storybook/html": "^10.3.4",
