@@ -33,7 +33,7 @@ Click text, drag across blocks, then type directly on the rendered surface.
 - The hidden textarea mirrors only the active source slice.
 - Cross-block replacement uses one source operation.
 
-Try **bold text**, \`inline code\`, 中文输入, and emoji 👨‍👩‍👧‍👦.`;
+Try **bold text**, \`inline code\`, [docs](https://example.com), 中文输入, and emoji 👨‍👩‍👧‍👦.`;
 
 const highlighter = createHighlighter();
 const previewLayoutEngine = createLayoutEngine({

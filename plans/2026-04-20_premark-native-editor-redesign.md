@@ -165,7 +165,8 @@ Goal: support real composition without hiding behind CodeMirror.
 - [x] Test browser/spec event-order variants: `beforeinput`/`compositionupdate`/`input`/`compositionend` can arrive in different orders and must normalize to the same editor operation.
 - [x] Assert composition update never commits real source, never enters undo, and never requires changing browser DOM selection near the composition range.
 - [x] Add first screenshot for composition preedit text in the DOM prototype.
-- [ ] Add screenshots for replacement of selected text, composition near strong/code/link markers, and candidate-window anchoring when the OS screenshot path can capture it.
+- [x] Add browser screenshots for replacement of selected text and composition near strong/code/link markers.
+- [ ] Add candidate-window anchoring screenshots when the OS screenshot path can capture it.
 - [x] Add remote/AI patch tests during composition: before range, after range, inside selected replacement range, and overlapping composition range.
 
 Acceptance:
@@ -276,3 +277,6 @@ Acceptance:
 - Added active inline marker reveal coverage. The editor package can derive an active-marker Markdown view for strong/code/link tokens, hidden-marker caret rects now have explicit tests, and active-marker hit-test maps visible marker glyphs back to original source offsets.
 - Added `native-editor-shot-active-marker.png` to the deterministic Storybook screenshot matrix. Codex reviewed the crop: the raw `**` markers are visible, the caret remains inside the active strong token, and the line reflows without overlap.
 - Verification for the active-marker iteration: `vp check --fix` passes with existing warnings, targeted `vp test packages/editor/tests/editable-layout.test.ts` passes, full `vp test` passes 120 tests, `vp run build` passes, and `vp run test:browser` passes 12 Playwright tests.
+- Added browser composition screenshot coverage for selected replacement and preedit near strong/code/link rendered tokens. The Storybook fixture now includes a rendered link so the link-label composition path has a deterministic crop.
+- Codex reviewed `native-editor-shot-composition-replace.png`, `native-editor-shot-composition-strong.png`, `native-editor-shot-composition-code.png`, and `native-editor-shot-composition-link.png`. All four crops show visible preedit underline and caret placement without unexpected line shifts; OS candidate-window anchoring remains blocked by the macOS HID routing gap.
+- Verification for the composition screenshot iteration: `vp run test:browser` passes 12 Playwright tests.

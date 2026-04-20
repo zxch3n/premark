@@ -212,6 +212,58 @@ test.describe("Premark native editor story", () => {
 
     await page.goto(screenshotStoryUrl);
     await expect(surface).toContainText("Native rendered Markdown");
+    await setSourceSelection(
+      page,
+      await sourceOffset(page, "bold text"),
+      await sourceOffset(page, "bold text", "end"),
+    );
+    await bridge.evaluate((element) => {
+      element.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+      element.dispatchEvent(new CompositionEvent("compositionupdate", { data: "替换" }));
+    });
+    await expect(surface).toContainText("替换");
+    await editor.screenshot({
+      path: testInfo.outputPath("native-editor-shot-composition-replace.png"),
+    });
+
+    await page.goto(screenshotStoryUrl);
+    await expect(surface).toContainText("Native rendered Markdown");
+    await setSourceCaret(page, (await sourceOffset(page, "bold text")) + 2);
+    await bridge.evaluate((element) => {
+      element.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+      element.dispatchEvent(new CompositionEvent("compositionupdate", { data: "强" }));
+    });
+    await expect(surface).toContainText("强");
+    await editor.screenshot({
+      path: testInfo.outputPath("native-editor-shot-composition-strong.png"),
+    });
+
+    await page.goto(screenshotStoryUrl);
+    await expect(surface).toContainText("Native rendered Markdown");
+    await setSourceCaret(page, await sourceOffset(page, "inline code"));
+    await bridge.evaluate((element) => {
+      element.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+      element.dispatchEvent(new CompositionEvent("compositionupdate", { data: "码" }));
+    });
+    await expect(surface).toContainText("码");
+    await editor.screenshot({
+      path: testInfo.outputPath("native-editor-shot-composition-code.png"),
+    });
+
+    await page.goto(screenshotStoryUrl);
+    await expect(surface).toContainText("Native rendered Markdown");
+    await setSourceCaret(page, await sourceOffset(page, "docs"));
+    await bridge.evaluate((element) => {
+      element.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+      element.dispatchEvent(new CompositionEvent("compositionupdate", { data: "链" }));
+    });
+    await expect(surface).toContainText("链");
+    await editor.screenshot({
+      path: testInfo.outputPath("native-editor-shot-composition-link.png"),
+    });
+
+    await page.goto(screenshotStoryUrl);
+    await expect(surface).toContainText("Native rendered Markdown");
     await setSourceCaret(page, await sourceOffset(page, "Try ", "end"));
     await pasteMarkdown(page, "**Paste Preview** ");
     await expect(surface).toContainText("Paste Preview");
