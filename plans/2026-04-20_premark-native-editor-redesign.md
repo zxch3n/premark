@@ -114,16 +114,16 @@ Goal: paint native selection and caret on the rendered surface.
 - [x] Wire mouse and keyboard selection commands to browser events in the prototype.
 - [x] Define mobile selection behavior for touch long press, drag handles, soft keyboard focus, scroll, and zoom.
 - [x] Add tests for select-all, Home/End, PageUp/PageDown, line boundary, word boundary, document boundary, and direction-preserving selection extension.
-- [x] Add screenshot tests for forward selection, backward selection, wrapped-line selection, cross-block selection, and active inline-token selection in the DOM debug renderer.
+- [x] Add screenshot tests for forward selection, backward selection, wrapped-line selection, cross-block selection, active inline-token selection, and code-block selection in the DOM debug renderer.
 - [ ] Add active-marker reveal and high-DPI Canvas selection screenshots.
 - [x] Add visual tests for selection overlays independent of CodeMirror.
 
 Acceptance:
 
-- [ ] Selection over rendered Markdown looks continuous across paragraphs/lists/code.
-- [ ] Selection geometry matches source range mapping within strict pixel thresholds.
-- [ ] Desktop and mobile-specific selection behaviors have automated coverage or an explicit documented automation gap.
-- [ ] Codex has reviewed the saved selection screenshots and recorded whether they match expected geometry and styling.
+- [x] Selection over rendered Markdown looks continuous across paragraphs/lists/code.
+- [x] Selection geometry matches source range mapping within strict pixel thresholds.
+- [x] Desktop and mobile-specific selection behaviors have automated coverage or an explicit documented automation gap.
+- [x] Codex has reviewed the saved selection screenshots and recorded whether they match expected geometry and styling.
 
 ## Phase 3: Input Bridge
 
@@ -265,3 +265,5 @@ Acceptance:
 - Verification for the composition automation iteration: targeted composition/core tests pass and `vp run test:browser` passes 11 Playwright tests.
 - Added Playwright browser reporting guidance. Browser test artifacts now write to ignored `artifacts/playwright-browser`, the HTML report writes to `artifacts/playwright-browser-html`, and `tests/browser/ci-reporting.md` documents uploading failure screenshots, trace zips, future actual/expected/diff images, and event trace fixtures.
 - Verification for browser reporting: `vp check --fix` passes with existing warnings, `vp run test:browser` passes 11 Playwright tests, generated screenshot crops are present under `artifacts/playwright-browser`, and the HTML report exists under `artifacts/playwright-browser-html`.
+- Added strict selection geometry threshold tests that compare selection rect edges to source caret positions for inline text, wrapped text, and code blocks. Added and reviewed a code-block selection screenshot crop, closing the DOM debug renderer selection acceptance items while Canvas screenshots remain separate.
+- Verification for the selection geometry iteration: `vp check --fix` passes with existing warnings, `vp test` passes 118 tests, and `vp run test:browser` passes 11 Playwright tests.

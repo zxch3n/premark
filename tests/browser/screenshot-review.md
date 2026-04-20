@@ -69,6 +69,7 @@ Current generated folder pattern:
   - `native-editor-shot-composition.png`: synthetic preedit text appears inside the rendered strong text, with underline and caret aligned to the preedit range.
   - `native-editor-shot-paste.png`: pasted Markdown renders as bold text before the existing strong token, and the caret lands after the pasted content.
   - `native-editor-shot-remote.png`: a remote blockquote insertion appears above the active document without remounting the rendered surface.
+  - `native-editor-shot-code-block.png`: code-block text selection stays inside the rendered code surface and remains aligned to the code text.
   - `native-editor-shot-hidpi.png`: high-DPI DOM crop keeps the selected list text aligned; the right edge intentionally crops unrelated paragraph text.
 - Notes:
   - This review found and fixed a real source-map bug: layout `blockIndex` referred to normalized layout blocks, not parser source blocks, which broke list-item and post-list paragraph mappings.

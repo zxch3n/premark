@@ -5,6 +5,10 @@ import { createInMemoryEditorDocumentState, createSelectionGeometry } from "../s
 
 installNodeCanvas();
 
+function expectCloseTo(actual: number, expected: number, threshold = 0.75): void {
+  expect(Math.abs(actual - expected)).toBeLessThanOrEqual(threshold);
+}
+
 describe("createSelectionGeometry", () => {
   it("returns a visible caret for collapsed selections", () => {
     const editor = createInMemoryEditorDocumentState("Hello **world**", 600);
@@ -67,5 +71,63 @@ describe("createSelectionGeometry", () => {
     });
     expect(geometry.selectionRects.length).toBeGreaterThanOrEqual(2);
     expect(new Set(geometry.selectionRects.map((rect) => rect.y)).size).toBeGreaterThanOrEqual(2);
+  });
+
+  it("matches single-line selection rect edges to caret positions within a strict threshold", () => {
+    const editor = createInMemoryEditorDocumentState("Hello **world** after", 600);
+    const worldFrom = editor.markdown.indexOf("world");
+    const worldTo = worldFrom + "world".length;
+    editor.setSelection(worldFrom, worldTo);
+
+    const geometry = createSelectionGeometry(editor);
+    const [rect] = geometry.selectionRects;
+    expect(rect).toBeDefined();
+
+    const startCaret = editor.editableIndex.sourceOffsetToCaretRect(worldFrom);
+    const endCaret = editor.editableIndex.sourceOffsetToCaretRect(worldTo);
+    expectCloseTo(rect!.x, startCaret.rect.x);
+    expectCloseTo(rect!.x + rect!.width, endCaret.rect.x);
+    expectCloseTo(rect!.y, startCaret.rect.y);
+    expectCloseTo(rect!.height, startCaret.rect.height);
+  });
+
+  it("matches code-block selection rect edges to caret positions within a strict threshold", () => {
+    const markdown = ["```ts", "const x = 1;", "```"].join("\n");
+    const editor = createInMemoryEditorDocumentState(markdown, 600);
+    const codeFrom = editor.markdown.indexOf("const x");
+    const codeTo = editor.markdown.indexOf("1;") + "1;".length;
+    editor.setSelection(codeFrom, codeTo);
+
+    const geometry = createSelectionGeometry(editor);
+    const [rect] = geometry.selectionRects;
+    expect(rect).toBeDefined();
+
+    const startCaret = editor.editableIndex.sourceOffsetToCaretRect(codeFrom);
+    const endCaret = editor.editableIndex.sourceOffsetToCaretRect(codeTo);
+    expectCloseTo(rect!.x, startCaret.rect.x);
+    expectCloseTo(rect!.x + rect!.width, endCaret.rect.x);
+    expectCloseTo(rect!.y, startCaret.rect.y);
+    expectCloseTo(rect!.height, startCaret.rect.height);
+  });
+
+  it("keeps wrapped selection rects aligned to start and end caret edges", () => {
+    const markdown = "Alpha beta gamma delta epsilon zeta eta theta iota kappa";
+    const editor = createInMemoryEditorDocumentState(markdown, 160);
+    const from = markdown.indexOf("beta");
+    const to = markdown.indexOf("theta") + "theta".length;
+    editor.setSelection(from, to);
+
+    const geometry = createSelectionGeometry(editor);
+    expect(geometry.selectionRects.length).toBeGreaterThan(1);
+
+    const first = geometry.selectionRects[0]!;
+    const last = geometry.selectionRects.at(-1)!;
+    const startCaret = editor.editableIndex.sourceOffsetToCaretRect(from);
+    const endCaret = editor.editableIndex.sourceOffsetToCaretRect(to);
+    expectCloseTo(first.x, startCaret.rect.x);
+    expectCloseTo(first.y, startCaret.rect.y);
+    expectCloseTo(last.x + last.width, endCaret.rect.x);
+    expectCloseTo(last.y, endCaret.rect.y);
+    expect(geometry.selectionRects.every((rect) => rect.width > 0 && rect.height > 0)).toBe(true);
   });
 });
