@@ -42,6 +42,8 @@ Current environment boundary:
 - `CGEventPostToPid` can deliver physical key events to the browser process even when Chrome is not the foreground app.
 - That targeted path bypasses macOS input-method composition, so it is useful for focus/input plumbing but is not a valid IME test.
 - When the browser cannot be foregrounded safely, or when global HID key events do not reach the focused hidden textarea, the runner records `test-results/macos-ime/ime-skip.txt` and exits successfully unless strict mode is enabled.
+- The HID gate checks foreground state before posting global key codes. If macOS reports another app
+  as frontmost, or if `NSWorkspace` reports `loginwindow`, the runner stops before sending HID input.
 
 Useful environment variables:
 
@@ -58,7 +60,10 @@ Artifacts:
 - `test-results/macos-ime/*-screen.png`: whole-screen OS screenshots, used for candidate-window anchoring when available.
 - `test-results/macos-ime/<scenario-name>.png`: real IME scenario screenshots.
 - `test-results/macos-ime/ime-skipped-no-foreground.png`: browser could not become foreground.
+- `test-results/macos-ime/ime-skipped-no-foreground.json`: foreground diagnostics for the final IME foreground gate.
 - `test-results/macos-ime/ime-skip.txt`: exact skip reason.
+- `test-results/macos-ime/hid-probe-no-foreground.png`: browser could not become foreground before the HID probe.
+- `test-results/macos-ime/hid-probe-no-foreground.json`: foreground diagnostics for a skipped HID probe.
 - `test-results/macos-ime/hid-probe-failed.png`: browser was foreground, but global HID events did not reach the focused hidden textarea.
 - `test-results/macos-ime/hid-probe-failed.json`: event trace and source text for the HID skip.
 - `test-results/macos-ime/*-failed.png`: failure crops for debugging.

@@ -1,15 +1,16 @@
 # Premark Native Editor Redesign Plan
 
-Status: Phase 16 complete; Phase 17 OS IME gate deferred
+Status: Phase 16 complete; Phase 17 OS IME gate attempted and blocked by macOS foreground state
 Owner: Codex / Zixuan
 Last Updated: 2026-04-21
 Compaction Rule: after memory reload or compaction, reread this whole file before continuing.
 
 ## Current Objective
 
-- Hold at Phase 17 until Zixuan explicitly allows real macOS HID/IME validation.
+- Resume Phase 17 only after the macOS GUI session can make Chrome the foreground app.
 - Keep the native Premark-rendered editor as the product path; CodeMirror overlay remains removed.
-- Do not run macOS HID/IME tests while the machine is actively used unless Zixuan explicitly asks.
+- Real Pinyin scenario code is ready, but the current session reports `System Events = Notion` and `NSWorkspace = loginwindow`; global HID is not a valid signal in this state.
+- Japanese/Korean scenario code is ready, but current enabled input sources contain no Japanese or Korean candidates.
 
 ## New Learnings
 
@@ -34,6 +35,8 @@ Compaction Rule: after memory reload or compaction, reread this whole file befor
 - Visual parity needs both screenshots and source-addressed geometry metadata. Screenshots catch paint regressions, while fixture reports classify caret/selection failures without relying on pixel diffs alone.
 - Remote patches should be an explicit controller API, not just `applyEdit(recordUndo:false)`. Batch patches are applied from higher source offsets to lower ones so CRDT/remote callers can provide current-document coordinates without earlier changes shifting later ranges.
 - Composition under remote patches has three product states: preserved when the replacement text is unchanged, conflict when a remote patch touches the replacement range, and optional cancel-on-conflict for integrations that prefer fail-closed composition.
+- Real macOS IME validation has two separate gates: targeted `CGEventPostToPid` can prove browser/input plumbing, but native IME composition requires the browser to be the foreground app and global HID to reach it. On 2026-04-21, targeted Chrome key events passed while foreground checks failed (`System Events` saw Notion; `NSWorkspace` saw `loginwindow`).
+- The macOS IME runner now stops before sending global HID if the browser is not foreground, so failed OS focus no longer risks typing probe characters into another app.
 
 ## Architecture Direction
 
@@ -307,7 +310,7 @@ Goal: finish the OS-only validation when the machine is available.
 - [ ] Review candidate-window anchoring screenshot artifacts.
 - [ ] Enable and run Japanese commit/cancel/replacement.
 - [ ] Enable and run Korean commit/cancel/replacement.
-- [ ] Record OS limitations and reproducible setup steps.
+- [x] Record OS limitations and reproducible setup steps.
 
 Acceptance:
 
@@ -374,3 +377,7 @@ Acceptance:
 - Added a Canvas native streaming fixture. `fixture=streaming` demonstrates AI chunks appending through the remote patch API while the user edits a different block; `autostream=1` runs a short automatic stream for manual Storybook inspection. Browser coverage types locally, streams two AI chunks, and verifies local selection plus incremental rendering stay stable.
 - Current verification for Phase 16 completion: `vp check --fix` passes, `vp test` passes 207 tests, `vp run build` passes, and `vp run test:browser` passes 31 Playwright tests.
 - Remaining plan work is Phase 17 only. It is an OS-level macOS HID/IME validation gate and remains deferred by instruction while the machine is actively used.
+- Zixuan allowed exclusive tests. Real Pinyin was attempted twice in strict mode and once in non-strict mode. Targeted Chrome key events passed, proving browser/input-bridge plumbing, but global IME/HID validation could not start because macOS would not make Chrome foreground. Direct AppleScript activation, System Events `frontmost`, `open -a`, AXRaise, Cmd-Tab via HID, Finder activation, iTerm activation, and `NSRunningApplication.activate` all failed to produce a valid Chrome foreground state.
+- Current OS diagnostics: `System Events` reports Notion as frontmost, while `NSWorkspace` reports `loginwindow` as frontmost. The runner now treats this as a no-foreground OS gate failure and stops before posting global HID. Artifacts: `test-results/macos-ime/hid-probe-no-foreground.png`, `test-results/macos-ime/hid-probe-no-foreground.json`, and `test-results/macos-ime/ime-skip.txt`.
+- Japanese and Korean dry-runs were rechecked. Both scenario sets are prepared, but current enabled input sources have no Japanese/Korean candidates, so real Japanese/Korean IME scenarios cannot run until those input sources are enabled.
+- Phase 17 status: OS limitations and reproducible failure conditions are recorded; Pinyin/Japanese/Korean pass criteria remain open because the GUI foreground/input-source prerequisites are not satisfied in the current session.
