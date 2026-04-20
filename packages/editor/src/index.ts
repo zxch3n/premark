@@ -1,5 +1,13 @@
 export { createCompositionSession, CompositionSession } from "./composition.ts";
 export {
+  clientPointToSurfacePoint,
+  clientPointToWorldPoint,
+  surfacePointToClientPoint,
+  surfacePointToDevicePixel,
+  worldPointToClientPoint,
+} from "./coordinate-transform.ts";
+export type { EditorCoordinateTransform, Point } from "./coordinate-transform.ts";
+export {
   applyEditOperation,
   deleteRangeOperation,
   insertTextOperation,
