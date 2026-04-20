@@ -12,6 +12,7 @@ const osInputScript = join(root, "tests/macos-ime/os-input.swift");
 const targetInputSourceID =
   process.env.PREMARK_MACOS_IME_SOURCE_ID ?? "com.apple.inputmethod.SCIM.ITABC";
 const strictRealIme = process.env.PREMARK_MACOS_IME_STRICT === "1";
+const dryRun = process.env.PREMARK_MACOS_IME_DRY_RUN === "1" || process.argv.includes("--dry-run");
 
 if (process.platform !== "darwin") {
   console.log("[macos-ime] skipped: not running on macOS");
@@ -39,6 +40,47 @@ function swiftInputSource(...args) {
 
 function swiftOsInput(...args) {
   return run("swift", [osInputScript, ...args]);
+}
+
+function parseInputSources(sources) {
+  return sources
+    .split("\n")
+    .map((line) => {
+      const [id = "", enabled = "", ...nameParts] = line.split("\t");
+      return {
+        id,
+        enabled: enabled === "enabled",
+        name: nameParts.join("\t"),
+      };
+    })
+    .filter((source) => source.id.length > 0);
+}
+
+function findImeCandidates(sources, patterns) {
+  return sources.filter((source) =>
+    patterns.some((pattern) => pattern.test(`${source.id} ${source.name}`)),
+  );
+}
+
+function writeDryRunReport(report) {
+  mkdirSync(join(root, "test-results/macos-ime"), { recursive: true });
+  writeFileSync(
+    join(root, "test-results/macos-ime/dry-run.json"),
+    `${JSON.stringify(report, null, 2)}\n`,
+  );
+  writeFileSync(
+    join(root, "test-results/macos-ime/dry-run.txt"),
+    [
+      `current=${report.currentInputSourceID}`,
+      `target=${report.targetInputSourceID}`,
+      `targetFound=${String(report.targetFound)}`,
+      `usFound=${String(report.usFound)}`,
+      `japaneseCandidates=${report.japaneseCandidates.length}`,
+      `koreanCandidates=${report.koreanCandidates.length}`,
+      `osInputHelper=${report.osInputHelper}`,
+      "",
+    ].join("\n"),
+  );
 }
 
 function osascript(script) {
@@ -243,6 +285,28 @@ async function launchMacBrowser() {
 
 async function main() {
   const sources = swiftInputSource("list");
+  const parsedSources = parseInputSources(sources);
+  const usSourceID = "com.apple.keylayout.US";
+
+  if (dryRun) {
+    const report = {
+      mode: "dry-run",
+      currentInputSourceID: swiftInputSource("current"),
+      targetInputSourceID,
+      targetFound: parsedSources.some((source) => source.id === targetInputSourceID),
+      usFound: parsedSources.some((source) => source.id === usSourceID),
+      pinyinCandidates: findImeCandidates(parsedSources, [/pinyin/iu, /SCIM/iu, /ITABC/iu]),
+      japaneseCandidates: findImeCandidates(parsedSources, [/japanese/iu, /kotoeri/iu, /romaji/iu]),
+      koreanCandidates: findImeCandidates(parsedSources, [/korean/iu, /hangul/iu]),
+      osInputHelper: swiftOsInput("check"),
+      enabledSourceCount: parsedSources.filter((source) => source.enabled).length,
+      sourceCount: parsedSources.length,
+    };
+    writeDryRunReport(report);
+    console.log(`[macos-ime] dry-run report written: ${JSON.stringify(report, null, 2)}`);
+    return;
+  }
+
   if (!sources.includes(targetInputSourceID)) {
     console.log(`[macos-ime] skipped: input source not found: ${targetInputSourceID}`);
     console.log(sources);
@@ -274,7 +338,6 @@ async function main() {
       launched.processCandidates.find((name) => processNames.includes(name)) ?? "";
     console.log(`[macos-ime] browser activation target: ${browserProcessName || "(none)"}`);
 
-    const usSourceID = "com.apple.keylayout.US";
     if (sources.includes(usSourceID)) {
       const selectedUS = swiftInputSource("select", usSourceID);
       console.log(`[macos-ime] selected input source for focus probe: ${selectedUS}`);

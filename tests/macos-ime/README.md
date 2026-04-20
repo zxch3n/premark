@@ -6,6 +6,16 @@ Run:
 vp run test:macos-ime
 ```
 
+Non-interactive readiness check:
+
+```sh
+vp run test:macos-ime:dry-run
+```
+
+The dry run does not build Storybook, launch a browser, foreground an app, or post keyboard/HID
+events. It only verifies the Swift helpers, records the current input source, checks whether the
+target Pinyin and US sources are available, and lists likely Japanese/Korean input-source candidates.
+
 The runner builds Storybook, serves the native Premark editor story, then runs two macOS-specific probes:
 
 - A required US keyboard probe posts real macOS key events to the browser process and verifies that the hidden textarea bridge receives `keydown`, `beforeinput`, `input`, and source updates.
@@ -23,9 +33,12 @@ Useful environment variables:
 - `PREMARK_MACOS_IME_SOURCE_ID`: input source ID to test. Defaults to `com.apple.inputmethod.SCIM.ITABC`.
 - `PREMARK_MACOS_IME_BROWSER_CHANNEL`: Playwright browser channel. Defaults to `chrome`; set `bundled` to use Playwright's bundled Chromium.
 - `PREMARK_MACOS_IME_STRICT=1`: fail instead of skip when real foreground Pinyin cannot run.
+- `PREMARK_MACOS_IME_DRY_RUN=1`: run the non-interactive readiness check only.
 
 Artifacts:
 
+- `test-results/macos-ime/dry-run.json`: input-source and helper readiness report.
+- `test-results/macos-ime/dry-run.txt`: short dry-run summary.
 - `test-results/macos-ime/pinyin-commit.png`: real Pinyin succeeded.
 - `test-results/macos-ime/pinyin-skipped-no-foreground.png`: browser could not become foreground.
 - `test-results/macos-ime/pinyin-skip.txt`: exact skip reason.

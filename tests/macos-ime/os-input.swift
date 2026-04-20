@@ -2,7 +2,7 @@ import ApplicationServices
 import Foundation
 
 func usage() -> Never {
-  fputs("usage: os-input.swift keycodes <pid> <key-code>... | hid-keycodes <key-code>...\n", stderr)
+  fputs("usage: os-input.swift check | keycodes <pid> <key-code>... | hid-keycodes <key-code>...\n", stderr)
   exit(2)
 }
 
@@ -12,6 +12,8 @@ guard args.count >= 2 else {
 }
 
 switch args[1] {
+case "check":
+  print("ok")
 case "keycodes":
   guard args.count >= 4, let pid = Int32(args[2]) else {
     usage()
