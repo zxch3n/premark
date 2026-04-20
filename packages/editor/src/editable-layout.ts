@@ -18,6 +18,7 @@ export interface EditableFragment {
   readonly font: string;
   readonly type: InlineFragment["type"] | "code_block";
   readonly sourceRange: SourceRange;
+  readonly sourceOffsets: readonly number[];
   readonly tokenRange?: SourceRange;
   readonly rect: Rect;
   readonly textInsetX: number;
@@ -47,6 +48,19 @@ export interface EditableLayoutIndexInput {
   readonly layout: DocumentLayout;
   readonly blockSpans: readonly BlockSpan[];
   readonly inlineSources: readonly MarkdownInlineSourceRecord[];
+  readonly sourceMap?: EditableLayoutSourceMap;
+}
+
+export interface EditableLayoutSourceMap {
+  readonly markdown: string;
+  readonly segments: readonly EditableLayoutSourceMapSegment[];
+}
+
+export interface EditableLayoutSourceMapSegment {
+  readonly revealedFrom: number;
+  readonly revealedTo: number;
+  readonly sourceFrom: number;
+  readonly sourceTo: number;
 }
 
 export class EditableLayoutIndex {
@@ -62,7 +76,7 @@ export class EditableLayoutIndex {
 
   hitTest(x: number, y: number): HitTestResult {
     const lineFragments = this.fragments.filter(
-      (fragment) => y >= fragment.rect.y && y <= fragment.rect.y + fragment.rect.height,
+      (fragment) => y >= fragment.rect.y && y < fragment.rect.y + fragment.rect.height,
     );
 
     if (lineFragments.length === 0) {
@@ -95,9 +109,7 @@ export class EditableLayoutIndex {
   }
 
   sourceOffsetToCaretRect(offset: number, affinity: "before" | "after" = "after"): CaretRect {
-    const containing = this.fragments.find(
-      (fragment) => offset >= fragment.sourceRange.from && offset <= fragment.sourceRange.to,
-    );
+    const containing = containingFragmentAtOffset(this.fragments, offset, affinity);
 
     if (containing !== undefined) {
       return {
@@ -111,7 +123,14 @@ export class EditableLayoutIndex {
       .reverse()
       .find((fragment) => fragment.sourceRange.to <= offset);
     const after = this.fragments.find((fragment) => fragment.sourceRange.from >= offset);
-    const fallback = affinity === "before" ? (before ?? after) : (after ?? before);
+    const fallback =
+      before !== undefined &&
+      after !== undefined &&
+      isInterBlockWhitespaceOffset(this.blockSpans, offset)
+        ? before
+        : affinity === "before"
+          ? (before ?? after)
+          : (after ?? before);
 
     if (fallback === undefined) {
       return {
@@ -210,6 +229,42 @@ export class EditableLayoutIndex {
   }
 }
 
+function containingFragmentAtOffset(
+  fragments: readonly EditableFragment[],
+  offset: number,
+  affinity: "before" | "after",
+): EditableFragment | undefined {
+  const containing = fragments.filter(
+    (fragment) => offset >= fragment.sourceRange.from && offset <= fragment.sourceRange.to,
+  );
+  if (containing.length <= 1) {
+    return containing[0];
+  }
+
+  if (affinity === "before") {
+    return (
+      [...containing].reverse().find((fragment) => fragment.sourceRange.to === offset) ??
+      containing[0]
+    );
+  }
+
+  return (
+    containing.find((fragment) => fragment.sourceRange.from === offset) ??
+    containing[containing.length - 1]
+  );
+}
+
+function isInterBlockWhitespaceOffset(blockSpans: readonly BlockSpan[], offset: number): boolean {
+  const previousBlock = [...blockSpans].reverse().find((span) => span.to <= offset);
+  const nextBlock = blockSpans.find((span) => span.from >= offset);
+  return (
+    previousBlock !== undefined &&
+    nextBlock !== undefined &&
+    offset > previousBlock.to &&
+    offset < nextBlock.from
+  );
+}
+
 function sourceRangeCoveringFragments(
   fragments: readonly EditableFragment[],
   fallbackOffset: number,
@@ -269,63 +324,70 @@ function buildEditableFragments(input: EditableLayoutIndexInput): EditableFragme
   );
   const output: EditableFragment[] = [];
   let sourceCursor = 0;
+  let layoutCursor = 0;
 
   for (const line of input.layout.lines) {
     if (line.kind === "opaque" && line.content.type === "code_block") {
-      if (line.content.code.length === 0) continue;
-      const sourceFrom = findFragmentSource(
-        input.markdown,
-        line.content.code,
+      const codeContent = line.content;
+      if (codeContent.code.length === 0) continue;
+      const mapped = findFragmentSourceMapping(
+        input,
+        codeContent.code,
+        codeContent.code,
         sourceCursor,
-        input.markdown.length,
+        layoutCursor,
       );
-      const sourceRange = {
-        from: sourceFrom,
-        to: sourceFrom + line.content.code.length,
-      };
+      const sourceRange = mapped.sourceRange;
       const blockSpan = findBlockSpanForRange(input.blockSpans, sourceRange);
       if (blockSpan === undefined) continue;
-      output.push({
-        blockId: blockSpan.id,
-        blockIndex: line.blockIndex,
-        lineIndex: line.index,
-        fragmentIndex: 0,
-        text: line.content.code,
-        font: line.content.font,
-        type: "code_block",
-        sourceRange,
-        rect: {
-          x: line.x + line.content.padding.left,
-          y: line.y + line.content.padding.top,
-          width: Math.max(1, line.width - line.content.padding.left - line.content.padding.right),
-          height: Math.max(
-            line.content.lineHeight,
-            line.height - line.content.padding.top - line.content.padding.bottom,
-          ),
-        },
-        textInsetX: 0,
+      let textOffset = 0;
+      codeContent.code.split("\n").forEach((codeLine, codeLineIndex) => {
+        const lineStart = textOffset;
+        const lineEnd = lineStart + codeLine.length;
+        textOffset = lineEnd + 1;
+
+        const sourceOffsets = mapped.sourceOffsets.slice(lineStart, lineEnd + 1);
+        output.push({
+          blockId: blockSpan.id,
+          blockIndex: line.blockIndex,
+          lineIndex: line.index + codeLineIndex,
+          fragmentIndex: codeLineIndex,
+          text: codeLine,
+          font: codeContent.font,
+          type: "code_block",
+          sourceRange: sourceRangeFromOffsets(sourceOffsets),
+          sourceOffsets,
+          rect: {
+            x: line.x + codeContent.padding.left,
+            y: line.y + codeContent.padding.top + codeLineIndex * codeContent.lineHeight,
+            width: Math.max(1, measureTextWidth(codeLine, codeContent.font)),
+            height: codeContent.lineHeight,
+          },
+          textInsetX: 0,
+        });
       });
       sourceCursor = Math.max(sourceRange.to, blockSpan.to);
+      layoutCursor = mapped.nextLayoutCursor;
       continue;
     }
 
     if (line.kind !== "text") continue;
 
     line.fragments.forEach((fragment, fragmentIndex) => {
-      if (fragment.text.length === 0) return;
-      const sourceFrom = findFragmentSource(
-        input.markdown,
+      const sourceText = comparableSourceText(fragment.text);
+      if (sourceText.length === 0) return;
+      const mapped = findFragmentSourceMapping(
+        input,
         fragment.text,
+        sourceText,
         sourceCursor,
-        input.markdown.length,
+        layoutCursor,
       );
-      const sourceRange = {
-        from: sourceFrom,
-        to: sourceFrom + fragment.text.length,
-      };
+      const sourceRange = mapped.sourceRange;
       const blockSpan = findBlockSpanForRange(input.blockSpans, sourceRange);
       if (blockSpan === undefined) {
         sourceCursor = sourceRange.to;
+        layoutCursor = mapped.nextLayoutCursor;
         return;
       }
       output.push({
@@ -337,6 +399,7 @@ function buildEditableFragments(input: EditableLayoutIndexInput): EditableFragme
         font: fragment.font,
         type: fragment.type,
         sourceRange,
+        sourceOffsets: mapped.sourceOffsets,
         tokenRange: findSmallestContainingTokenRange(blockSpan.id, sourceRange, tokenRecords),
         rect: {
           x: line.x + fragment.x,
@@ -347,10 +410,103 @@ function buildEditableFragments(input: EditableLayoutIndexInput): EditableFragme
         textInsetX: fragment.type === "inline_code" ? 6 : 0,
       });
       sourceCursor = sourceRange.to;
+      layoutCursor = mapped.nextLayoutCursor;
     });
   }
 
-  return output;
+  return addVirtualSourceLineBreakFragments(output, input.markdown, input.blockSpans);
+}
+
+function addVirtualSourceLineBreakFragments(
+  fragments: readonly EditableFragment[],
+  markdown: string,
+  blockSpans: readonly BlockSpan[],
+): EditableFragment[] {
+  const virtualFragments: EditableFragment[] = [];
+  for (let index = 1; index < blockSpans.length; index += 1) {
+    const previousSpan = blockSpans[index - 1]!;
+    const nextSpan = blockSpans[index]!;
+    const newlineOffsets = newlineOffsetsInRange(markdown, previousSpan.to, nextSpan.from);
+    const blankLineCount = Math.max(0, newlineOffsets.length - 1);
+    if (blankLineCount === 0) continue;
+
+    const previousFragment = [...fragments]
+      .reverse()
+      .find((fragment) => fragment.sourceRange.to <= previousSpan.to);
+    const nextFragment = fragments.find((fragment) => fragment.sourceRange.from >= nextSpan.from);
+    if (previousFragment === undefined || nextFragment === undefined) continue;
+
+    const lineHeight = previousFragment.rect.height;
+    const availableGap = nextFragment.rect.y - (previousFragment.rect.y + lineHeight);
+    if (availableGap + 0.5 < blankLineCount * lineHeight) continue;
+
+    for (let blankLineIndex = 0; blankLineIndex < blankLineCount; blankLineIndex += 1) {
+      const sourceOffset = (newlineOffsets[blankLineIndex] ?? previousSpan.to) + 1;
+      virtualFragments.push(
+        createVirtualLineBreakFragment(previousFragment, sourceOffset, blankLineIndex + 1),
+      );
+    }
+  }
+
+  const lastSpan = blockSpans.at(-1);
+  const lastFragment = fragments.at(-1);
+  if (lastSpan !== undefined && lastFragment !== undefined) {
+    const trailingNewlineOffsets = newlineOffsetsInRange(markdown, lastSpan.to, markdown.length);
+    trailingNewlineOffsets.forEach((newlineOffset, index) => {
+      virtualFragments.push(
+        createVirtualLineBreakFragment(lastFragment, newlineOffset + 1, index + 1),
+      );
+    });
+  }
+
+  return [...fragments, ...virtualFragments].sort(compareEditableFragments);
+}
+
+function createVirtualLineBreakFragment(
+  previousFragment: EditableFragment,
+  sourceOffset: number,
+  lineDelta: number,
+): EditableFragment {
+  return {
+    blockId: `${previousFragment.blockId}:newline:${sourceOffset}`,
+    blockIndex: previousFragment.blockIndex,
+    lineIndex: -sourceOffset,
+    fragmentIndex: 0,
+    text: "",
+    font: previousFragment.font,
+    type: "text",
+    sourceRange: {
+      from: sourceOffset,
+      to: sourceOffset,
+    },
+    sourceOffsets: [sourceOffset],
+    rect: {
+      x: 0,
+      y: previousFragment.rect.y + previousFragment.rect.height * lineDelta,
+      width: 1,
+      height: previousFragment.rect.height,
+    },
+    textInsetX: 0,
+  };
+}
+
+function newlineOffsetsInRange(markdown: string, from: number, to: number): number[] {
+  const offsets: number[] = [];
+  for (let offset = Math.max(0, from); offset < Math.min(markdown.length, to); offset += 1) {
+    if (markdown.charCodeAt(offset) === 10) {
+      offsets.push(offset);
+    }
+  }
+  return offsets;
+}
+
+function compareEditableFragments(left: EditableFragment, right: EditableFragment): number {
+  if (left.rect.y !== right.rect.y) return left.rect.y - right.rect.y;
+  if (left.rect.x !== right.rect.x) return left.rect.x - right.rect.x;
+  if (left.sourceRange.from !== right.sourceRange.from) {
+    return left.sourceRange.from - right.sourceRange.from;
+  }
+  return left.sourceRange.to - right.sourceRange.to;
 }
 
 function findBlockSpanForRange(
@@ -388,6 +544,163 @@ function findFragmentSource(
 ): number {
   const found = markdown.indexOf(renderedText, from);
   return found >= from && found < blockTo ? found : from;
+}
+
+const markerSeparator = String.fromCharCode(0x2060);
+
+function comparableSourceText(renderedText: string): string {
+  return renderedText.replaceAll(markerSeparator, "");
+}
+
+function findFragmentSourceMapping(
+  input: EditableLayoutIndexInput,
+  renderedText: string,
+  comparableText: string,
+  sourceCursor: number,
+  layoutCursor: number,
+): {
+  sourceRange: SourceRange;
+  sourceOffsets: readonly number[];
+  nextLayoutCursor: number;
+} {
+  if (input.sourceMap !== undefined) {
+    const revealedMatch =
+      findRenderedTextInMarkdown(input.sourceMap.markdown, renderedText, layoutCursor) ??
+      findRenderedTextInMarkdown(input.sourceMap.markdown, renderedText, 0);
+    if (revealedMatch !== null) {
+      const sourceOffsets = revealedMatch.boundaries.map((offset) =>
+        mapRevealedOffsetToSource(input.sourceMap!, offset),
+      );
+      if (sourceOffsets.length > 0) {
+        return {
+          sourceRange: sourceRangeFromOffsets(sourceOffsets),
+          sourceOffsets,
+          nextLayoutCursor: revealedMatch.range.to,
+        };
+      }
+    }
+  }
+
+  const sourceFrom = findFragmentSource(
+    input.markdown,
+    comparableText,
+    sourceCursor,
+    input.markdown.length,
+  );
+  const sourceOffsets = createLinearSourceOffsets(renderedText, sourceFrom);
+  return {
+    sourceRange: sourceRangeFromOffsets(sourceOffsets),
+    sourceOffsets,
+    nextLayoutCursor: layoutCursor,
+  };
+}
+
+function findRenderedTextInMarkdown(
+  markdown: string,
+  renderedText: string,
+  from: number,
+): { range: SourceRange; boundaries: readonly number[] } | null {
+  if (renderedText.length === 0) return null;
+
+  for (let start = Math.max(0, from); start < markdown.length; start += 1) {
+    let rawOffset = start;
+    let renderedOffset = 0;
+    const boundaries = [start];
+    while (rawOffset < markdown.length && renderedOffset < renderedText.length) {
+      const rawChar = markdown[rawOffset];
+      if (rawChar === markerSeparator) {
+        rawOffset += markerSeparator.length;
+        continue;
+      }
+
+      const nextRawOffset =
+        rawChar === "\\" && rawOffset + 1 < markdown.length ? rawOffset + 2 : rawOffset + 1;
+      const renderedChar =
+        rawChar === "\\" && rawOffset + 1 < markdown.length ? markdown[rawOffset + 1] : rawChar;
+      if (renderedChar !== renderedText[renderedOffset]) {
+        break;
+      }
+      rawOffset = nextRawOffset;
+      renderedOffset += 1;
+      boundaries.push(rawOffset);
+    }
+
+    if (renderedOffset === renderedText.length) {
+      return {
+        range: {
+          from: start,
+          to: rawOffset,
+        },
+        boundaries,
+      };
+    }
+  }
+
+  return null;
+}
+
+function mapRevealedOffsetToSource(sourceMap: EditableLayoutSourceMap, offset: number): number {
+  let previous: EditableLayoutSourceMapSegment | null = null;
+  let next: EditableLayoutSourceMapSegment | null = null;
+  for (const segment of sourceMap.segments) {
+    if (offset >= segment.revealedFrom && offset <= segment.revealedTo) {
+      return mapSegmentOffset(segment, offset, "start");
+    }
+    if (segment.revealedTo <= offset) {
+      previous = segment;
+    }
+    if (next === null && segment.revealedFrom >= offset) {
+      next = segment;
+    }
+  }
+
+  if (previous !== null) {
+    return previous.sourceTo;
+  }
+  if (next !== null) {
+    return next.sourceFrom;
+  }
+  return 0;
+}
+
+function createLinearSourceOffsets(renderedText: string, sourceFrom: number): readonly number[] {
+  const offsets = [sourceFrom];
+  let sourceOffset = sourceFrom;
+  for (let index = 0; index < renderedText.length; index += 1) {
+    if (renderedText[index] !== markerSeparator) {
+      sourceOffset += 1;
+    }
+    offsets.push(sourceOffset);
+  }
+  return offsets;
+}
+
+function sourceRangeFromOffsets(offsets: readonly number[]): SourceRange {
+  if (offsets.length === 0) {
+    return {
+      from: 0,
+      to: 0,
+    };
+  }
+  return {
+    from: Math.min(...offsets),
+    to: Math.max(...offsets),
+  };
+}
+
+function mapSegmentOffset(
+  segment: EditableLayoutSourceMapSegment,
+  offset: number,
+  side: "start" | "end",
+): number {
+  const revealedLength = segment.revealedTo - segment.revealedFrom;
+  const sourceLength = segment.sourceTo - segment.sourceFrom;
+  if (revealedLength <= 0 || sourceLength <= 0) {
+    return side === "start" ? segment.sourceFrom : segment.sourceTo;
+  }
+  const ratio = (offset - segment.revealedFrom) / revealedLength;
+  const mapped = segment.sourceFrom + ratio * sourceLength;
+  return side === "start" ? Math.floor(mapped) : Math.ceil(mapped);
 }
 
 function proportionalWidth(
@@ -489,7 +802,7 @@ function offsetInsideFragment(fragment: EditableFragment, x: number): number {
       break;
     }
   }
-  return Math.min(fragment.sourceRange.to, fragment.sourceRange.from + delta);
+  return sourceOffsetAtTextOffset(fragment, delta);
 }
 
 function caretRectInFragment(fragment: EditableFragment, offset: number): Rect {
@@ -497,7 +810,7 @@ function caretRectInFragment(fragment: EditableFragment, offset: number): Rect {
     Math.max(offset, fragment.sourceRange.from),
     fragment.sourceRange.to,
   );
-  const delta = clampedOffset - fragment.sourceRange.from;
+  const delta = textOffsetAtSourceOffset(fragment, clampedOffset);
   return {
     x: textOffsetToX(fragment, delta),
     y: fragment.rect.y,
@@ -507,8 +820,8 @@ function caretRectInFragment(fragment: EditableFragment, offset: number): Rect {
 }
 
 function rectForFragmentRange(fragment: EditableFragment, from: number, to: number): Rect {
-  const startDelta = from - fragment.sourceRange.from;
-  const endDelta = to - fragment.sourceRange.from;
+  const startDelta = textOffsetAtSourceOffset(fragment, from);
+  const endDelta = textOffsetAtSourceOffset(fragment, to);
   const x = textOffsetToX(fragment, startDelta);
   const endX = textOffsetToX(fragment, endDelta);
   return {
@@ -517,6 +830,23 @@ function rectForFragmentRange(fragment: EditableFragment, from: number, to: numb
     width: Math.max(0, endX - x),
     height: fragment.rect.height,
   };
+}
+
+function sourceOffsetAtTextOffset(fragment: EditableFragment, textOffset: number): number {
+  const clampedOffset = Math.min(Math.max(textOffset, 0), fragment.sourceOffsets.length - 1);
+  return fragment.sourceOffsets[clampedOffset] ?? fragment.sourceRange.from;
+}
+
+function textOffsetAtSourceOffset(fragment: EditableFragment, sourceOffset: number): number {
+  const offsets = fragment.sourceOffsets;
+  if (offsets.length === 0) return 0;
+  for (let index = 0; index < offsets.length; index += 1) {
+    const current = offsets[index] ?? fragment.sourceRange.from;
+    if (current >= sourceOffset) {
+      return index;
+    }
+  }
+  return offsets.length - 1;
 }
 
 function mergeLineRects(rects: readonly Rect[]): Rect[] {

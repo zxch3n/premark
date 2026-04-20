@@ -39,13 +39,13 @@ const highlighter = createHighlighter();
 const previewLayoutEngine = createLayoutEngine({
   fontTheme: "modern",
   highlighter,
+  lineBreakMode: "source",
 });
 
 export const InteractiveNativePrototype = () => {
   const root = document.createElement("div");
   const searchParams = new URL(window.location.href).searchParams;
   const screenshotMode = searchParams.get("screenshot") === "1";
-  const activeMarkerMode = searchParams.get("marker") === "active";
   root.className = screenshotMode ? "pne-root pne-screenshot-mode" : "pne-root";
 
   const editor = createInMemoryEditorDocumentState(sampleMarkdown, 720, {
@@ -198,16 +198,10 @@ export const InteractiveNativePrototype = () => {
       };
     }
 
-    if (!activeMarkerMode) {
-      return {
-        layout: editor.layout,
-        editableIndex: editor.editableIndex,
-      };
-    }
-
     const reveal = createActiveMarkerRevealMarkdown({
       markdown: editor.markdown,
       inlineSources: editor.inlineSources,
+      blockSpans: editor.parseState.blockSpans,
       selectionRange: editor.selectionSourceRange,
     });
     if (reveal.markerState === "hidden") {
@@ -225,6 +219,7 @@ export const InteractiveNativePrototype = () => {
         layout,
         blockSpans: editor.parseState.blockSpans,
         inlineSources: editor.inlineSources,
+        sourceMap: reveal.sourceMap,
       }),
     };
   }
@@ -348,7 +343,7 @@ export const InteractiveNativePrototype = () => {
   surface.addEventListener("pointerdown", (event) => {
     event.preventDefault();
     const point = pointFromEvent(event);
-    pointerSession = beginPointerSelection(editor, point.x, point.y);
+    pointerSession = beginPointerSelection(editor, point.x, point.y, currentEditableIndex);
     textarea.focus();
     render();
   });
@@ -358,7 +353,7 @@ export const InteractiveNativePrototype = () => {
       return;
     }
     const point = pointFromEvent(event);
-    updatePointerSelection(editor, pointerSession, point.x, point.y);
+    updatePointerSelection(editor, pointerSession, point.x, point.y, currentEditableIndex);
     render();
   });
 

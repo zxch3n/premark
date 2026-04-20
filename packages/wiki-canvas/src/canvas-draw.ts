@@ -63,6 +63,8 @@ export interface TileDrawOptions {
   selectionColor?: string;
   caretRect?: CanvasOverlayRect;
   caretColor?: string;
+  compositionRects?: readonly CanvasOverlayRect[];
+  compositionColor?: string;
 }
 
 export interface CanvasOverlayRect {
@@ -151,6 +153,8 @@ export function drawTile(
 
   drawSelectionOverlay(ctx, options.selectionRects ?? [], originX, originY, {
     selectionColor: options.selectionColor ?? "rgba(125, 211, 174, 0.32)",
+    compositionColor: options.compositionColor ?? options.caretColor ?? palette.accent,
+    compositionRects: options.compositionRects ?? [],
     caretColor: options.caretColor ?? palette.accent,
     caretRect: options.caretRect,
   });
@@ -180,11 +184,17 @@ function drawSelectionOverlay(
   originY: number,
   options: {
     readonly selectionColor: string;
+    readonly compositionColor: string;
+    readonly compositionRects: readonly CanvasOverlayRect[];
     readonly caretColor: string;
     readonly caretRect?: CanvasOverlayRect;
   },
 ): void {
-  if (selectionRects.length === 0 && options.caretRect === undefined) {
+  if (
+    selectionRects.length === 0 &&
+    options.compositionRects.length === 0 &&
+    options.caretRect === undefined
+  ) {
     return;
   }
 
@@ -192,6 +202,12 @@ function drawSelectionOverlay(
   ctx.fillStyle = options.selectionColor;
   for (const rect of selectionRects) {
     roundedRect(ctx, originX + rect.x, originY + rect.y, rect.width, rect.height, 3);
+    ctx.fill();
+  }
+
+  ctx.fillStyle = options.compositionColor;
+  for (const rect of options.compositionRects) {
+    roundedRect(ctx, originX + rect.x, originY + rect.y + rect.height - 3, rect.width, 2, 1);
     ctx.fill();
   }
 

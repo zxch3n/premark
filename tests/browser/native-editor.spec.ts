@@ -6,6 +6,9 @@ const screenshotStoryUrl = `${storyUrl}&screenshot=1`;
 const activeMarkerScreenshotStoryUrl = `${screenshotStoryUrl}&marker=active`;
 const canvasSelectionStoryUrl =
   "/iframe.html?id=editing-premark-canvas-selection--canvas-selection&viewMode=story";
+const canvasNativeStoryUrl =
+  "/iframe.html?id=editing-premark-canvas-native-editor--interactive-canvas-native-editor&viewMode=story";
+const canvasNativeContentPadding = 28;
 
 async function readSelection(page: Page) {
   return JSON.parse((await page.locator("[data-debug-selection]").textContent()) ?? "{}") as {
@@ -14,6 +17,7 @@ async function readSelection(page: Page) {
     isCollapsed: boolean;
     direction: string;
     range: { from: number; to: number };
+    headCaret: { rect: { x: number; y: number; width: number; height: number } };
   };
 }
 
@@ -26,6 +30,117 @@ async function editorMarkdown(page: Page) {
         }
       ).__premarkNativeEditor?.markdown() ?? "",
   );
+}
+
+async function canvasEditorMarkdown(page: Page) {
+  return page.evaluate(
+    () =>
+      (
+        window as typeof window & {
+          __premarkCanvasNativeEditor?: { markdown(): string };
+        }
+      ).__premarkCanvasNativeEditor?.markdown() ?? "",
+  );
+}
+
+async function canvasPointForText(page: Page, text: string, edge: "start" | "end" = "start") {
+  return page.evaluate(
+    ({ text, edge }) =>
+      (
+        window as typeof window & {
+          __premarkCanvasNativeEditor?: {
+            pointForText(text: string, edge?: "start" | "end"): { x: number; y: number };
+          };
+        }
+      ).__premarkCanvasNativeEditor!.pointForText(text, edge),
+    { text, edge },
+  );
+}
+
+async function readCanvasSelection(page: Page) {
+  return page.evaluate(() =>
+    (
+      window as typeof window & {
+        __premarkCanvasNativeEditor?: {
+          selection(): { anchorOffset: number; headOffset: number; isCollapsed: boolean };
+        };
+      }
+    ).__premarkCanvasNativeEditor!.selection(),
+  );
+}
+
+async function readCanvasGeometry(page: Page) {
+  return JSON.parse(
+    (await page.locator("[data-canvas-debug-selection]").textContent()) ?? "{}",
+  ) as {
+    headCaret: { rect: { x: number; y: number; width: number; height: number } };
+    caret?: { rect: { x: number; y: number; width: number; height: number } };
+  };
+}
+
+async function setCanvasCaret(page: Page, offset: number) {
+  await page.evaluate(
+    (caretOffset) =>
+      (
+        window as typeof window & {
+          __premarkCanvasNativeEditor?: { setCaret(offset: number): void };
+        }
+      ).__premarkCanvasNativeEditor!.setCaret(caretOffset),
+    offset,
+  );
+}
+
+async function measuredCanvasPointForText(page: Page, text: string) {
+  return page.evaluate(
+    ({ text, contentPadding }) => {
+      const editor = (
+        window as typeof window & {
+          __premarkCanvasNativeEditor?: {
+            fragmentForText(text: string): {
+              text: string;
+              font: string;
+              textInsetX: number;
+              sourceRange: { from: number; to: number };
+              rect: { x: number; y: number; width: number; height: number };
+            };
+          };
+        }
+      ).__premarkCanvasNativeEditor!;
+      const fragment = editor.fragmentForText(text);
+      const localOffset = fragment.text.indexOf(text);
+      if (localOffset < 0) {
+        throw new Error(`Text is not inside fragment: ${text}`);
+      }
+      const context = document.createElement("canvas").getContext("2d");
+      if (context === null) {
+        throw new Error("Missing canvas measurement context");
+      }
+      context.font = fragment.font;
+      const fullWidth = context.measureText(fragment.text).width;
+      const prefixWidth = context.measureText(fragment.text.slice(0, localOffset)).width;
+      const visibleTextWidth = Math.max(0, fragment.rect.width - fragment.textInsetX * 2);
+      const measuredLocalX =
+        fragment.textInsetX + (fullWidth > 0 ? (prefixWidth / fullWidth) * visibleTextWidth : 0);
+      const expectedContentX = fragment.rect.x + measuredLocalX;
+      const proportionalContentX =
+        fragment.rect.x + (fragment.rect.width * localOffset) / fragment.text.length;
+
+      return {
+        x: contentPadding + expectedContentX,
+        y: contentPadding + fragment.rect.y + fragment.rect.height / 2,
+        expectedContentX,
+        proportionalDelta: Math.abs(expectedContentX - proportionalContentX),
+      };
+    },
+    { text, contentPadding: canvasNativeContentPadding },
+  );
+}
+
+async function canvasSourceOffset(page: Page, text: string, edge: "start" | "end" = "start") {
+  const markdown = await canvasEditorMarkdown(page);
+  const offset = markdown.indexOf(text);
+  expect(offset, `canvas source offset for ${text}`).toBeGreaterThanOrEqual(0);
+  return edge === "start" ? offset : offset + text.length;
 }
 
 async function sourceOffset(page: Page, text: string, edge: "start" | "end" = "start") {
@@ -380,6 +495,134 @@ test.describe("Premark native editor story", () => {
     } finally {
       await context.close();
     }
+  });
+
+  test("supports Canvas native editor hit-test, typing, drag replacement and composition", async ({
+    page,
+  }, testInfo) => {
+    await page.goto(canvasNativeStoryUrl);
+
+    const canvas = page.locator("[data-canvas-native-editor]");
+    const bridge = page.locator("[data-canvas-input-bridge]");
+    const source = page.locator("[data-canvas-debug-source]");
+    await expect(canvas).toBeVisible();
+    await expect(source).toContainText("Canvas native editor");
+
+    const headingTextStart = await canvasSourceOffset(page, "Canvas native editor");
+    await setCanvasCaret(page, 0);
+    const headingOffsetZero = await readCanvasGeometry(page);
+    await setCanvasCaret(page, 1);
+    const headingOffsetOne = await readCanvasGeometry(page);
+    await setCanvasCaret(page, headingTextStart);
+    const headingTextGeometry = await readCanvasGeometry(page);
+    const measuredHeadingTextStart = await measuredCanvasPointForText(page, "Canvas native editor");
+    expect(headingOffsetOne.headCaret.rect.x).toBeGreaterThan(headingOffsetZero.headCaret.rect.x);
+    expect(headingTextGeometry.headCaret.rect.x).toBeCloseTo(
+      measuredHeadingTextStart.expectedContentX,
+      0,
+    );
+
+    const variableStart = await measuredCanvasPointForText(page, "WWWW");
+    expect(variableStart.proportionalDelta).toBeGreaterThan(8);
+    await canvas.click({ position: variableStart });
+    await expect(bridge).toBeFocused();
+    await setCanvasCaret(page, await canvasSourceOffset(page, "WWWW"));
+    const measuredCaretGeometry = await readCanvasGeometry(page);
+    expect(measuredCaretGeometry.headCaret.rect.x).toBeCloseTo(variableStart.expectedContentX, 0);
+    const variableSelection = await readCanvasSelection(page);
+    expect(variableSelection.isCollapsed).toBe(true);
+    expect(variableSelection.headOffset).toBe(await canvasSourceOffset(page, "WWWW"));
+
+    await page.keyboard.type("wide ");
+    await expect(source).toContainText("wide WWWW");
+
+    const dragStart = await canvasPointForText(page, "Click text");
+    const dragEnd = await canvasPointForText(page, "hidden textarea", "end");
+    await page.mouse.move(dragStart.x, dragStart.y);
+    await page.mouse.down();
+    await page.mouse.move(dragEnd.x, dragEnd.y, { steps: 8 });
+    await page.mouse.up();
+    const draggedSelection = await readCanvasSelection(page);
+    expect(draggedSelection.isCollapsed).toBe(false);
+    expect(draggedSelection.headOffset).toBeGreaterThan(draggedSelection.anchorOffset);
+
+    await page.keyboard.type("Canvas replace");
+    await expect(source).toContainText("Canvas replace");
+    await expect(source).not.toContainText("Click text, drag across blocks");
+
+    const docsStart = await canvasPointForText(page, "docs");
+    await canvas.click({ position: docsStart });
+    await bridge.evaluate((element) => {
+      element.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+      element.dispatchEvent(new CompositionEvent("compositionupdate", { data: "链" }));
+    });
+    await expect(source).not.toContainText("链");
+    await canvas.screenshot({
+      path: testInfo.outputPath("native-editor-canvas-native-composition.png"),
+    });
+    await bridge.evaluate((element) => {
+      element.dispatchEvent(new CompositionEvent("compositionend", { data: "链" }));
+    });
+    await expect(source).toContainText("链docs");
+  });
+
+  test("reveals Markdown controls only when the active range needs them", async ({ page }) => {
+    await page.goto(storyUrl);
+
+    const surface = page.locator("[data-editor-surface]");
+    await expect(surface).toContainText("Native rendered Markdown");
+
+    await setSourceCaret(page, await sourceOffset(page, "Native rendered Markdown"));
+    await expect(surface).toContainText("# Native rendered Markdown");
+    const headingGeometry = await readSelection(page);
+    const headingTextX = await surface.evaluate((element) => {
+      const renderedSurface = element.querySelector(".pmd-surface");
+      if (renderedSurface === null) {
+        throw new Error("Missing rendered surface");
+      }
+      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+      let textNode: Text | null = null;
+      while (walker.nextNode()) {
+        const candidate = walker.currentNode as Text;
+        if (candidate.data.includes("# Native rendered Markdown")) {
+          textNode = candidate;
+          break;
+        }
+      }
+      if (textNode === null) {
+        throw new Error("Missing revealed heading text node");
+      }
+      const offset = textNode.data.indexOf("Native");
+      const range = document.createRange();
+      range.setStart(textNode, offset);
+      range.setEnd(textNode, offset + 1);
+      const rect = range.getBoundingClientRect();
+      return rect.left - renderedSurface.getBoundingClientRect().left;
+    });
+    expect(headingGeometry.headCaret.rect.x).toBeCloseTo(headingTextX, 0);
+
+    await setSourceCaret(page, (await sourceOffset(page, "bold text")) + 1);
+    await expect(surface).toContainText("**bold text**");
+    await expect(surface.locator(".pmd-fragment--strong", { hasText: "bold text" })).toBeVisible();
+
+    await setSourceCaret(page, await sourceOffset(page, "docs"));
+    await expect(surface).toContainText("[docs](https://example.com)");
+    await expect(surface.locator("a.pmd-fragment--link", { hasText: "docs" })).toBeVisible();
+
+    await setSourceSelection(
+      page,
+      await sourceOffset(page, "Try"),
+      await sourceOffset(page, "emoji", "end"),
+    );
+    await expect(surface).not.toContainText("**bold text**");
+    await expect(surface).not.toContainText("https://example.com");
+
+    await setSourceSelection(
+      page,
+      await sourceOffset(page, "bold text"),
+      await sourceOffset(page, "bold text", "end"),
+    );
+    await expect(surface).toContainText("**bold text**");
   });
 
   test("supports rendered-surface click, typing, drag selection, replacement and screenshots", async ({

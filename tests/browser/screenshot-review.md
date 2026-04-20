@@ -15,6 +15,7 @@ Current generated folder pattern:
 - `artifacts/playwright-browser/native-editor-Premark-nati-*/native-editor-shot-*.png`
 - `artifacts/playwright-browser/native-editor-Premark-nati-*/native-editor-mobile-touch-selection.png`
 - `artifacts/playwright-browser/native-editor-Premark-nati-*/native-editor-canvas-selection-hidpi.png`
+- `artifacts/playwright-browser/native-editor-Premark-nati-*/native-editor-canvas-native-composition.png`
 - `test-results/macos-ime/pinyin-skipped-no-foreground.png`
 
 ## Review Entries
@@ -137,3 +138,32 @@ Current generated folder pattern:
 - Notes:
   - These are hard visual diffs through Playwright `toHaveScreenshot`, not only generated review artifacts.
   - The current baseline is macOS/Chromium-specific. Refreshing baselines must be a reviewed visual change.
+
+### 2026-04-20 Canvas Native Editor
+
+- Reviewer: Codex
+- Scenario: interactive Canvas-native editor story with hidden textarea input bridge
+- Result: pass for first Canvas-native editor crop and composition preedit crop
+- Reviewed baseline screenshots:
+  - `native-editor-visual-canvas-native-editor-darwin.png`: the visible editing surface is a Canvas-rendered Markdown tile; heading, list text, variable-width inline text, inline code, link text, CJK text, and emoji all render without a DOM text surface.
+- Reviewed generated screenshots:
+  - `native-editor-canvas-native-composition.png`: synthetic preedit text is not committed to Markdown source, while the Canvas renderer keeps the active caret/composition underline on the rendered line.
+- Notes:
+  - The browser test independently recomputes the `WWWW` hit-test coordinate with Canvas `measureText`, then checks both source offset and caret geometry. This is meant to catch regressions back to proportional character-width placement.
+  - This validates the first Canvas-native editing path. It still uses the existing tile skin rather than final document-canvas art direction.
+
+### 2026-04-20 Source-Preserving Newlines
+
+- Reviewer: Codex
+- Scenario: refreshed visual baselines after native editor layout began preserving source newline characters
+- Result: pass on the local macOS Chromium baseline
+- Reviewed baseline screenshots:
+  - `native-editor-visual-idle-darwin.png`: blank source lines and paragraph softbreaks are now visible as real vertical advances; the heading marker reveal and caret remain aligned.
+  - `native-editor-visual-cross-block-selection-darwin.png`: cross-block selection still spans paragraph/list content with stable geometry after the line-height based source spacing change.
+  - `native-editor-visual-active-marker-darwin.png`: active marker reveal still exposes raw Markdown controls without overlap after explicit source lines are used.
+  - `native-editor-visual-composition-link-darwin.png`: composition underline remains attached to the link-label line after source-preserving line layout.
+  - `native-editor-visual-canvas-selection-darwin.png`: Canvas selection crop reflects the same source line advances and keeps overlay rectangles on the intended lines.
+  - `native-editor-visual-canvas-native-editor-darwin.png`: Canvas-native editor crop now shows source line gaps consistently with the DOM editor path.
+- Notes:
+  - The changed screenshots are intentional: native editing no longer uses Markdown preview softbreak collapsing.
+  - Parser semantics are unchanged; this is an editor-layout behavior change.

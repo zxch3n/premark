@@ -1,7 +1,14 @@
 import { installNodeCanvas } from "../../layout/src/node-canvas.ts";
+import { createLayoutEngine } from "@pretext-md/layout";
+import { createIncrementalParseState, createMarkdownInlineSourceMap } from "@pretext-md/parser";
 import { describe, expect, it } from "vite-plus/test";
 
-import { createInMemoryEditorDocumentState, createSelectionGeometry } from "../src/index.ts";
+import {
+  createActiveMarkerRevealMarkdown,
+  createEditableLayoutIndex,
+  createInMemoryEditorDocumentState,
+  createSelectionGeometry,
+} from "../src/index.ts";
 
 installNodeCanvas();
 
@@ -129,5 +136,75 @@ describe("createSelectionGeometry", () => {
     expectCloseTo(last.x + last.width, endCaret.rect.x);
     expectCloseTo(last.y, endCaret.rect.y);
     expect(geometry.selectionRects.every((rect) => rect.width > 0 && rect.height > 0)).toBe(true);
+  });
+
+  it("uses the active render-view index when Markdown controls are revealed", () => {
+    const markdown = "# Native rendered Markdown";
+    const editor = createInMemoryEditorDocumentState(markdown, 720);
+    editor.setSelection(0, 0);
+    const parseState = createIncrementalParseState(markdown);
+    const inlineSources = createMarkdownInlineSourceMap(parseState);
+    const reveal = createActiveMarkerRevealMarkdown({
+      markdown,
+      inlineSources,
+      blockSpans: parseState.blockSpans,
+      selectionRange: { from: 0, to: 0 },
+    });
+    const layout = createLayoutEngine({ fontTheme: "github" }).layout(reveal.markdown, 720);
+    const activeIndex = createEditableLayoutIndex({
+      markdown,
+      layout,
+      blockSpans: parseState.blockSpans,
+      inlineSources,
+      sourceMap: reveal.sourceMap,
+    });
+
+    const activeGeometry = createSelectionGeometry(editor, activeIndex);
+    editor.setSelection(1, 1);
+    const activeOffsetOne = createSelectionGeometry(editor, activeIndex);
+    editor.setSelection(markdown.indexOf("Native"), markdown.indexOf("Native"));
+    const activeTitleStart = createSelectionGeometry(editor, activeIndex);
+
+    expect(activeOffsetOne.headCaret.rect.x).toBeGreaterThan(activeGeometry.headCaret.rect.x);
+    expect(activeTitleStart.headCaret.rect.x).toBeGreaterThan(activeOffsetOne.headCaret.rect.x);
+  });
+
+  it("keeps collapsed caret geometry at the previous visual line end on wrap boundaries", () => {
+    const editor = createInMemoryEditorDocumentState(
+      "Alpha beta gamma delta epsilon zeta eta theta iota kappa",
+      160,
+    );
+    const firstLineEnd = editor.editableIndex.fragments[0]!.sourceRange.to;
+    const firstLine = editor.editableIndex.fragments[0]!;
+    const secondLine = editor.editableIndex.fragments[1]!;
+    editor.setSelection(firstLineEnd, firstLineEnd);
+
+    const geometry = createSelectionGeometry(editor);
+    const afterCaret = editor.editableIndex.sourceOffsetToCaretRect(firstLineEnd, "after");
+
+    expect(firstLine.sourceRange.to).toBe(secondLine.sourceRange.from);
+    expect(geometry.headCaret.rect.y).toBe(firstLine.rect.y);
+    expect(geometry.headCaret.rect.x).toBeCloseTo(firstLine.rect.x + firstLine.rect.width, 0);
+    expect(afterCaret.rect.y).toBe(secondLine.rect.y);
+    expect(afterCaret.rect.x).toBeCloseTo(secondLine.rect.x, 0);
+  });
+
+  it("keeps collapsed caret geometry on explicit blank visual lines", () => {
+    const editor = createInMemoryEditorDocumentState("abc\n\ndef", 600);
+    const firstLine = editor.editableIndex.fragments.find((fragment) => fragment.text === "abc")!;
+    const blankLine = editor.editableIndex.fragments.find(
+      (fragment) => fragment.sourceRange.from === 4,
+    )!;
+    const secondLine = editor.editableIndex.fragments.find((fragment) => fragment.text === "def")!;
+    editor.setSelection(editor.markdown.indexOf("\n") + 1, editor.markdown.indexOf("\n") + 1);
+
+    const geometry = createSelectionGeometry(editor);
+
+    expect(geometry.headCaret.fragment).toBe(blankLine);
+    expect(geometry.headCaret.rect.y).toBe(firstLine.rect.y + firstLine.rect.height);
+    expect(geometry.headCaret.rect.x).toBe(0);
+    expect(
+      editor.editableIndex.sourceOffsetToCaretRect(editor.markdown.indexOf("def")).fragment,
+    ).toBe(secondLine);
   });
 });
