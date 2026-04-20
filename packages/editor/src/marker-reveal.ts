@@ -22,9 +22,19 @@ export interface ActiveMarkerRevealSourceMapSegment {
   readonly sourceTo: number;
 }
 
+export interface ActiveMarkerRevealEditableRun {
+  readonly revealedFrom: number;
+  readonly revealedTo: number;
+  readonly revealedOffsets: readonly number[];
+  readonly sourceOffsets: readonly number[];
+  readonly kind: "source" | "control";
+  readonly controlType?: RevealedMarkerType;
+}
+
 export interface ActiveMarkerRevealSourceMap {
   readonly markdown: string;
   readonly segments: readonly ActiveMarkerRevealSourceMapSegment[];
+  readonly runs: readonly ActiveMarkerRevealEditableRun[];
 }
 
 export interface ActiveMarkerRevealMarkdown {
@@ -124,6 +134,7 @@ export function createActiveMarkerRevealMarkdown(
     sourceMap: {
       markdown: applied.markdown,
       segments: applied.segments,
+      runs: applied.runs,
     },
     markerState: "active",
   };
@@ -210,6 +221,8 @@ interface ReplacementSourceMapSegment {
   readonly to: number;
   readonly sourceFrom: number;
   readonly sourceTo: number;
+  readonly kind?: "source" | "control";
+  readonly controlType?: RevealedMarkerType;
 }
 
 function blockControlReplacements(markdown: string, control: ActiveBlockControl): Replacement[] {
@@ -229,13 +242,14 @@ function blockControlReplacements(markdown: string, control: ActiveBlockControl)
             to: markerText.length,
             sourceFrom: markerRange.from,
             sourceTo: markerRange.to,
+            kind: "source",
           },
-          {
-            from: markerText.length + 1,
-            to: markerText.length + 1 + escapedMarker.length,
-            sourceFrom: markerRange.from,
-            sourceTo: markerRange.to,
-          },
+          ...escapedVisibleTextSourceMapSegments(
+            markerText,
+            markerRange.from,
+            markerText.length + 1,
+            "heading",
+          ),
         ],
       },
     ];
@@ -256,6 +270,7 @@ function blockControlReplacements(markdown: string, control: ActiveBlockControl)
           to: fence.length + 1 + sourceText.length,
           sourceFrom: control.source.from,
           sourceTo: control.source.to,
+          kind: "source",
         },
       ],
     },
@@ -320,17 +335,19 @@ function inlineControlSourceMap(
       const escapedOpen = escapeMarkdownAsVisibleText(markers.open);
       const escapedClose = escapeMarkdownAsVisibleText(markers.close);
       return [
-        ...escapedVisibleTextSourceMapSegments(markers.open, token.source.from, 0),
+        ...escapedVisibleTextSourceMapSegments(markers.open, token.source.from, 0, token.type),
         {
           from: escapedOpen.length,
           to: escapedOpen.length + token.sourceText.length,
           sourceFrom: token.source.from,
           sourceTo: token.source.to,
+          kind: "source",
         },
         ...escapedVisibleTextSourceMapSegments(
           markers.close,
           token.source.to - markers.close.length,
           text.length - escapedClose.length,
+          token.type,
         ),
       ];
     }
@@ -341,17 +358,19 @@ function inlineControlSourceMap(
       const escapedClose = escapeMarkdownAsVisibleText(markers.close);
       const sourceTextFrom = escapedOpen.length + MARKER_SEPARATOR.length;
       return [
-        ...escapedVisibleTextSourceMapSegments(markers.open, token.source.from, 0),
+        ...escapedVisibleTextSourceMapSegments(markers.open, token.source.from, 0, token.type),
         {
           from: sourceTextFrom,
           to: sourceTextFrom + token.sourceText.length,
           sourceFrom: token.source.from,
           sourceTo: token.source.to,
+          kind: "source",
         },
         ...escapedVisibleTextSourceMapSegments(
           markers.close,
           token.source.to - markers.close.length,
           text.length - escapedClose.length,
+          token.type,
         ),
       ];
     }
@@ -362,17 +381,19 @@ function inlineControlSourceMap(
         const escapedOpen = "\\[";
         const escapedSuffix = escapeMarkdownAsVisibleText(suffix);
         return [
-          ...escapedVisibleTextSourceMapSegments("[", token.source.from, 0),
+          ...escapedVisibleTextSourceMapSegments("[", token.source.from, 0, token.type),
           {
             from: escapedOpen.length,
             to: escapedOpen.length + token.sourceText.length,
             sourceFrom: token.source.from,
             sourceTo: token.source.to,
+            kind: "source",
           },
           ...escapedVisibleTextSourceMapSegments(
             suffix,
             token.source.from + closingBracket,
             text.length - escapedSuffix.length,
+            token.type,
           ),
         ];
       }
@@ -386,6 +407,7 @@ function inlineControlSourceMap(
       to: text.length,
       sourceFrom: token.source.from,
       sourceTo: token.source.to,
+      kind: "source",
     },
   ];
 }
@@ -394,6 +416,7 @@ function escapedVisibleTextSourceMapSegments(
   sourceText: string,
   sourceFrom: number,
   replacementFrom: number,
+  controlType?: RevealedMarkerType,
 ): ReplacementSourceMapSegment[] {
   const segments: ReplacementSourceMapSegment[] = [];
   let replacementCursor = replacementFrom;
@@ -405,6 +428,8 @@ function escapedVisibleTextSourceMapSegments(
       to: replacementCursor + replacementLength,
       sourceFrom: sourceFrom + index,
       sourceTo: sourceFrom + index + 1,
+      kind: controlType === undefined ? "source" : "control",
+      controlType,
     });
     replacementCursor += replacementLength;
   }
@@ -495,12 +520,11 @@ function normalizeReplacements(
       ...merged,
       text: escapeMarkdownAsVisibleText(markdown.slice(merged.from, merged.to)),
       segments: [
-        {
-          from: 0,
-          to: escapeMarkdownAsVisibleText(markdown.slice(merged.from, merged.to)).length,
-          sourceFrom: merged.from,
-          sourceTo: merged.to,
-        },
+        ...escapedVisibleTextSourceMapSegments(
+          markdown.slice(merged.from, merged.to),
+          merged.from,
+          0,
+        ),
       ],
     };
   }
@@ -510,9 +534,14 @@ function normalizeReplacements(
 function applyReplacements(
   markdown: string,
   replacements: readonly Replacement[],
-): { markdown: string; segments: ActiveMarkerRevealSourceMapSegment[] } {
+): {
+  markdown: string;
+  segments: ActiveMarkerRevealSourceMapSegment[];
+  runs: ActiveMarkerRevealEditableRun[];
+} {
   let result = "";
   const segments: ActiveMarkerRevealSourceMapSegment[] = [];
+  const runs: ActiveMarkerRevealEditableRun[] = [];
   let cursor = 0;
   for (const replacement of replacements) {
     if (cursor < replacement.from) {
@@ -523,18 +552,31 @@ function applyReplacements(
         sourceFrom: cursor,
         sourceTo: replacement.from,
       });
+      runs.push(createLinearEditableRun(result.length, cursor, unchanged.length, "source"));
       result += unchanged;
     }
 
     const replacementStart = result.length;
     for (const segment of replacement.segments ?? []) {
       if (segment.sourceFrom === segment.sourceTo) continue;
+      const revealedFrom = replacementStart + segment.from;
+      const revealedTo = replacementStart + segment.to;
       segments.push({
-        revealedFrom: replacementStart + segment.from,
-        revealedTo: replacementStart + segment.to,
+        revealedFrom,
+        revealedTo,
         sourceFrom: segment.sourceFrom,
         sourceTo: segment.sourceTo,
       });
+      runs.push(
+        createEditableRunFromSegment(
+          revealedFrom,
+          revealedTo,
+          segment.sourceFrom,
+          segment.sourceTo,
+          segment.kind ?? "source",
+          segment.controlType,
+        ),
+      );
     }
     result += replacement.text;
     cursor = replacement.to;
@@ -547,13 +589,61 @@ function applyReplacements(
       sourceFrom: cursor,
       sourceTo: markdown.length,
     });
+    runs.push(createLinearEditableRun(result.length, cursor, unchanged.length, "source"));
     result += unchanged;
   }
 
   return {
     markdown: result,
     segments,
+    runs,
   };
+}
+
+function createEditableRunFromSegment(
+  revealedFrom: number,
+  revealedTo: number,
+  sourceFrom: number,
+  sourceTo: number,
+  kind: "source" | "control",
+  controlType?: RevealedMarkerType,
+): ActiveMarkerRevealEditableRun {
+  const revealedLength = revealedTo - revealedFrom;
+  const sourceLength = sourceTo - sourceFrom;
+  const canUseLinearOffsets = revealedLength === sourceLength;
+  return {
+    revealedFrom,
+    revealedTo,
+    revealedOffsets: canUseLinearOffsets
+      ? createLinearOffsets(revealedFrom, revealedLength)
+      : [revealedFrom, revealedTo],
+    sourceOffsets: canUseLinearOffsets
+      ? createLinearOffsets(sourceFrom, sourceLength)
+      : [sourceFrom, sourceTo],
+    kind,
+    controlType,
+  };
+}
+
+function createLinearEditableRun(
+  revealedFrom: number,
+  sourceFrom: number,
+  length: number,
+  kind: "source" | "control",
+  controlType?: RevealedMarkerType,
+): ActiveMarkerRevealEditableRun {
+  return {
+    revealedFrom,
+    revealedTo: revealedFrom + length,
+    revealedOffsets: createLinearOffsets(revealedFrom, length),
+    sourceOffsets: createLinearOffsets(sourceFrom, length),
+    kind,
+    controlType,
+  };
+}
+
+function createLinearOffsets(from: number, length: number): number[] {
+  return Array.from({ length: length + 1 }, (_, index) => from + index);
 }
 
 function escapeMarkdownAsVisibleText(text: string): string {
@@ -574,5 +664,6 @@ function createIdentitySourceMap(markdown: string): ActiveMarkerRevealSourceMap 
               sourceTo: markdown.length,
             },
           ],
+    runs: markdown.length === 0 ? [] : [createLinearEditableRun(0, 0, markdown.length, "source")],
   };
 }

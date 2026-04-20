@@ -23,6 +23,7 @@ export type {
   CaretRect,
   EditableFragment,
   EditableLayoutSourceMap,
+  EditableLayoutSourceMapRun,
   EditableLayoutSourceMapSegment,
   GranularHitTestResult,
   HitTestGranularity,
@@ -36,6 +37,7 @@ export {
 export { createActiveMarkerRevealMarkdown, findActiveMarkerToken } from "./marker-reveal.ts";
 export type {
   ActiveMarkdownControl,
+  ActiveMarkerRevealEditableRun,
   ActiveMarkerRevealMarkdown,
   ActiveMarkerRevealMarkdownInput,
   ActiveMarkerRevealSourceMap,

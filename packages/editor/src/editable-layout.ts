@@ -54,6 +54,7 @@ export interface EditableLayoutIndexInput {
 export interface EditableLayoutSourceMap {
   readonly markdown: string;
   readonly segments: readonly EditableLayoutSourceMapSegment[];
+  readonly runs?: readonly EditableLayoutSourceMapRun[];
 }
 
 export interface EditableLayoutSourceMapSegment {
@@ -61,6 +62,13 @@ export interface EditableLayoutSourceMapSegment {
   readonly revealedTo: number;
   readonly sourceFrom: number;
   readonly sourceTo: number;
+}
+
+export interface EditableLayoutSourceMapRun {
+  readonly revealedFrom: number;
+  readonly revealedTo: number;
+  readonly revealedOffsets: readonly number[];
+  readonly sourceOffsets: readonly number[];
 }
 
 export class EditableLayoutIndex {
@@ -568,12 +576,11 @@ function findFragmentSourceMapping(
       findRenderedTextInMarkdown(input.sourceMap.markdown, renderedText, layoutCursor) ??
       findRenderedTextInMarkdown(input.sourceMap.markdown, renderedText, 0);
     if (revealedMatch !== null) {
-      const sourceOffsets = normalizeMappedSourceOffsets(
-        renderedText,
+      const sourceOffsets =
+        mapRevealedBoundariesToSourceOffsets(input.sourceMap, revealedMatch.boundaries) ??
         revealedMatch.boundaries.map((offset) =>
           mapRevealedOffsetToSource(input.sourceMap!, offset),
-        ),
-      );
+        );
       if (sourceOffsets.length > 0) {
         return {
           sourceRange: sourceRangeFromOffsets(sourceOffsets),
@@ -642,34 +649,82 @@ function findRenderedTextInMarkdown(
   return null;
 }
 
-function normalizeMappedSourceOffsets(
-  renderedText: string,
-  sourceOffsets: readonly number[],
-): readonly number[] {
-  if (sourceOffsets.length !== renderedText.length + 1 || sourceOffsets.length === 0) {
-    return sourceOffsets;
+function mapRevealedBoundariesToSourceOffsets(
+  sourceMap: EditableLayoutSourceMap,
+  boundaries: readonly number[],
+): readonly number[] | null {
+  const runs = sourceMap.runs;
+  if (runs === undefined || boundaries.length === 0) {
+    return null;
   }
 
-  const first = sourceOffsets[0]!;
-  const last = sourceOffsets[sourceOffsets.length - 1]!;
-  if (sourceOffsets.length > 1 && first > sourceOffsets[1]!) {
-    const inferredFirst = sourceOffsets[1]! - 1;
-    if (last - inferredFirst === renderedText.length) {
-      return createLinearSourceOffsets(renderedText, inferredFirst);
+  const offsets: number[] = [];
+  for (const boundary of boundaries) {
+    const mapped = mapRevealedBoundaryToSourceOffset(runs, boundary);
+    if (mapped === null) {
+      return null;
+    }
+    offsets.push(mapped);
+  }
+  return offsets;
+}
+
+function mapRevealedBoundaryToSourceOffset(
+  runs: readonly EditableLayoutSourceMapRun[],
+  boundary: number,
+): number | null {
+  let previous: EditableLayoutSourceMapRun | null = null;
+  let next: EditableLayoutSourceMapRun | null = null;
+  const exactOffsets: number[] = [];
+
+  for (const run of runs) {
+    const exactIndex = run.revealedOffsets.indexOf(boundary);
+    if (exactIndex >= 0) {
+      const sourceOffset = run.sourceOffsets[exactIndex];
+      if (sourceOffset !== undefined) {
+        exactOffsets.push(sourceOffset);
+      }
+      continue;
+    }
+
+    if (boundary > run.revealedFrom && boundary < run.revealedTo) {
+      return interpolateRunBoundary(run, boundary);
+    }
+
+    if (run.revealedTo <= boundary) {
+      previous = run;
+    }
+    if (next === null && run.revealedFrom >= boundary) {
+      next = run;
     }
   }
 
-  if (last - first !== renderedText.length) {
-    return sourceOffsets;
+  if (exactOffsets.length > 0) {
+    return Math.min(...exactOffsets);
   }
 
-  for (let index = 1; index < sourceOffsets.length; index += 1) {
-    if (sourceOffsets[index]! < sourceOffsets[index - 1]!) {
-      return sourceOffsets;
-    }
+  if (previous !== null) {
+    return previous.sourceOffsets.at(-1) ?? null;
   }
+  if (next !== null) {
+    return next.sourceOffsets[0] ?? null;
+  }
+  return null;
+}
 
-  return createLinearSourceOffsets(renderedText, first);
+function interpolateRunBoundary(run: EditableLayoutSourceMapRun, boundary: number): number | null {
+  for (let index = 1; index < run.revealedOffsets.length; index += 1) {
+    const previousRevealed = run.revealedOffsets[index - 1]!;
+    const nextRevealed = run.revealedOffsets[index]!;
+    if (boundary < previousRevealed || boundary > nextRevealed) continue;
+    const previousSource = run.sourceOffsets[index - 1]!;
+    const nextSource = run.sourceOffsets[index]!;
+    const revealedLength = nextRevealed - previousRevealed;
+    if (revealedLength <= 0) return previousSource;
+    const ratio = (boundary - previousRevealed) / revealedLength;
+    return Math.round(previousSource + (nextSource - previousSource) * ratio);
+  }
+  return null;
 }
 
 function mapRevealedOffsetToSource(sourceMap: EditableLayoutSourceMap, offset: number): number {

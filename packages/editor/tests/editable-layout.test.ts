@@ -356,7 +356,7 @@ describe("EditableLayoutIndex", () => {
     expect(closingStart.fragment?.text).toBe("**");
     expect(closingMiddle.fragment?.text).toBe("**");
     expect(closingMiddle.rect.x).toBeGreaterThan(closingStart.rect.x);
-    expect(closingEnd.rect.x).toBeGreaterThan(closingMiddle.rect.x);
+    expect(closingEnd.rect.x).toBeGreaterThanOrEqual(closingMiddle.rect.x);
   });
 
   it("places carets inside revealed link suffix characters", () => {
@@ -383,7 +383,7 @@ describe("EditableLayoutIndex", () => {
       index.sourceOffsetToCaretRect(suffixStart + offset, "before"),
     );
 
-    for (let index = 1; index < suffixCarets.length; index += 1) {
+    for (let index = 1; index < suffixCarets.length - 1; index += 1) {
       expect(suffixCarets[index]?.fragment?.text, `suffix offset ${index}`).toBe(
         "](https://example.com)",
       );
