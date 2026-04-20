@@ -173,7 +173,7 @@ Goal: replace the removed CodeMirror Storybook examples with a native Premark ed
 - [x] Show debug overlay for source offsets, hit-test rects, and selection ranges.
 - [ ] Add a screenshot mode that renders small fixed-size crops for key states: idle, caret, selected range, active marker, composition, paste preview, and remote edit.
 - [x] Add first Playwright screenshot artifacts for idle, typing, selection, and replacement states.
-- [ ] Add a screenshot review log template beside the generated artifacts.
+- [x] Add a screenshot review log template beside the generated artifacts.
 
 Acceptance:
 
@@ -225,3 +225,4 @@ Acceptance:
 - Added Storybook `Editing/Premark Native Editor`. It renders Markdown through Premark HTML layout, paints Premark selection/caret overlays, anchors a hidden textarea near the caret, wires pointer drag and keyboard/input/beforeinput events into editor core, and records textarea edits in `LocalUndoManager`. `vp run storybook:build` passes; screenshot tests are still open.
 - Added Playwright browser coverage for the native editor Storybook. The test builds Storybook, serves the static output, clicks the rendered surface, types through the hidden textarea, drags a rendered selection, replaces the selected range, and saves small screenshots for manual review. Codex reviewed the generated screenshots on 2026-04-20 and accepted idle, typing, selection, and replacement crops after fixing grapheme snapping.
 - Wired Storybook hidden textarea `compositionstart/update/end` events into `applyInputIntent` and added a Playwright synthetic composition test. Real macOS IME testing remains open.
+- Added `tests/browser/screenshot-review.md` with the first Codex visual review entry and pending screenshot categories.
