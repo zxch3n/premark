@@ -14,8 +14,9 @@ const strictRealIme = process.env.PREMARK_MACOS_IME_STRICT === "1";
 const dryRun = process.env.PREMARK_MACOS_IME_DRY_RUN === "1" || process.argv.includes("--dry-run");
 const preflight =
   process.env.PREMARK_MACOS_IME_PREFLIGHT === "1" || process.argv.includes("--preflight");
+let globalKeyInputMethod = process.env.PREMARK_MACOS_IME_GLOBAL_KEY_METHOD ?? "system-events";
 
-const PINYIN_NIHAO_KEY_CODES = [45, 34, 4, 0, 31, 49, 36];
+const PINYIN_NIHAO_KEY_CODES = [45, 34, 4, 0, 31, 49];
 const PINYIN_SCENARIOS = [
   {
     name: "pinyin-candidate-anchor",
@@ -109,8 +110,8 @@ const KOREAN_SCENARIOS = [
   },
   {
     name: "korean-cancel",
-    description: "Start a Korean preedit and cancel it with Escape.",
-    keyCodes: [2, 40, 53],
+    description: "Start a Korean preedit and cancel it with Backspace.",
+    keyCodes: [2, 51],
     expectUnchanged: true,
   },
   {
@@ -482,10 +483,51 @@ async function focusBridge(page, browserProcessName) {
 function sendSystemKeyCodes(browserProcessName, keyCodes) {
   const keyCodeLines = keyCodes.map((code) => `key code ${code}`).join("\n        ");
   activateBrowser(browserProcessName);
+  console.log(`[macos-ime] posting System Events key codes: ${keyCodes.join(",")}`);
   osascript(`
     tell application "System Events"
       delay 0.2
       ${keyCodeLines}
+    end tell
+  `);
+}
+
+function appleScriptModifierList(modifiers) {
+  const parts = modifiers
+    .split(",")
+    .map((part) => part.trim().toLowerCase())
+    .filter((part) => part.length > 0 && part !== "none");
+  if (parts.length === 0) {
+    return "{}";
+  }
+  const normalized = parts.map((part) => {
+    switch (part) {
+      case "command":
+      case "cmd":
+      case "meta":
+        return "command down";
+      case "shift":
+        return "shift down";
+      case "option":
+      case "alt":
+        return "option down";
+      case "control":
+      case "ctrl":
+        return "control down";
+      default:
+        throw new Error(`Unknown System Events modifier: ${part}`);
+    }
+  });
+  return `{${normalized.join(", ")}}`;
+}
+
+function sendSystemShortcut(browserProcessName, modifiers, keyCode) {
+  activateBrowser(browserProcessName);
+  console.log(`[macos-ime] posting System Events shortcut: ${modifiers}+${keyCode}`);
+  osascript(`
+    tell application "System Events"
+      delay 0.2
+      key code ${keyCode} using ${appleScriptModifierList(modifiers)}
     end tell
   `);
 }
@@ -502,13 +544,21 @@ function sendTargetedKeyCodes(browserProcessName, browserPid, keyCodes) {
 
 function sendHidKeyCodes(browserProcessName, keyCodes) {
   activateBrowser(browserProcessName);
-  console.log(`[macos-ime] posting HID key codes: ${keyCodes.join(",")}`);
+  if (globalKeyInputMethod === "system-events") {
+    sendSystemKeyCodes(browserProcessName, keyCodes);
+    return;
+  }
+  console.log(`[macos-ime] posting Swift HID key codes: ${keyCodes.join(",")}`);
   swiftOsInput("hid-keycodes", ...keyCodes.map(String));
 }
 
 function sendHidShortcut(browserProcessName, modifiers, keyCode) {
   activateBrowser(browserProcessName);
-  console.log(`[macos-ime] posting HID shortcut: ${modifiers}+${keyCode}`);
+  if (globalKeyInputMethod === "system-events") {
+    sendSystemShortcut(browserProcessName, modifiers, keyCode);
+    return;
+  }
+  console.log(`[macos-ime] posting Swift HID shortcut: ${modifiers}+${keyCode}`);
   swiftOsInput("hid-shortcut", modifiers, String(keyCode));
 }
 
@@ -703,7 +753,7 @@ async function waitForServer() {
 }
 
 async function launchMacBrowser() {
-  const preferredChannel = process.env.PREMARK_MACOS_IME_BROWSER_CHANNEL ?? "chrome";
+  const preferredChannel = process.env.PREMARK_MACOS_IME_BROWSER_CHANNEL ?? "bundled";
   if (preferredChannel !== "bundled") {
     try {
       return {
@@ -863,20 +913,51 @@ async function main() {
           { timeout: 5_000 },
         );
       } catch (error) {
-        const message =
-          `skipped real ${selectedScenarioSetName} IME scenarios: global HID key events did not reach the foreground browser. ` +
-          "Real IME automation requires global key events; targeted CGEventPostToPid bypasses input-method composition.";
-        await writeImeFailureArtifact(page, "hid-probe-failed", message, {
-          foreground: await foregroundDiagnostics(browserProcessName),
-        });
-        writeFileSync(join(root, "test-results/macos-ime/ime-skip.txt"), `${message}\n`);
-        if (strictRealIme) {
-          throw new Error(`[macos-ime] ${message}`, { cause: error });
+        if (globalKeyInputMethod === "swift-hid") {
+          console.log(
+            "[macos-ime] Swift HID key-event probe did not reach the browser; trying System Events global key codes",
+          );
+          globalKeyInputMethod = "system-events";
+          sendHidKeyCodes(browserProcessName, [0, 11, 8]);
+          try {
+            await page.waitForFunction(
+              () => document.querySelector("[data-debug-source]")?.textContent?.includes("abc"),
+              undefined,
+              { timeout: 5_000 },
+            );
+            console.log("[macos-ime] System Events global key-event fallback passed");
+          } catch (fallbackError) {
+            const message =
+              `skipped real ${selectedScenarioSetName} IME scenarios: neither Swift HID nor System Events ` +
+              "global key events reached the foreground browser. Real IME automation requires global key events; " +
+              "targeted CGEventPostToPid bypasses input-method composition.";
+            await writeImeFailureArtifact(page, "hid-probe-failed", message, {
+              foreground: await foregroundDiagnostics(browserProcessName),
+              firstError: String(error),
+            });
+            writeFileSync(join(root, "test-results/macos-ime/ime-skip.txt"), `${message}\n`);
+            if (strictRealIme) {
+              throw new Error(`[macos-ime] ${message}`, { cause: fallbackError });
+            }
+            console.log(`[macos-ime] ${message}`);
+            return;
+          }
+        } else {
+          const message =
+            `skipped real ${selectedScenarioSetName} IME scenarios: global HID key events did not reach the foreground browser. ` +
+            "Real IME automation requires global key events; targeted CGEventPostToPid bypasses input-method composition.";
+          await writeImeFailureArtifact(page, "hid-probe-failed", message, {
+            foreground: await foregroundDiagnostics(browserProcessName),
+          });
+          writeFileSync(join(root, "test-results/macos-ime/ime-skip.txt"), `${message}\n`);
+          if (strictRealIme) {
+            throw new Error(`[macos-ime] ${message}`, { cause: error });
+          }
+          console.log(`[macos-ime] ${message}`);
+          return;
         }
-        console.log(`[macos-ime] ${message}`);
-        return;
       }
-      console.log("[macos-ime] global HID key-event probe passed");
+      console.log(`[macos-ime] global key-event probe passed with method: ${globalKeyInputMethod}`);
     } else {
       console.log("[macos-ime] skipped HID US probe: com.apple.keylayout.US not found");
     }

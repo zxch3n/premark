@@ -34,8 +34,8 @@ explicit `enable` command for manual setup, but the runner does not enable input
 The runner builds Storybook, serves the native Premark editor story, then runs two macOS-specific probes:
 
 - A required US keyboard probe posts real macOS key events to the browser process and verifies that the hidden textarea bridge receives `keydown`, `beforeinput`, `input`, and source updates.
-- A global HID US keyboard probe verifies that foreground OS key events can reach the focused hidden textarea. This is required before running real IME composition because targeted process events bypass macOS input methods.
-- A real IME probe runs only when the browser can be made the macOS foreground app and global HID key events reach the hidden textarea. This path uses global key codes so the selected macOS input source can create native composition events and candidate UI.
+- A global-key US keyboard probe verifies that foreground OS key events can reach the focused hidden textarea. This is required before running real IME composition because targeted process events bypass macOS input methods.
+- A real IME probe runs only when the browser can be made the macOS foreground app and global key events reach the hidden textarea. This path uses System Events key codes by default so the selected macOS input source can create native composition events and candidate UI.
 
 When the real IME path is enabled, the runner executes one scenario set. `pinyin` is the default:
 
@@ -63,7 +63,8 @@ Useful environment variables:
 
 - `PREMARK_MACOS_IME_SCENARIO_SET`: scenario set to run. Supported values: `pinyin`, `japanese`, `korean`. Defaults to `pinyin`.
 - `PREMARK_MACOS_IME_SOURCE_ID`: input source ID to test. Defaults to the selected set's built-in macOS source ID.
-- `PREMARK_MACOS_IME_BROWSER_CHANNEL`: Playwright browser channel. Defaults to `chrome`; set `bundled` to use Playwright's bundled Chromium.
+- `PREMARK_MACOS_IME_BROWSER_CHANNEL`: Playwright browser channel. Defaults to `bundled` so real IME runs use the isolated Chrome for Testing app instead of an existing Chrome window.
+- `PREMARK_MACOS_IME_GLOBAL_KEY_METHOD`: global key sender for the real IME path. Defaults to `system-events`. Set `swift-hid` only for diagnostics; in current testing it can reach Chrome but can bypass IME composition.
 - `PREMARK_MACOS_IME_STRICT=1`: fail instead of skip when real foreground IME cannot run.
 - `PREMARK_MACOS_IME_DRY_RUN=1`: run the non-interactive readiness check only.
 - `PREMARK_MACOS_IME_PREFLIGHT=1`: run input-source plus foreground diagnostics only.
