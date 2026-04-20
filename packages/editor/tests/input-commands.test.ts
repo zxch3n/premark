@@ -170,4 +170,78 @@ describe("applyInputIntent", () => {
 
     expect(editor.markdown).toBe("Hello world");
   });
+
+  it("pastes Markdown payloads before plain text and records undo", () => {
+    const editor = createInMemoryEditorDocumentState("Hello world", 600);
+    const undoManager = new LocalUndoManager();
+    const worldFrom = editor.markdown.indexOf("world");
+    editor.setSelection(worldFrom, worldFrom + "world".length);
+
+    applyInputIntent(
+      editor,
+      {
+        type: "clipboard",
+        action: "paste",
+        markdown: "**Premark**",
+        plainText: "Premark",
+      },
+      { undoManager },
+    );
+
+    expect(editor.markdown).toBe("Hello **Premark**");
+    expect(undoManager.undoDepth).toBe(1);
+  });
+
+  it("pastes plain text and simple HTML fallback payloads", () => {
+    const editor = createInMemoryEditorDocumentState("A B C", 600);
+    editor.setSelection(2, 3);
+
+    applyInputIntent(editor, {
+      type: "clipboard",
+      action: "paste",
+      plainText: "plain",
+    });
+    expect(editor.markdown).toBe("A plain C");
+
+    editor.setSelection(2, 7);
+    applyInputIntent(editor, {
+      type: "clipboard",
+      action: "paste",
+      html: "<p>Hello<br>world</p>",
+    });
+    expect(editor.markdown).toBe("A Hello\nworld C");
+  });
+
+  it("cuts selected source through the same edit path", () => {
+    const editor = createInMemoryEditorDocumentState("Hello world", 600);
+    const undoManager = new LocalUndoManager();
+    const worldFrom = editor.markdown.indexOf("world");
+    editor.setSelection(worldFrom, worldFrom + "world".length);
+
+    applyInputIntent(editor, { type: "clipboard", action: "cut" }, { undoManager });
+
+    expect(editor.markdown).toBe("Hello ");
+    expect(undoManager.undoDepth).toBe(1);
+  });
+
+  it("pastes over and cuts cross-block selections", () => {
+    const editor = createInMemoryEditorDocumentState("First\n\nSecond", 600);
+    const firstInside = editor.markdown.indexOf("st");
+    const secondInside = editor.markdown.indexOf("Second") + "Sec".length;
+    editor.setSelection(firstInside, secondInside);
+
+    applyInputIntent(editor, {
+      type: "clipboard",
+      action: "paste",
+      markdown: "Joined",
+    });
+
+    expect(editor.markdown).toBe("FirJoinedond");
+
+    const joinedFrom = editor.markdown.indexOf("Joined");
+    editor.setSelection(joinedFrom, joinedFrom + "Joined".length);
+    applyInputIntent(editor, { type: "clipboard", action: "cut" });
+
+    expect(editor.markdown).toBe("Firond");
+  });
 });

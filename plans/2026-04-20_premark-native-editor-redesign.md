@@ -124,11 +124,11 @@ Goal: receive real OS text input while keeping Premark as the visible editor.
 - [ ] Wire real browser `beforeinput` / `input` / keyboard events to normalized source operations.
 - [x] Handle core insert text, delete/backspace, Enter, selectionchange, and composition intents.
 - [x] Handle undo/redo through normalized history intents and `LocalUndoManager`.
-- [ ] Handle paste and clipboard transforms.
+- [x] Handle paste and clipboard transforms in the core intent path.
 - [x] Keep bridge content minimal to avoid DOM editor behavior becoming the product.
 - [x] Add an input event trace recorder for `keydown`, `beforeinput`, `input`, `keyup`, `selectionchange`, `composition*`, `paste`, `copy`, and `cut`.
 - [x] Add tests proving text insertion does not rely on keydown, so mobile autocorrect/autosuggest/swipe-like input can be modeled as input operations.
-- [ ] Add clipboard tests for Markdown, plain text, HTML, cross-block cut, cross-block paste, and paste while a selection is active.
+- [x] Add clipboard tests for Markdown, plain text, HTML, cross-block cut, cross-block paste, and paste while a selection is active.
 - [ ] Add focus/textarea-anchoring tests for scroll, zoom, visual viewport resize, and editor blur/refocus.
 
 Acceptance:
@@ -214,3 +214,4 @@ Acceptance:
 - Added pure selection commands for pointer drag/reversal and keyboard movement. Tests cover grapheme-safe ArrowLeft/ArrowRight, Shift+Arrow extension, Shift+Command-style document boundary extension, and wrapped-line ArrowDown movement.
 - Added `applyInputIntent` to apply normalized input intents to `EditorDocumentState`. Tests cover text replacement, cross-block deletion, grapheme-safe delete backward/forward, Enter paragraph insertion, selectionchange, and virtual-to-committed composition.
 - Connected normalized `historyUndo` / `historyRedo` intents to `LocalUndoManager`. Text edits and composition commits can now record undo entries through `applyInputIntent`; tests cover undo/redo round trips.
+- Added core clipboard intent handling. Paste chooses Markdown before plain text before a simple HTML-to-text fallback; cut uses the same source edit path. Tests cover selection paste, HTML fallback, cross-block paste, and cross-block cut.
