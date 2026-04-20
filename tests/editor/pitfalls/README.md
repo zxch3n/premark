@@ -17,7 +17,7 @@ Status legend:
 | ----------------------------------------- | ------------------------------------------------------------------------------------------------- | -------------- |
 | IME event order variants                  | Event trace normalization tests for `beforeinput`, `input`, `compositionupdate`, `compositionend` | logic          |
 | Non-cancelable composition updates        | Composition virtual patch tests assert source and undo are unchanged until commit                 | logic          |
-| DOM/selection mutation aborts composition | Browser test asserts browser selection is not touched during composition                          | planned        |
+| DOM/selection mutation aborts composition | Browser test asserts browser selection is not touched during composition                          | browser        |
 | Hidden textarea drift                     | Input bridge trace compares textarea state, Premark selection, and source                         | browser        |
 | macOS foreground activation               | Browser must be the foreground app before System Events can exercise real IME composition         | gap            |
 | Candidate window bounds                   | macOS IME screenshots or documented capture gap                                                   | gap            |
