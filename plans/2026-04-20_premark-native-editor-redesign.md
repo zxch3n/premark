@@ -10,7 +10,7 @@ Compaction Rule: after memory reload or compaction, reread this whole file befor
 - Resume Phase 17 only after the macOS GUI session can make Chrome the foreground app.
 - Keep the native Premark-rendered editor as the product path; CodeMirror overlay remains removed.
 - Real Pinyin/Japanese/Korean scenario code is ready, and all three target input sources are now enabled.
-- The current GUI session still reports `System Events = Notion` and `NSWorkspace = loginwindow`; global HID is not a valid signal in this state.
+- The current GUI session is screen-locked (`CGSSessionScreenIsLocked=1`), so `NSWorkspace` reports `loginwindow`; global HID is not a valid signal in this state.
 
 ## New Learnings
 
@@ -38,6 +38,7 @@ Compaction Rule: after memory reload or compaction, reread this whole file befor
 - Real macOS IME validation has two separate gates: targeted `CGEventPostToPid` can prove browser/input plumbing, but native IME composition requires the browser to be the foreground app and global HID to reach it. On 2026-04-21, targeted Chrome key events passed while foreground checks failed (`System Events` saw Notion; `NSWorkspace` saw `loginwindow`).
 - The macOS IME runner now stops before sending global HID if the browser is not foreground, so failed OS focus no longer risks typing probe characters into another app.
 - macOS input-source readiness should use `TISCreateInputSourceList(..., includeAllInstalled: true)` plus each source's enabled flag. The enabled-only list can omit selectable input modes such as Japanese Romaji Hiragana and make the runner falsely think a source is unavailable.
+- `NSWorkspace = loginwindow` was explained by `CGSessionCopyCurrentDictionary`: the session reports `CGSSessionScreenIsLocked=1`. Phase 17 real HID must not run while locked even if process-targeted key events still work.
 
 ## Architecture Direction
 
@@ -385,4 +386,4 @@ Acceptance:
 - Added `vp run test:macos-ime:preflight`, which records input-source readiness from both enabled and all-installed TIS lists plus `System Events`/`NSWorkspace` foreground diagnostics without building Storybook, launching a browser, or sending HID. Reports are written both as shared files and scenario-specific files such as `preflight-pinyin.json`.
 - Corrected an input-source false negative: Japanese Romaji Hiragana appears as enabled in the all-installed TIS list but not in the enabled-only list. The runner now uses all-installed plus enabled flags and selects sources from all-installed. Korean parent and 2-Set Korean were enabled through the helper; Pinyin, Japanese, and Korean preflights now all report their target source as enabled/installed.
 - Verified `vp run test:macos-ime:dry-run` for Pinyin, Japanese, and Korean after the source-readiness fix. All three dry-runs now report `targetFound=true` and `targetInstalled=true`.
-- Remaining blocker after preflight hardening: the GUI foreground state still reports `System Events = Notion` and `NSWorkspace = loginwindow`, so real Pinyin/Japanese/Korean HID scenarios must still wait for a normal foregroundable macOS session.
+- Added `CGSessionCopyCurrentDictionary` to foreground diagnostics. It reports `CGSSessionScreenIsLocked=1`, which explains `NSWorkspace = loginwindow`; real Pinyin/Japanese/Korean HID scenarios must wait until the screen is unlocked and Chrome can become foreground. The real runner now checks this before launching a browser/server and writes `ime-skipped-locked-session.json` instead of attempting targeted or global key probes.

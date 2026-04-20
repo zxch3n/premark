@@ -217,6 +217,11 @@ function findImeCandidates(sources, patterns) {
   );
 }
 
+function isSessionFlag(session, key) {
+  const value = session?.[key];
+  return value === true || value === 1;
+}
+
 function writeReport(report, name) {
   mkdirSync(join(root, "test-results/macos-ime"), { recursive: true });
   const json = `${JSON.stringify(report, null, 2)}\n`;
@@ -247,6 +252,12 @@ function writeReport(report, name) {
       report.foreground === undefined
         ? undefined
         : `nsWorkspaceFrontmost=${report.foreground.nsWorkspaceFrontmost.name}`,
+      report.foreground === undefined
+        ? undefined
+        : `screenLocked=${String(isSessionFlag(report.foreground.cgSession, "CGSSessionScreenIsLocked"))}`,
+      report.foreground === undefined
+        ? undefined
+        : `onConsole=${String(isSessionFlag(report.foreground.cgSession, "kCGSSessionOnConsoleKey"))}`,
       "",
     ]
       .filter((line) => line !== undefined)
@@ -397,12 +408,41 @@ print([(app?.localizedName ?? ""), (app?.bundleIdentifier ?? ""), String(app?.pr
   };
 }
 
+function cgSessionSnapshot() {
+  const result = spawnSync(
+    "swift",
+    [
+      "-e",
+      `import CoreGraphics
+import Foundation
+let session = (CGSessionCopyCurrentDictionary() as? [String: Any]) ?? [:]
+let data = try JSONSerialization.data(withJSONObject: session, options: [.sortedKeys])
+print(String(data: data, encoding: .utf8) ?? "{}")`,
+    ],
+    { cwd: root, encoding: "utf8" },
+  );
+  if (result.status !== 0) {
+    return {
+      error: result.stderr.trim() || result.stdout.trim() || `swift exited ${result.status}`,
+    };
+  }
+  try {
+    return JSON.parse(result.stdout.trim() || "{}");
+  } catch (error) {
+    return {
+      error: `failed to parse CGSession JSON: ${String(error)}`,
+      raw: result.stdout.trim(),
+    };
+  }
+}
+
 function foregroundSnapshot() {
   return {
     systemEventsFrontmost: osascript(
       'tell application "System Events" to get name of first application process whose frontmost is true',
     ),
     nsWorkspaceFrontmost: nsWorkspaceFrontmostApplication(),
+    cgSession: cgSessionSnapshot(),
   };
 }
 
@@ -717,6 +757,24 @@ async function main() {
         (installed ? " (installed but disabled)" : " (not installed)"),
     );
     console.log(sources);
+    return;
+  }
+
+  const initialForeground = foregroundSnapshot();
+  if (isSessionFlag(initialForeground.cgSession, "CGSSessionScreenIsLocked")) {
+    mkdirSync(join(root, "test-results/macos-ime"), { recursive: true });
+    const message =
+      `skipped real ${selectedScenarioSetName} IME scenarios: macOS screen is locked. ` +
+      "Real IME automation requires an unlocked GUI session with the browser as the foreground app.";
+    writeFileSync(join(root, "test-results/macos-ime/ime-skip.txt"), `${message}\n`);
+    writeFileSync(
+      join(root, "test-results/macos-ime/ime-skipped-locked-session.json"),
+      `${JSON.stringify(initialForeground, null, 2)}\n`,
+    );
+    if (strictRealIme) {
+      throw new Error(`[macos-ime] ${message}`);
+    }
+    console.log(`[macos-ime] ${message}`);
     return;
   }
 
