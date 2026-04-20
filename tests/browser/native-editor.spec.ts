@@ -240,5 +240,54 @@ test.describe("Premark native editor story", () => {
     await page.setViewportSize({ width: 920, height: 640 });
     await surface.click({ position: { x: 180, y: 120 } });
     await expect(bridge).toBeFocused();
+
+    await page.evaluate(() => {
+      document.body.style.setProperty("zoom", "1.2");
+    });
+    await surface.click({ position: { x: 140, y: 110 } });
+    await expect(bridge).toBeFocused();
+    const [zoomBridgeRect, zoomViewportRect] = await Promise.all([
+      bridge.evaluate((element) => element.getBoundingClientRect().toJSON()),
+      viewport.evaluate((element) => element.getBoundingClientRect().toJSON()),
+    ]);
+    expect(zoomBridgeRect.top).toBeGreaterThanOrEqual(zoomViewportRect.top);
+    expect(zoomBridgeRect.left).toBeGreaterThanOrEqual(zoomViewportRect.left);
+  });
+
+  test("keeps hidden textarea anchored in a mobile visual viewport resize model", async ({
+    browser,
+  }) => {
+    const context = await browser.newContext({
+      baseURL: "http://127.0.0.1:6106",
+      deviceScaleFactor: 2,
+      hasTouch: true,
+      isMobile: true,
+      viewport: { width: 390, height: 700 },
+    });
+    const page = await context.newPage();
+    try {
+      await page.goto(storyUrl);
+
+      const surface = page.locator("[data-editor-surface]");
+      const bridge = page.locator("[data-input-bridge]");
+      await expect(surface).toContainText("Native rendered Markdown");
+
+      await surface.tap({ position: { x: 92, y: 86 } });
+      await expect(bridge).toBeFocused();
+
+      await page.setViewportSize({ width: 390, height: 430 });
+      await surface.tap({ position: { x: 120, y: 150 } });
+      await expect(bridge).toBeFocused();
+
+      const bridgeRect = await bridge.evaluate((element) =>
+        element.getBoundingClientRect().toJSON(),
+      );
+      expect(bridgeRect.top).toBeGreaterThanOrEqual(0);
+      expect(bridgeRect.top).toBeLessThanOrEqual(430);
+      expect(bridgeRect.left).toBeGreaterThanOrEqual(0);
+      expect(bridgeRect.left).toBeLessThanOrEqual(390);
+    } finally {
+      await context.close();
+    }
   });
 });
