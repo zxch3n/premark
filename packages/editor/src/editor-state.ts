@@ -56,7 +56,10 @@ export class EditorDocumentState {
       options.adapter ??
       createInMemoryTextDocumentAdapter(options.markdown, { idPrefix: "editor" });
     this.containerWidth = options.containerWidth;
-    this.layoutEngine = createLayoutEngine(options.layoutStyle ?? { fontTheme: "github" });
+    this.layoutEngine = createLayoutEngine({
+      ...(options.layoutStyle ?? { fontTheme: "github" }),
+      lineBreakMode: options.layoutStyle?.lineBreakMode ?? "source",
+    });
     this.selectionRange = this.adapter.createRange(0, 0, {
       kind: "selection",
       bias: "stick-end",

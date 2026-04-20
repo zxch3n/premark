@@ -16,6 +16,26 @@ function measuredTextWidth(text: string, font: string): number {
   return context.measureText(text).width;
 }
 
+function createTestIndex(markdown: string, width = 800) {
+  const state = createIncrementalParseState(markdown);
+  const inlineSources = createMarkdownInlineSourceMap(state);
+  const layout = createLayoutEngine({ fontTheme: "github", lineBreakMode: "source" }).layout(
+    markdown,
+    width,
+  );
+  return {
+    state,
+    inlineSources,
+    layout,
+    index: createEditableLayoutIndex({
+      markdown,
+      layout,
+      blockSpans: state.blockSpans,
+      inlineSources,
+    }),
+  };
+}
+
 describe("EditableLayoutIndex", () => {
   it("maps rendered strong, code and link fragments back to raw source ranges", () => {
     const markdown = "Hello **bold** and `code` plus [docs](https://example.com).";
@@ -255,10 +275,10 @@ describe("EditableLayoutIndex", () => {
     const inlineSources = createMarkdownInlineSourceMap(state);
     const layoutEngine = createLayoutEngine({ fontTheme: "github" });
 
-    for (const [type, visibleSource] of [
-      ["strong", "**bold**"],
-      ["code-span", "`code`"],
-      ["link", "[docs](https://example.com)"],
+    for (const [type, content, expectedFragmentType] of [
+      ["strong", "bold", "strong"],
+      ["code-span", "code", "inline_code"],
+      ["link", "docs", "link"],
     ] as const) {
       const token = inlineSources.find((record) => record.type === type);
       expect(token, `token for ${type}`).toBeDefined();
@@ -277,13 +297,14 @@ describe("EditableLayoutIndex", () => {
         layout,
         blockSpans: state.blockSpans,
         inlineSources,
+        sourceMap: reveal.sourceMap,
       });
-      const fragment = index.fragments.find((candidate) => candidate.text.includes(visibleSource));
-      expect(reveal.activeToken?.type).toBe(type);
-      expect(fragment, `visible fragment for ${visibleSource}`).toBeDefined();
-      expect(markdown.slice(fragment!.sourceRange.from, fragment!.sourceRange.to)).toContain(
-        visibleSource,
+      const fragment = index.fragments.find(
+        (candidate) => candidate.text === content && candidate.type === expectedFragmentType,
       );
+      expect(reveal.activeToken?.type).toBe(type);
+      expect(fragment, `styled content fragment for ${content}`).toBeDefined();
+      expect(markdown.slice(fragment!.sourceRange.from, fragment!.sourceRange.to)).toBe(content);
 
       const contentStart =
         type === "link"
@@ -293,12 +314,77 @@ describe("EditableLayoutIndex", () => {
             : markdown.indexOf("bold");
       const markerCaret = index.sourceOffsetToCaretRect(markerOffset);
       const contentCaret = index.sourceOffsetToCaretRect(contentStart);
-      expect(markerCaret.fragment?.text).toContain(visibleSource);
       expect(markerCaret.rect.x).toBeLessThan(contentCaret.rect.x);
 
       const hit = index.hitTest(markerCaret.rect.x + 0.5, markerCaret.rect.y + 1);
       expect(hit.offset).toBeGreaterThanOrEqual(token!.source.from);
       expect(hit.offset).toBeLessThan(contentStart);
+    }
+  });
+
+  it("keeps heading caret positions aligned after H1-H6 block control reveal", () => {
+    for (const level of [1, 2, 3, 4, 5, 6] as const) {
+      const marker = "#".repeat(level);
+      const markdown = `${marker} Native rendered Markdown`;
+      const escapedMarker = marker
+        .split("")
+        .map((char) => `\\${char}`)
+        .join("");
+      const state = createIncrementalParseState(markdown);
+      const inlineSources = createMarkdownInlineSourceMap(state);
+      const reveal = createActiveMarkerRevealMarkdown({
+        markdown,
+        inlineSources,
+        blockSpans: state.blockSpans,
+        selectionRange: {
+          from: markdown.indexOf("rendered"),
+          to: markdown.indexOf("rendered"),
+        },
+      });
+      const layout = createLayoutEngine({ fontTheme: "github" }).layout(reveal.markdown, 800);
+      const index = createEditableLayoutIndex({
+        markdown,
+        layout,
+        blockSpans: state.blockSpans,
+        inlineSources,
+        sourceMap: reveal.sourceMap,
+      });
+
+      const titleStartOffset = markdown.indexOf("Native");
+      const titleStart = index.sourceOffsetToCaretRect(titleStartOffset);
+      const renderedStart = index.sourceOffsetToCaretRect(markdown.indexOf("rendered"));
+      const markdownEnd = index.sourceOffsetToCaretRect(markdown.length);
+      const headingFragment = titleStart.fragment!;
+      const measuredControlWidth =
+        (measuredTextWidth(`${marker} `, headingFragment.font) /
+          measuredTextWidth(headingFragment.text, headingFragment.font)) *
+        headingFragment.rect.width;
+
+      expect(reveal.markdown, `H${level}`).toBe(
+        `${marker} ${escapedMarker} Native rendered Markdown`,
+      );
+      expect(titleStart.fragment?.text, `H${level}`).toContain(
+        `${marker} Native rendered Markdown`,
+      );
+      expect(index.sourceOffsetToCaretRect(0).rect.x, `H${level}`).toBeCloseTo(
+        headingFragment.rect.x,
+        0,
+      );
+      expect(index.sourceOffsetToCaretRect(level).rect.x, `H${level}`).toBeGreaterThan(
+        headingFragment.rect.x,
+      );
+      expect(titleStart.rect.x, `H${level}`).toBeCloseTo(
+        headingFragment.rect.x + measuredControlWidth,
+        0,
+      );
+      expect(renderedStart.rect.x, `H${level}`).toBeGreaterThan(titleStart.rect.x);
+      expect(markdownEnd.rect.x, `H${level}`).toBeCloseTo(
+        headingFragment.rect.x + headingFragment.rect.width,
+        0,
+      );
+
+      const titleHit = index.hitTest(titleStart.rect.x + 0.5, titleStart.rect.y + 1);
+      expect(titleHit.offset, `H${level}`).toBe(titleStartOffset);
     }
   });
 
@@ -454,5 +540,173 @@ describe("EditableLayoutIndex", () => {
     expect(selectionRects[0]?.height).toBe(20);
     expect(selectionRects.length).toBeGreaterThan(0);
     expect(selectionRects.every((rect) => rect.width > 0 && rect.height > 0)).toBe(true);
+  });
+
+  it("places caret on explicit blank visual lines between source blocks", () => {
+    const markdown = "abc\n\ndef";
+    const { index } = createTestIndex(markdown);
+    const first = index.fragments.find((fragment) => fragment.text === "abc");
+    const second = index.fragments.find((fragment) => fragment.text === "def");
+    const blank = index.fragments.find((fragment) => fragment.sourceRange.from === 4);
+    expect(first).toBeDefined();
+    expect(second).toBeDefined();
+    expect(blank).toBeDefined();
+
+    const lineEnd = index.sourceOffsetToCaretRect(markdown.indexOf("\n"));
+    const blankLineOffset = index.sourceOffsetToCaretRect(markdown.indexOf("\n") + 1);
+    const nextBlockStart = index.sourceOffsetToCaretRect(markdown.indexOf("def"));
+
+    expect(lineEnd.fragment).toBe(first);
+    expect(lineEnd.rect.x).toBeCloseTo(first!.rect.x + first!.rect.width, 0);
+    expect(lineEnd.rect.y).toBe(first!.rect.y);
+
+    expect(blankLineOffset.fragment).toBe(blank);
+    expect(blankLineOffset.rect.x).toBe(0);
+    expect(blankLineOffset.rect.y).toBe(first!.rect.y + first!.rect.height);
+
+    expect(nextBlockStart.fragment).toBe(second);
+    expect(nextBlockStart.rect.x).toBeCloseTo(second!.rect.x, 0);
+    expect(nextBlockStart.rect.y).toBe(first!.rect.y + first!.rect.height * 2);
+  });
+
+  it("preserves every source newline as a visual line break in editor layout", () => {
+    const markdown = "abc\ndef\n\nghi";
+    const { index } = createTestIndex(markdown);
+    const first = index.fragments.find((fragment) => fragment.text === "abc");
+    const second = index.fragments.find((fragment) => fragment.text === "def");
+    const blank = index.fragments.find((fragment) => fragment.sourceRange.from === 8);
+    const third = index.fragments.find((fragment) => fragment.text === "ghi");
+    expect(first).toBeDefined();
+    expect(second).toBeDefined();
+    expect(blank).toBeDefined();
+    expect(third).toBeDefined();
+
+    expect(second!.rect.y).toBe(first!.rect.y + first!.rect.height);
+    expect(blank!.rect.y).toBe(first!.rect.y + first!.rect.height * 2);
+    expect(third!.rect.y).toBe(first!.rect.y + first!.rect.height * 3);
+
+    expect(index.sourceOffsetToCaretRect(markdown.indexOf("\n")).fragment).toBe(first);
+    expect(index.sourceOffsetToCaretRect(markdown.indexOf("def")).fragment).toBe(second);
+    expect(index.sourceOffsetToCaretRect(8).fragment).toBe(blank);
+    expect(index.sourceOffsetToCaretRect(markdown.indexOf("ghi")).fragment).toBe(third);
+  });
+
+  it("keeps styled softbreak content source-addressable across visual lines", () => {
+    const markdown = "**abc\ndef** and [ghi\njkl](https://example.com)";
+    const { index } = createTestIndex(markdown);
+    const abc = index.fragments.find((fragment) => fragment.text === "abc");
+    const def = index.fragments.find((fragment) => fragment.text === "def");
+    const ghi = index.fragments.find((fragment) => fragment.text === "ghi");
+    const jkl = index.fragments.find((fragment) => fragment.text === "jkl");
+    expect(abc).toBeDefined();
+    expect(def).toBeDefined();
+    expect(ghi).toBeDefined();
+    expect(jkl).toBeDefined();
+
+    expect(abc!.type).toBe("strong");
+    expect(def!.type).toBe("strong");
+    expect(ghi!.type).toBe("link");
+    expect(jkl!.type).toBe("link");
+    expect(def!.rect.y).toBe(abc!.rect.y + abc!.rect.height);
+    expect(jkl!.rect.y).toBeGreaterThan(ghi!.rect.y);
+
+    expect(index.sourceOffsetToCaretRect(markdown.indexOf("abc")).fragment).toBe(abc);
+    expect(index.sourceOffsetToCaretRect(markdown.indexOf("def")).fragment).toBe(def);
+    expect(index.sourceOffsetToCaretRect(markdown.indexOf("ghi")).fragment).toBe(ghi);
+    expect(index.sourceOffsetToCaretRect(markdown.indexOf("jkl")).fragment).toBe(jkl);
+  });
+
+  it("does not collapse real next-block starts into the previous line end", () => {
+    for (const markdown of ["abc\n- item", "abc\n> quote", "abc\n# Heading"]) {
+      const { index, state } = createTestIndex(markdown);
+      const first = index.fragments.find((fragment) => fragment.text === "abc");
+      const nextBlock = state.blockSpans[1];
+      expect(first, markdown).toBeDefined();
+      expect(nextBlock, markdown).toBeDefined();
+
+      const newlineCaret = index.sourceOffsetToCaretRect(markdown.indexOf("\n"));
+      const nextBlockCaret = index.sourceOffsetToCaretRect(nextBlock!.from);
+
+      expect(newlineCaret.fragment, markdown).toBe(first);
+      expect(newlineCaret.rect.y, markdown).toBe(first!.rect.y);
+      expect(nextBlockCaret.rect.y, markdown).toBeGreaterThan(first!.rect.y);
+    }
+  });
+
+  it("uses layout y positions and measured x positions for wrapped visual line boundaries", () => {
+    const markdown = "Alpha beta gamma delta epsilon zeta eta theta iota kappa";
+    const { index } = createTestIndex(markdown, 160);
+    expect(index.fragments.length).toBeGreaterThanOrEqual(3);
+
+    for (const fragment of index.fragments) {
+      const start = index.sourceOffsetToCaretRect(fragment.sourceRange.from, "after");
+      const end = index.sourceOffsetToCaretRect(fragment.sourceRange.to, "before");
+      expect(start.rect.y).toBe(fragment.rect.y);
+      expect(end.rect.y).toBe(fragment.rect.y);
+      expect(start.rect.x).toBeCloseTo(fragment.rect.x, 0);
+      expect(end.rect.x).toBeCloseTo(fragment.rect.x + fragment.rect.width, 0);
+    }
+
+    const first = index.fragments[0]!;
+    const second = index.fragments[1]!;
+    expect(first.sourceRange.to).toBe(second.sourceRange.from);
+    expect(index.sourceOffsetToCaretRect(first.sourceRange.to, "before").rect.y).toBe(first.rect.y);
+    expect(index.sourceOffsetToCaretRect(first.sourceRange.to, "after").rect.y).toBe(second.rect.y);
+  });
+
+  it("hit-tests visual line y boundaries into the lower line", () => {
+    const markdown = "Alpha beta gamma delta epsilon zeta eta theta iota kappa";
+    const { index } = createTestIndex(markdown, 160);
+    const first = index.fragments[0]!;
+    const second = index.fragments[1]!;
+
+    const lastPixelOnFirst = index.hitTest(
+      first.rect.x + first.rect.width - 1,
+      first.rect.y + first.rect.height - 0.01,
+    );
+    const firstPixelOnSecond = index.hitTest(second.rect.x + 1, second.rect.y);
+
+    expect(lastPixelOnFirst.fragment).toBe(first);
+    expect(firstPixelOnSecond.fragment).toBe(second);
+    expect(firstPixelOnSecond.offset).toBe(second.sourceRange.from);
+  });
+
+  it("places caret and hit-test on the correct source line inside multiline code blocks", () => {
+    const markdown = ["```ts", "const x = 1;", "const y = 2;", "```"].join("\n");
+    const { index } = createTestIndex(markdown);
+    const firstCodeLine = index.fragments.find((fragment) => fragment.text === "const x = 1;");
+    const secondCodeLine = index.fragments.find((fragment) => fragment.text === "const y = 2;");
+    expect(firstCodeLine).toBeDefined();
+    expect(secondCodeLine).toBeDefined();
+
+    const firstStart = index.sourceOffsetToCaretRect(markdown.indexOf("const x"));
+    const firstEnd = index.sourceOffsetToCaretRect(markdown.indexOf("const x") + "const x".length);
+    const secondStart = index.sourceOffsetToCaretRect(markdown.indexOf("const y"));
+    const secondEnd = index.sourceOffsetToCaretRect(markdown.indexOf("const y") + "const y".length);
+
+    expect(firstStart.fragment).toBe(firstCodeLine);
+    expect(secondStart.fragment).toBe(secondCodeLine);
+    expect(secondStart.rect.y).toBeGreaterThan(firstStart.rect.y);
+    expect(secondStart.rect.x).toBeCloseTo(firstStart.rect.x, 0);
+    expect(firstEnd.rect.x).toBeCloseTo(
+      firstStart.rect.x + measuredTextWidth("const x", firstCodeLine!.font),
+      0,
+    );
+    expect(secondEnd.rect.x).toBeCloseTo(
+      secondStart.rect.x + measuredTextWidth("const y", secondCodeLine!.font),
+      0,
+    );
+
+    const hitSecond = index.hitTest(secondStart.rect.x + 1, secondStart.rect.y);
+    expect(hitSecond.fragment).toBe(secondCodeLine);
+    expect(hitSecond.offset).toBe(markdown.indexOf("const y"));
+
+    const rects = index.sourceRangeToSelectionRects({
+      from: markdown.indexOf("x = 1"),
+      to: markdown.indexOf("y = 2") + "y = 2".length,
+    });
+    expect(rects.length).toBe(2);
+    expect(rects[0]?.y).toBe(firstCodeLine!.rect.y);
+    expect(rects[1]?.y).toBe(secondCodeLine!.rect.y);
   });
 });

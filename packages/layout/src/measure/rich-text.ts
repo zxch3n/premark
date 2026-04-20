@@ -82,6 +82,7 @@ export interface PrepareRichTextOptions {
   fonts: ResolvedFonts;
   baseFont: string;
   lineHeight: number;
+  lineBreakMode?: "markdown" | "source";
   prefix?: ListPrefix;
 }
 
@@ -219,6 +220,7 @@ function collectInlineSpecs(
   fonts: ResolvedFonts,
   baseFont: string,
   state: StyleState,
+  lineBreakMode: "markdown" | "source",
 ): void {
   for (const node of nodes) {
     switch (node.type) {
@@ -244,6 +246,10 @@ function collectInlineSpecs(
         });
         break;
       case "softbreak": {
+        if (lineBreakMode === "source") {
+          target.push({ kind: "break" });
+          break;
+        }
         const style = getFontForStyle(state, fonts, baseFont);
         pushTextSpec(target, {
           text: " ",
@@ -259,31 +265,59 @@ function collectInlineSpecs(
         target.push({ kind: "break" });
         break;
       case "strong":
-        collectInlineSpecs(target, node.children, fonts, baseFont, {
-          ...state,
-          strong: true,
-        });
+        collectInlineSpecs(
+          target,
+          node.children,
+          fonts,
+          baseFont,
+          {
+            ...state,
+            strong: true,
+          },
+          lineBreakMode,
+        );
         break;
       case "emphasis":
-        collectInlineSpecs(target, node.children, fonts, baseFont, {
-          ...state,
-          emphasis: true,
-        });
+        collectInlineSpecs(
+          target,
+          node.children,
+          fonts,
+          baseFont,
+          {
+            ...state,
+            emphasis: true,
+          },
+          lineBreakMode,
+        );
         break;
       case "strikethrough":
-        collectInlineSpecs(target, node.children, fonts, baseFont, {
-          ...state,
-          strikethrough: true,
-        });
+        collectInlineSpecs(
+          target,
+          node.children,
+          fonts,
+          baseFont,
+          {
+            ...state,
+            strikethrough: true,
+          },
+          lineBreakMode,
+        );
         break;
       case "link":
-        collectInlineSpecs(target, node.children, fonts, baseFont, {
-          ...state,
-          link: {
-            href: node.href,
-            title: node.title,
+        collectInlineSpecs(
+          target,
+          node.children,
+          fonts,
+          baseFont,
+          {
+            ...state,
+            link: {
+              href: node.href,
+              title: node.title,
+            },
           },
-        });
+          lineBreakMode,
+        );
         break;
       case "image": {
         const style = getFontForStyle(state, fonts, baseFont);
@@ -319,9 +353,7 @@ function prepareInlineItems(specs: readonly InlineSpec[]): PreparedInlineItem[] 
 
   for (const spec of specs) {
     if (spec.kind === "break") {
-      if (items.at(-1)?.kind !== "break") {
-        items.push({ kind: "break" });
-      }
+      items.push({ kind: "break" });
       pendingGap = 0;
       continue;
     }
@@ -414,11 +446,18 @@ function measureIntrinsicWidth(items: readonly PreparedInlineItem[]): number {
 
 export function prepareRichText(options: PrepareRichTextOptions): PreparedRichText {
   const specs: InlineSpec[] = [];
-  collectInlineSpecs(specs, options.nodes, options.fonts, options.baseFont, {
-    strong: false,
-    emphasis: false,
-    strikethrough: false,
-  });
+  collectInlineSpecs(
+    specs,
+    options.nodes,
+    options.fonts,
+    options.baseFont,
+    {
+      strong: false,
+      emphasis: false,
+      strikethrough: false,
+    },
+    options.lineBreakMode ?? "markdown",
+  );
   const items = prepareInlineItems(specs);
 
   return {

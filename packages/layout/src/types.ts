@@ -79,6 +79,7 @@ export interface StyleConfig {
   fontOverrides?: Partial<ResolvedFonts>;
   highlighter?: PrismHighlighter;
   theme?: string;
+  lineBreakMode?: "markdown" | "source";
 }
 
 export interface BlockContext {

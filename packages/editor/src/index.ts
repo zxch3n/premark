@@ -22,6 +22,8 @@ export { createEditableLayoutIndex, EditableLayoutIndex } from "./editable-layou
 export type {
   CaretRect,
   EditableFragment,
+  EditableLayoutSourceMap,
+  EditableLayoutSourceMapSegment,
   GranularHitTestResult,
   HitTestGranularity,
   HitTestResult,
@@ -33,8 +35,11 @@ export {
 } from "./memory-adapter.ts";
 export { createActiveMarkerRevealMarkdown, findActiveMarkerToken } from "./marker-reveal.ts";
 export type {
+  ActiveMarkdownControl,
   ActiveMarkerRevealMarkdown,
   ActiveMarkerRevealMarkdownInput,
+  ActiveMarkerRevealSourceMap,
+  ActiveMarkerRevealSourceMapSegment,
   RevealedMarkerType,
 } from "./marker-reveal.ts";
 export {

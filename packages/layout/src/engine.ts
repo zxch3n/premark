@@ -3,7 +3,9 @@ import {
   incrementalParse,
   type IncrementalParseResult,
   type IncrementalParseState,
+  type BlockSpan,
   type MarkdownBlock,
+  type MarkdownInline,
 } from "@pretext-md/parser";
 
 import { hashContent, type BlockCache } from "./cache.ts";
@@ -92,11 +94,39 @@ function plainInlineText(nodes: NonNullable<NormalizedBlock["inline"]>): string 
     .join("");
 }
 
+function inlineContainsSourceBreak(nodes: readonly MarkdownInline[]): boolean {
+  return nodes.some((node) => {
+    switch (node.type) {
+      case "softbreak":
+      case "hardbreak":
+        return true;
+      case "strong":
+      case "emphasis":
+      case "strikethrough":
+      case "link":
+      case "image":
+        return inlineContainsSourceBreak(node.children);
+      default:
+        return false;
+    }
+  });
+}
+
 function stripHtmlMarkup(html: string): string {
   return html
     .replace(/<[^>]+>/gu, " ")
     .replace(/\s+/gu, " ")
     .trim();
+}
+
+function countNewlines(text: string, from: number, to: number): number {
+  let count = 0;
+  for (let index = Math.max(0, from); index < Math.min(text.length, to); index += 1) {
+    if (text.charCodeAt(index) === 10) {
+      count += 1;
+    }
+  }
+  return count;
 }
 
 function translateLine(
@@ -148,6 +178,8 @@ export class LayoutEngineImpl implements LayoutEngine {
 
   private readonly highlighter?: StyleConfig["highlighter"];
 
+  private readonly lineBreakMode: NonNullable<StyleConfig["lineBreakMode"]>;
+
   private version = 0;
 
   private blockCaches: InternalBlockCache[] = [];
@@ -173,6 +205,7 @@ export class LayoutEngineImpl implements LayoutEngine {
     };
     this.fonts = resolveFonts(config.fontTheme, config.fontOverrides);
     this.highlighter = config.highlighter;
+    this.lineBreakMode = config.lineBreakMode ?? "markdown";
   }
 
   layout(markdown: string, containerWidth: number): DocumentLayout {
@@ -212,9 +245,15 @@ export class LayoutEngineImpl implements LayoutEngine {
     markdown = this.lastMarkdown,
   ): DocumentLayout {
     const normalizedDocument = normalizeDocument(blocks, this.spacing);
-    const layout = this.layoutNormalizedBlocks(normalizedDocument.blocks, containerWidth);
+    const parseState = createIncrementalParseState(markdown);
+    const layout = this.layoutNormalizedBlocks(
+      normalizedDocument.blocks,
+      containerWidth,
+      markdown,
+      parseState.blockSpans,
+    );
     this.lastMarkdown = markdown;
-    this.lastParseState = createIncrementalParseState(markdown);
+    this.lastParseState = parseState;
     this.lastBlocks = blocks;
     this.lastNormalizedDocument = normalizedDocument;
     this.lastLayout = layout;
@@ -223,7 +262,12 @@ export class LayoutEngineImpl implements LayoutEngine {
   }
 
   resize(_prevLayout: DocumentLayout, newWidth: number): DocumentLayout {
-    const layout = this.layoutNormalizedBlocks(this.lastNormalizedDocument.blocks, newWidth);
+    const layout = this.layoutNormalizedBlocks(
+      this.lastNormalizedDocument.blocks,
+      newWidth,
+      this.lastMarkdown,
+      this.lastParseState.blockSpans,
+    );
     this.lastLayout = layout;
     this.lastDirtyFromLayoutBlock = 0;
     return layout;
@@ -277,12 +321,52 @@ export class LayoutEngineImpl implements LayoutEngine {
     };
   }
 
+  private blockGapBefore(
+    normalizedBlocks: readonly NormalizedBlock[],
+    blockIndex: number,
+    previousMarginBottom: number,
+    markdown: string,
+    blockSpans: readonly BlockSpan[],
+  ): number {
+    const block = normalizedBlocks[blockIndex];
+    if (block === undefined) {
+      return 0;
+    }
+    if (blockIndex === 0) {
+      return block.marginTop;
+    }
+    if (this.lineBreakMode === "markdown") {
+      return Math.max(previousMarginBottom, block.marginTop);
+    }
+
+    const previousBlock = normalizedBlocks[blockIndex - 1];
+    if (previousBlock === undefined || previousBlock.sourceBlockIndex === block.sourceBlockIndex) {
+      return 0;
+    }
+
+    const previousSpan = blockSpans[previousBlock.sourceBlockIndex];
+    const currentSpan = blockSpans[block.sourceBlockIndex];
+    if (
+      previousSpan === undefined ||
+      currentSpan === undefined ||
+      currentSpan.from < previousSpan.to
+    ) {
+      return 0;
+    }
+
+    const newlineCount = countNewlines(markdown, previousSpan.to, currentSpan.from);
+    return Math.max(0, newlineCount - 1) * this.fonts.lineHeights.body;
+  }
+
   private prepareBlock(block: NormalizedBlock): PreparedBlock {
     if (block.type === "heading" || block.type === "paragraph") {
       const typography = this.getBaseTypography(block);
       const prefix = createListPrefix(block.context.listMarker, this.fonts, this.spacing);
       const plain =
-        block.inline !== undefined && inlineIsPlainText(block.inline) && prefix === undefined;
+        block.inline !== undefined &&
+        inlineIsPlainText(block.inline) &&
+        prefix === undefined &&
+        (this.lineBreakMode === "markdown" || !inlineContainsSourceBreak(block.inline));
       if (plain && block.inline !== undefined) {
         return {
           kind: "text",
@@ -302,6 +386,7 @@ export class LayoutEngineImpl implements LayoutEngine {
           fonts: this.fonts,
           baseFont: typography.font,
           lineHeight: typography.lineHeight,
+          lineBreakMode: this.lineBreakMode,
           prefix,
         }),
       };
@@ -560,12 +645,19 @@ export class LayoutEngineImpl implements LayoutEngine {
       : normalizedDocument.blocks.length -
         this.getNormalizedSuffixCount(parseResult.reusedSuffixCount);
     const layout = forceFullLayout
-      ? this.layoutNormalizedBlocks(normalizedDocument.blocks, containerWidth)
+      ? this.layoutNormalizedBlocks(
+          normalizedDocument.blocks,
+          containerWidth,
+          parseResult.state.text,
+          parseResult.state.blockSpans,
+        )
       : this.layoutNormalizedBlocksIncrementally(
           normalizedDocument,
           containerWidth,
           dirtyFromLayoutBlock,
           dirtyToLayoutBlock,
+          parseResult.state.text,
+          parseResult.state.blockSpans,
         );
 
     this.lastMarkdown = parseResult.state.text;
@@ -653,6 +745,8 @@ export class LayoutEngineImpl implements LayoutEngine {
     containerWidth: number,
     dirtyFromBlock: number,
     dirtyToBlock: number,
+    markdown: string,
+    blockSpans: readonly BlockSpan[],
   ): DocumentLayout {
     if (normalizedDocument.blocks.length === 0) {
       this.version += 1;
@@ -682,10 +776,13 @@ export class LayoutEngineImpl implements LayoutEngine {
 
     for (let blockIndex = dirtyFromBlock; blockIndex < dirtyToBlock; blockIndex += 1) {
       const normalized = normalizedDocument.blocks[blockIndex];
-      cursorY +=
-        blockIndex === 0
-          ? normalized.marginTop
-          : Math.max(previousMarginBottom, normalized.marginTop);
+      cursorY += this.blockGapBefore(
+        normalizedDocument.blocks,
+        blockIndex,
+        previousMarginBottom,
+        markdown,
+        blockSpans,
+      );
       const width = Math.max(1, containerWidth - normalized.indent);
       const contentHash = normalized.contentHash;
       const contentKey = normalized.contentKey;
@@ -724,12 +821,15 @@ export class LayoutEngineImpl implements LayoutEngine {
     if (suffixCount > 0) {
       const oldSuffixStart = this.lastLayout.blocks.length - suffixCount;
       const firstOldSuffix = this.lastLayout.blocks[oldSuffixStart];
-      const firstNewNormalized = normalizedDocument.blocks[dirtyToBlock];
       const firstNewY =
         cursorY +
-        (dirtyToBlock === 0
-          ? firstNewNormalized.marginTop
-          : Math.max(previousMarginBottom, firstNewNormalized.marginTop));
+        this.blockGapBefore(
+          normalizedDocument.blocks,
+          dirtyToBlock,
+          previousMarginBottom,
+          markdown,
+          blockSpans,
+        );
       const yOffset = firstNewY - firstOldSuffix.y;
 
       for (let offset = 0; offset < suffixCount; offset += 1) {
@@ -780,6 +880,8 @@ export class LayoutEngineImpl implements LayoutEngine {
   private layoutNormalizedBlocks(
     normalizedBlocks: NormalizedBlock[],
     containerWidth: number,
+    markdown: string,
+    blockSpans: readonly BlockSpan[],
   ): DocumentLayout {
     if (normalizedBlocks.length === 0) {
       this.version += 1;
@@ -794,8 +896,13 @@ export class LayoutEngineImpl implements LayoutEngine {
     let previousMarginBottom = 0;
 
     normalizedBlocks.forEach((block, blockIndex) => {
-      cursorY +=
-        blockIndex === 0 ? block.marginTop : Math.max(previousMarginBottom, block.marginTop);
+      cursorY += this.blockGapBefore(
+        normalizedBlocks,
+        blockIndex,
+        previousMarginBottom,
+        markdown,
+        blockSpans,
+      );
       const width = Math.max(1, containerWidth - block.indent);
       const contentHash = block.contentHash;
       const contentKey = block.contentKey;

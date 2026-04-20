@@ -1,4 +1,5 @@
 import type { EditorDocumentState } from "./editor-state.ts";
+import type { EditableLayoutIndex } from "./editable-layout.ts";
 import { createGraphemeSegments, snapOffsetToGraphemeBoundary } from "./grapheme.ts";
 import type { NormalizedInputIntent } from "./input-trace.ts";
 import { createWordSegments } from "./text-segments.ts";
@@ -11,8 +12,9 @@ export function beginPointerSelection(
   editor: EditorDocumentState,
   x: number,
   y: number,
+  editableIndex: EditableLayoutIndex = editor.editableIndex,
 ): PointerSelectionSession {
-  const offset = hitTestGraphemeOffset(editor, x, y);
+  const offset = hitTestGraphemeOffset(editor, editableIndex, x, y);
   editor.setSelection(offset, offset);
   return {
     anchorOffset: offset,
@@ -24,8 +26,9 @@ export function updatePointerSelection(
   session: PointerSelectionSession,
   x: number,
   y: number,
+  editableIndex: EditableLayoutIndex = editor.editableIndex,
 ): void {
-  const offset = hitTestGraphemeOffset(editor, x, y);
+  const offset = hitTestGraphemeOffset(editor, editableIndex, x, y);
   editor.setSelection(session.anchorOffset, offset);
 }
 
@@ -168,8 +171,13 @@ function moveToDocumentBoundary(text: string, key: string): number | null {
   return null;
 }
 
-function hitTestGraphemeOffset(editor: EditorDocumentState, x: number, y: number): number {
-  const hit = editor.editableIndex.hitTest(x, y);
+function hitTestGraphemeOffset(
+  editor: EditorDocumentState,
+  editableIndex: EditableLayoutIndex,
+  x: number,
+  y: number,
+): number {
+  const hit = editableIndex.hitTest(x, y);
   return snapOffsetToGraphemeBoundary(
     editor.markdown,
     hit.offset,

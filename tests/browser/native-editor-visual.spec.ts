@@ -6,6 +6,8 @@ const screenshotStoryUrl = `${storyUrl}&screenshot=1`;
 const activeMarkerScreenshotStoryUrl = `${screenshotStoryUrl}&marker=active`;
 const canvasSelectionStoryUrl =
   "/iframe.html?id=editing-premark-canvas-selection--canvas-selection&viewMode=story";
+const canvasNativeStoryUrl =
+  "/iframe.html?id=editing-premark-canvas-native-editor--interactive-canvas-native-editor&viewMode=story";
 
 async function editorMarkdown(page: Page) {
   return page.evaluate(
@@ -111,5 +113,15 @@ test.describe("Premark native editor visual baselines", () => {
     } finally {
       await context.close();
     }
+  });
+
+  test("matches Canvas native editor crop", async ({ page }) => {
+    await page.goto(canvasNativeStoryUrl);
+    const canvas = page.locator("[data-canvas-native-editor]");
+    await expect(canvas).toBeVisible();
+    await expect(canvas).toHaveScreenshot("native-editor-visual-canvas-native-editor.png", {
+      animations: "disabled",
+      maxDiffPixelRatio: 0.01,
+    });
   });
 });
