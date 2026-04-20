@@ -135,6 +135,8 @@ export const inputTraceFixtures = [
       { type: "keydown", key: "End", shiftKey: true },
       { type: "keydown", key: "PageDown", shiftKey: true },
       { type: "keydown", key: "a", ctrlKey: true },
+      { type: "keydown", key: "Tab" },
+      { type: "keydown", key: "Tab", shiftKey: true },
     ],
     expectedIntents: [
       {
@@ -180,6 +182,8 @@ export const inputTraceFixtures = [
         extend: true,
       },
       { type: "select-all" },
+      { type: "line-indent", direction: "in" },
+      { type: "line-indent", direction: "out" },
     ],
   },
 ] as const satisfies readonly InputTraceFixture[];

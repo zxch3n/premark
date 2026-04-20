@@ -1,13 +1,13 @@
 # Premark Native Editor Redesign Plan
 
-Status: Phase 11 complete; Phase 12 next; OS IME deferred
+Status: Phase 12 in progress; OS IME deferred
 Owner: Codex / Zixuan
 Last Updated: 2026-04-21
 Compaction Rule: after memory reload or compaction, reread this whole file before continuing.
 
 ## Current Objective
 
-- Start Phase 12 Markdown editing behavior after the Phase 11 controller API baseline.
+- Continue Phase 12 Markdown editing behavior; links/images/headings and boundary deletes remain.
 - Keep the native Premark-rendered editor as the product path; CodeMirror overlay remains removed.
 - Do not run macOS HID/IME tests while the machine is actively used unless Zixuan explicitly asks.
 
@@ -219,10 +219,10 @@ Acceptance:
 
 Goal: make common Markdown structures feel correct under source-exact editing.
 
-- [ ] Lists: Enter creates next item, empty item exits, Tab/Shift+Tab changes indentation.
-- [ ] Task lists: checkbox toggles source without breaking selection.
-- [ ] Blockquotes: Enter continues quote, empty quote exits.
-- [ ] Fenced code: Enter, Tab, paste, and multi-line selection remain source-exact.
+- [x] Lists: Enter creates next item, empty item exits, Tab/Shift+Tab changes indentation.
+- [x] Task lists: checkbox toggles source without breaking selection.
+- [x] Blockquotes: Enter continues quote, empty quote exits.
+- [x] Fenced code: Enter, Tab, paste, and multi-line selection remain source-exact.
 - [ ] Links/images/headings: control-marker editing, rendered text replacement, and Backspace rules are covered.
 - [ ] Delete behavior across block and inline control boundaries is deterministic.
 
@@ -338,3 +338,4 @@ Acceptance:
 - Generalized the macOS IME runner into `pinyin`, `japanese`, and `korean` scenario sets, added a Pinyin candidate-window screen artifact path, and documented `PREMARK_MACOS_IME_SCENARIO_SET`. Dry-run verification passed for all three sets without launching a browser or posting HID; current system still has no Japanese/Korean input-source candidates enabled.
 - Added Phases 11-17 to keep the plan moving from prototype toward product integration, Markdown behavior, viewport performance, visual parity, collaboration/AI, and final OS IME gates.
 - Completed Phase 11. Added `PremarkEditorController` as the product-facing API for markdown, selection, edits, input intents, undo/redo, composition, resize, subscriptions, and render snapshots. Render snapshots now own active Markdown control reveal and virtual composition render views, so DOM and Canvas stories no longer rebuild those views locally. Verification on 2026-04-21: `vp check --fix`, `vp test` passed 186 tests, `vp run test:browser` passed 25 Playwright tests, and `vp run build` passed.
+- Phase 12 started. Added Markdown-aware Enter for unordered, ordered, task-list, and blockquote lines; empty list/quote lines exit their structure. Added Tab/Shift+Tab line indent/outdent intent from keydown, source-exact Tab/Enter/paste behavior inside fenced code, and task checkbox toggles through both helper and controller APIs while preserving selection. Browser coverage now exercises list continuation, list indent/outdent, and blockquote continuation/exit through the real hidden textarea path. Verification on 2026-04-21: `vp check --fix`, `vp test` passed 194 tests, `vp run test:browser` passed 26 Playwright tests, and `vp run build` passed.

@@ -139,4 +139,21 @@ describe("PremarkEditorController", () => {
     expect(controller.undo()).toBe(false);
     expect(controller.markdown()).toBe("aXbc");
   });
+
+  it("toggles task checkboxes through the public controller API", () => {
+    const controller = createInMemoryPremarkEditorController("- [ ] todo", 600);
+    const todoFrom = controller.markdown().indexOf("todo");
+    controller.setSelection(todoFrom, todoFrom + "todo".length);
+
+    const result = controller.toggleTaskCheckbox(todoFrom);
+
+    expect(result.type).toBe("edit");
+    expect(controller.markdown()).toBe("- [x] todo");
+    expect(controller.selection()).toMatchObject({
+      from: todoFrom,
+      to: todoFrom + "todo".length,
+    });
+    expect(controller.undo()).toBe(true);
+    expect(controller.markdown()).toBe("- [ ] todo");
+  });
 });

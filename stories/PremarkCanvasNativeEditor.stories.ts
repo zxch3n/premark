@@ -332,7 +332,11 @@ export const InteractiveCanvasNativeEditor = () => {
           ctrlKey: event.ctrlKey,
         },
       ])[0];
-      if (intent?.type !== "keyboard-selection" && intent?.type !== "select-all") {
+      if (
+        intent?.type !== "keyboard-selection" &&
+        intent?.type !== "select-all" &&
+        intent?.type !== "line-indent"
+      ) {
         return;
       }
       event.preventDefault();

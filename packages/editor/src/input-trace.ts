@@ -58,6 +58,7 @@ export type NormalizedInputIntent =
     }
   | { readonly type: "selection-change"; readonly anchor: number; readonly head: number }
   | { readonly type: "select-all" }
+  | { readonly type: "line-indent"; readonly direction: "in" | "out" }
   | {
       readonly type: "keyboard-selection";
       readonly key: string;
@@ -197,6 +198,13 @@ export function normalizeInputTrace(events: readonly InputTraceEvent[]): Normali
         });
         break;
       case "keydown": {
+        if (event.key === "Tab") {
+          intents.push({
+            type: "line-indent",
+            direction: event.shiftKey === true ? "out" : "in",
+          });
+          break;
+        }
         const selectionIntent = keyboardSelectionIntent(event);
         if (selectionIntent !== null) {
           intents.push(selectionIntent);
