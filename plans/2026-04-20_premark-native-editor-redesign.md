@@ -52,13 +52,13 @@ Premark native editing should have one continuous document surface:
 
 Goal: define the minimum editor contract before coding input.
 
-- [ ] Define `EditorDocumentState`: markdown, layout, block records, selection, composing range, pending operations.
-- [ ] Define source-position model for caret, anchor, head, and composition.
+- [x] Define `EditorDocumentState`: markdown, layout, block records, selection, composing range, pending operations.
+- [x] Define source-position model for caret, anchor, head, and composition.
 - [ ] Define supported initial editing scope: paragraph, heading, list item, blockquote, code block.
 - [ ] Define unsupported/deferred scopes: table cell rich editing, image resize, HTML block editing.
 - [ ] Define browser matrix: Chromium first, macOS IME required before claiming success.
 - [ ] Define manual fallback policy if real OS IME exposes a browser bug.
-- [ ] Create a pitfall-to-test matrix for IME, hidden textarea, selection, mobile, clipboard, Unicode, bidi, accessibility, visual stability, and remote edits.
+- [x] Create a pitfall-to-test matrix for IME, hidden textarea, selection, mobile, clipboard, Unicode, bidi, accessibility, visual stability, and remote edits.
 - [ ] Define screenshot artifact policy: crop size limits, deterministic fonts/theme, animation disabled, artifact folder, and review checklist.
 
 Acceptance:
@@ -71,9 +71,9 @@ Acceptance:
 
 Goal: make rendered Premark output addressable enough to edit directly.
 
-- [ ] Add fragment rect/source-range data to layout output or a sidecar index.
-- [ ] Implement `hitTest(x, y) -> sourceOffset`.
-- [ ] Implement `sourceOffsetToCaretRect(offset, affinity)`.
+- [x] Add fragment rect/source-range data to layout output or a sidecar index.
+- [x] Implement `hitTest(x, y) -> sourceOffset`.
+- [x] Implement `sourceOffsetToCaretRect(offset, affinity)`.
 - [ ] Implement line/word/block granularity hit-test helpers.
 - [ ] Add tests for Latin, CJK, emoji, inline code, links, list markers, blockquotes, and code blocks.
 - [ ] Add grapheme fixtures for combining marks, emoji ZWJ sequences, flags, skin tones, and CJK punctuation.
@@ -195,3 +195,5 @@ Acceptance:
 - Cloned MarkText and studied Muya. It confirms that a non-CodeMirror WYSIWYG Markdown editor is practical, but the first prototype should isolate browser-native editing behavior behind a small bridge and keep Premark's model/layout authoritative.
 - Accepted design direction: hidden textarea bridge near caret, Premark-rendered caret/selection/composition, inline marker reveal for strong/code/link, UTF-16 offsets with grapheme sidecar, CRDT-agnostic stable ranges, local undo, and strict logic/browser/visual/IME/mobile testing.
 - Researched browser/editor pitfalls from W3C/MDN/Chrome/CodeMirror/ProseMirror/Slate/Draft/Playwright/Unicode sources and added a dedicated automation plus screenshot audit phase.
+- Began implementation with `@pretext-md/editor`: in-memory CRDT-agnostic document adapter, stable ranges, source edit operations, virtual composition session, local undo manager, editable layout sidecar index, pitfall matrix tracker, and deterministic core tests.
+- Verified initial implementation with `vp check --fix`, `vp test`, and `vp run build`. Existing unrelated warnings remain in `packages/wiki-canvas/src/layout.ts` and `tools/wiki-canvas/src/cli.ts`.

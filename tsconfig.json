@@ -6,6 +6,7 @@
     "paths": {
       "@pretext-md/parser": ["./packages/parser/src/index.ts"],
       "@pretext-md/layout": ["./packages/layout/src/index.ts"],
+      "@pretext-md/editor": ["./packages/editor/src/index.ts"],
       "@pretext-md/highlight": ["./packages/highlight/src/index.ts"],
       "@pretext-md/html-renderer": ["./packages/html-renderer/src/index.ts"],
       "@pretext-md/wiki-canvas": ["./packages/wiki-canvas/src/index.ts"]
