@@ -186,6 +186,31 @@ The DOM renderer may expose extra debug labels and source ranges. It must not us
 
 Testing must be broad enough to justify a self-built editor. The prototype is not accepted if only happy-path typing works.
 
+## Research Pitfall Checklist
+
+The following checklist comes from browser specs, editor project docs/issues, and platform automation docs. Each item must map to automated tests or an explicit automation gap.
+
+| Pitfall                                                            | Why It Matters                                                                                                            | Automated Coverage                                                                                                                             |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| IME event order varies                                             | Specs and implementations do not always agree on `beforeinput`, `input`, `compositionupdate`, and `compositionend` order. | Event trace fixtures normalize all composition sequences into the same editor op.                                                              |
+| Composition updates may be non-cancelable                          | `insertCompositionText` updates cannot be treated like normal cancelable `beforeinput`.                                   | Composition tests assert update is virtual and source remains unchanged until commit.                                                          |
+| DOM/selection mutation can abort composition                       | ProseMirror reports IME aborts when DOM or DOM selection changes around active composition.                               | Tests assert Premark does not touch browser DOM selection near composition and only updates its own overlay.                                   |
+| Hidden textarea can drift from visible editor                      | CodeMirror used textarea polling because IME updates were historically not consistently observable.                       | Input bridge tests compare textarea value/selection, editor selection, source, and event trace after every input.                              |
+| Candidate window needs real bounds                                 | EditContext requires selection and character bounds so OS input services can place IME UI correctly.                      | Caret/textarea anchoring tests under scroll, zoom, high-DPI, and canvas world transforms; macOS screenshots when candidate UI can be captured. |
+| Cross-block composition replacement                                | Replacing a multi-block selection with IME text can corrupt state if bridge selection is trusted.                         | Cross-block Pinyin replacement tests use Premark stable range, not textarea selection.                                                         |
+| Mobile soft keyboards do not behave like hardware keyboards        | Slate reports autocorrect/autosuggest/swipe changes that do not map to key events.                                        | Mobile/input tests model direct `input`/`beforeinput` operations without `keydown`; real-device gap is recorded.                               |
+| Mobile viewport changes under OS keyboard                          | The visual viewport can shrink or move while the layout viewport remains unchanged.                                       | VisualViewport resize/scroll tests verify textarea anchor, caret rect, and selection rect remain aligned.                                      |
+| Selection anchor/focus/focus-element coupling is browser-sensitive | MDN documents that selection and input focus have complex cross-browser behavior.                                         | Tests maintain Premark anchor/head/direction independently from DOM focus and browser selection.                                               |
+| Keyboard selection has many modes                                  | Arrow, Shift+Arrow, Shift+Command+Arrow, Home/End, PageUp/PageDown, and select-all are distinct behaviors.                | Playwright keyboard suites cover collapsed, forward, backward, same-block, wrapped-line, and cross-block selections.                           |
+| Unicode grapheme boundaries are not UTF-16 boundaries              | UAX #29 notes grapheme clusters approximate user-perceived characters and matter for UI interactions.                     | Grapheme tests cover combining marks, emoji ZWJ, flags, variation selectors, CJK punctuation, delete, and caret movement.                      |
+| Bidi text reorders visual and logical positions                    | UAX #9 defines display reordering for mixed-direction text.                                                               | Bidi hit-test fixtures record current behavior for English/Hebrew/Arabic/numbers/Markdown markers.                                             |
+| Clipboard needs multiple formats                                   | Clipboard APIs allow manipulating `text/plain`, `text/html`, and richer semantic data during user events.                 | Copy/cut/paste tests assert Markdown, plain text, and HTML serialization for same-block and cross-block ranges.                                |
+| Browser extensions/grammar tools may mutate DOM                    | Draft.js warns DOM-modifying extensions can desync controlled editors.                                                    | DOM debug renderer has mutation-injection tests proving source of truth remains Premark state.                                                 |
+| Accessibility cannot be ignored                                    | ARIA textbox guidance expects labels and multiline semantics; hidden input must not trap AT users.                        | Accessibility smoke tests assert labels, focusability, `aria-multiline`, and no unlabeled hidden text control.                                 |
+| Screenshot tests can be flaky                                      | Playwright warns screenshots vary by OS, browser, hardware, headless mode, and fonts.                                     | Screenshot baseline policy fixes OS/browser/fonts/theme/scale, disables animation, and uses small crops.                                       |
+| Active marker reflow can move geometry                             | Showing `**`, backticks, or link URL changes active block width.                                                          | Before/after marker screenshot tests verify caret source offset and selection range stay correct through reflow.                               |
+| Remote/AI edits can move active ranges                             | Collaboration and streaming patches can move selection, undo targets, and composition anchors.                            | Stable range transform tests cover edits before, after, inside, and overlapping active ranges.                                                 |
+
 Vitest should cover deterministic logic:
 
 - stable range transform
@@ -231,6 +256,33 @@ macOS IME tests should cover:
 
 Mobile selection needs its own test class. It cannot be treated as desktop mouse selection with different coordinates. The first mobile target should include touch long press, drag handles when available, touch drag range extension, soft keyboard focus, composition-capable input where the platform allows automation, viewport resize after keyboard display, and selection rect stability under scroll/zoom. If full native mobile handles cannot be automated in Playwright, the gap must be recorded and covered by a manual or device-farm checklist before claiming mobile support.
 
+Screenshot tests are required, and they need human review by Codex before a phase is marked complete. Screenshots should be cropped to the editor state under test instead of full-page captures whenever possible. Each screenshot scenario should save:
+
+- actual crop
+- expected crop or baseline
+- diff image when comparison fails
+- event trace for the operation that produced the screenshot
+- `review.md` note with expected visual behavior and Codex pass/fail judgment
+
+The first screenshot set should include idle rendered Markdown, caret placement, forward selection, backward selection, wrapped-line selection, cross-block selection, active strong/code/link marker reveal, IME preedit text, paste replacement, remote edit while selected, DOM debug renderer, Canvas renderer, and high-DPI canvas rendering.
+
+## Research Sources
+
+- [W3C Input Events Level 2](https://www.w3.org/TR/input-events-2/): composition update ordering and `insertCompositionText`.
+- [W3C UI Events](https://www.w3.org/TR/uievents/): composition event ordering and cancelability notes.
+- [Chrome for Developers EditContext article](https://developer.chrome.com/blog/introducing-editcontext-api): custom editors, hidden editable element problems, and canvas editing responsibilities.
+- [MDN EditContext guide](https://developer.mozilla.org/en-US/docs/Web/API/EditContext_API/Guide): updating selection bounds, character bounds, and IME text formatting.
+- [ProseMirror composition discussion](https://discuss.prosemirror.net/t/composition-lost-when-i-input-after-select-multi-lines/4493): DOM/selection changes can abort browser composition.
+- [CodeMirror 5 internals](https://codemirror.net/5/doc/internals.html): hidden textarea input shim and IME polling history.
+- [Draft.js issues and pitfalls](https://draftjs.org/docs/advanced-topics-issues-and-pitfalls/): browser extensions, DOM mutations, IME, mobile support.
+- [Slate Android/soft keyboard issue](https://github.com/ianstormtaylor/slate/issues/2062): mobile input may not produce reliable key events.
+- [MDN Selection API](https://developer.mozilla.org/en-US/docs/Web/API/Selection): anchor/focus and focus behavior complexity.
+- [MDN VisualViewport](https://developer.mozilla.org/en-US/docs/Web/API/VisualViewport): OS keyboards can shrink the visual viewport without changing layout viewport.
+- [Clipboard API and events](https://www.w3.org/TR/clipboard-apis/): multi-format clipboard data during user-initiated clipboard events.
+- [Unicode UAX #29](https://www.unicode.org/reports/tr29/) and [Unicode UAX #9](https://unicode.org/reports/tr9/): grapheme segmentation and bidi behavior.
+- [Playwright keyboard](https://playwright.dev/docs/api/class-keyboard), [touchscreen](https://playwright.dev/docs/api/class-touchscreen), [screenshots](https://playwright.dev/docs/screenshots), and [visual comparison](https://playwright.dev/docs/next/test-snapshots) docs.
+- [Apple InputMethodKit](https://developer.apple.com/documentation/inputmethodkit) and [Mac Automation Scripting Guide](https://developer.apple.com/library/archive/documentation/LanguagesUtilities/Conceptual/MacAutomationScriptingGuide/AutomatetheUserInterface.html): macOS IME/candidate behavior and OS-level keyboard automation constraints.
+
 ## Acceptance
 
 The first prototype is accepted only when:
@@ -242,6 +294,8 @@ The first prototype is accepted only when:
 - Composition update does not mutate source or undo history.
 - DOM debug rendering and Canvas rendering share the same source map and rect computation.
 - Selection tests cover mouse, keyboard, Shift navigation, Shift+Command navigation, and mobile-specific behavior.
+- Known pitfall matrix items are either automated or explicitly listed as automation gaps.
+- Screenshot crops have been generated, visually reviewed by Codex, and recorded in the screenshot review log.
 
 ## Open Follow-Ups
 
