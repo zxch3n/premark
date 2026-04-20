@@ -153,7 +153,7 @@ Goal: support real composition without hiding behind CodeMirror.
 
 - [x] Track `compositionstart/update/end` as a composing source range.
 - [x] Render preedit text in Premark with underline/style matching platform expectation as closely as practical for the DOM debug prototype.
-- [ ] Commit and cancel composition without losing source selection.
+- [x] Commit and cancel composition without losing source selection.
 - [x] Create macOS-only runner with input-source selection, real OS key-event focus probe, screenshot artifacts, and strict/skip behavior.
 - [ ] Run macOS Pinyin real IME tests.
 - [ ] Add Japanese and Korean scenarios after Pinyin stabilizes.
@@ -245,3 +245,4 @@ Acceptance:
 - Expanded Playwright focus/anchoring coverage to include CSS zoom and a mobile context with touch input plus visual viewport shrink modeling. This does not claim full native mobile handle support, but it closes the hidden-textarea anchoring case under mobile-style viewport changes.
 - Added a bidi fixture for mixed English, Hebrew, Arabic, numbers, strong markers, and link markers. Current support is explicitly limited to logical UTF-16 source-offset hit-test behavior; precise visual-order bidi caret movement remains a later task.
 - Reconciled plan state with the implemented DOM prototype: Premark paints caret/selection overlays without CodeMirror, browser tests cover rendered click, cross-block drag, typing, paste/cut, and deterministic screenshot crops.
+- Added composition cancel coverage: virtual preedit updates leave source and undo history unchanged, cancel clears the composition view, and the original selected source range is preserved.
