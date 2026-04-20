@@ -43,13 +43,10 @@ function createRecordingContext(): CanvasRenderingContext2D & { calls: FillTextC
 }
 
 describe("drawTile", () => {
-  it("draws emoji runs at layout grapheme boundaries instead of canvas advances", () => {
-    const emoji = "👨‍👩‍👧‍👦";
-    const text = emoji.repeat(7);
-    const font = 'normal 400 16px "Segoe UI", Helvetica, Arial, sans-serif';
+  function createTextLayout(text: string, font: string): DocumentLayout {
     const boundaries = measureGraphemeBoundaryXs(text, font);
-    const layout: DocumentLayout = {
-      containerWidth: 240,
+    return {
+      containerWidth: 320,
       totalHeight: 24,
       version: 0,
       blocks: [
@@ -60,7 +57,7 @@ describe("drawTile", () => {
           lineCount: 1,
           y: 0,
           height: 24,
-          contentBox: { x: 0, y: 0, width: 240, height: 24 },
+          contentBox: { x: 0, y: 0, width: 320, height: 24 },
           meta: { type: "paragraph" },
           context: { quoteDepth: 0, listDepth: 0 },
         },
@@ -87,6 +84,14 @@ describe("drawTile", () => {
         },
       ],
     };
+  }
+
+  it("draws emoji runs at layout grapheme boundaries instead of canvas advances", () => {
+    const emoji = "👨‍👩‍👧‍👦";
+    const text = emoji.repeat(7);
+    const font = 'normal 400 16px "Segoe UI", Helvetica, Arial, sans-serif';
+    const boundaries = measureGraphemeBoundaryXs(text, font);
+    const layout = createTextLayout(text, font);
     const ctx = createRecordingContext();
 
     drawTile(ctx, layout, 240, 80, {
@@ -100,5 +105,66 @@ describe("drawTile", () => {
     expect(emojiCalls.map((call) => call.x)).toEqual(
       Array.from({ length: 7 }, (_, index) => boundaries[emoji.length * index]),
     );
+  });
+
+  it("draws revealed Markdown control graphemes at layout boundaries", () => {
+    const text = "Try **bold**";
+    const font = 'normal 400 16px "Segoe UI", Helvetica, Arial, sans-serif';
+    const boundaries = measureGraphemeBoundaryXs(text, font);
+    const ctx = createRecordingContext();
+
+    drawTile(ctx, createTextLayout(text, font), 320, 80, {
+      cardRadius: 0,
+      contentPadding: 0,
+      palette: darkTilePalette,
+    });
+
+    expect(ctx.calls.map((call) => call.text)).toEqual(["Try ", "*", "*", "bold", "*", "*"]);
+    expect(ctx.calls.map((call) => call.x)).toEqual([
+      boundaries[0],
+      boundaries[4],
+      boundaries[5],
+      boundaries[6],
+      boundaries[10],
+      boundaries[11],
+    ]);
+  });
+
+  it("draws revealed link suffix controls at layout boundaries", () => {
+    const text = "](https://example.com)";
+    const font = 'normal 400 16px "Segoe UI", Helvetica, Arial, sans-serif';
+    const boundaries = measureGraphemeBoundaryXs(text, font);
+    const ctx = createRecordingContext();
+
+    drawTile(ctx, createTextLayout(text, font), 320, 80, {
+      cardRadius: 0,
+      contentPadding: 0,
+      palette: darkTilePalette,
+    });
+
+    expect(ctx.calls.map((call) => call.text)).toEqual([
+      "]",
+      "(",
+      "https",
+      ":",
+      "/",
+      "/",
+      "example",
+      ".",
+      "com",
+      ")",
+    ]);
+    expect(ctx.calls.map((call) => call.x)).toEqual([
+      boundaries[0],
+      boundaries[1],
+      boundaries[2],
+      boundaries[7],
+      boundaries[8],
+      boundaries[9],
+      boundaries[10],
+      boundaries[17],
+      boundaries[18],
+      boundaries[21],
+    ]);
   });
 });

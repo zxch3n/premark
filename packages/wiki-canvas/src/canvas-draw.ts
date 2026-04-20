@@ -270,6 +270,7 @@ function fontSize(font: string): number {
 
 const EMOJI_LIKE_RE =
   /[\p{Emoji_Presentation}\p{Extended_Pictographic}\p{Regional_Indicator}\uFE0F\u20E3]/u;
+const MARKDOWN_BOUNDARY_SENSITIVE_RE = /[\\`*_[\]()#<>~:/.]/u;
 const canvasGraphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
 function drawMeasuredText(
@@ -279,15 +280,54 @@ function drawMeasuredText(
   baseline: number,
   font: string,
 ): void {
-  if (!EMOJI_LIKE_RE.test(text)) {
+  if (!isBoundarySensitiveText(text)) {
     ctx.fillText(text, x, baseline);
     return;
   }
 
   const boundaries = measureGraphemeBoundaryXs(text, font);
+  let chunkStart = 0;
   for (const part of canvasGraphemeSegmenter.segment(text)) {
-    ctx.fillText(part.segment, x + (boundaries[part.index] ?? 0), baseline);
+    if (!isBoundarySensitiveGrapheme(part.segment)) {
+      continue;
+    }
+    if (chunkStart < part.index) {
+      drawMeasuredChunk(ctx, text, chunkStart, part.index, x, baseline, boundaries);
+    }
+    drawMeasuredChunk(
+      ctx,
+      text,
+      part.index,
+      part.index + part.segment.length,
+      x,
+      baseline,
+      boundaries,
+    );
+    chunkStart = part.index + part.segment.length;
   }
+  if (chunkStart < text.length) {
+    drawMeasuredChunk(ctx, text, chunkStart, text.length, x, baseline, boundaries);
+  }
+}
+
+function isBoundarySensitiveText(text: string): boolean {
+  return EMOJI_LIKE_RE.test(text) || MARKDOWN_BOUNDARY_SENSITIVE_RE.test(text);
+}
+
+function isBoundarySensitiveGrapheme(text: string): boolean {
+  return EMOJI_LIKE_RE.test(text) || MARKDOWN_BOUNDARY_SENSITIVE_RE.test(text);
+}
+
+function drawMeasuredChunk(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  from: number,
+  to: number,
+  x: number,
+  baseline: number,
+  boundaries: readonly number[],
+): void {
+  ctx.fillText(text.slice(from, to), x + (boundaries[from] ?? 0), baseline);
 }
 
 function drawText(
