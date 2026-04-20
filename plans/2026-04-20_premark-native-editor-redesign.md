@@ -88,7 +88,7 @@ Goal: make rendered Premark output addressable enough to edit directly.
 - [x] Implement `hitTest(x, y) -> sourceOffset`.
 - [x] Implement `sourceOffsetToCaretRect(offset, affinity)`.
 - [x] Implement line/word/block granularity hit-test helpers.
-- [ ] Add tests for Latin, CJK, emoji, inline code, links, list markers, blockquotes, and code blocks.
+- [x] Add tests for Latin, CJK, emoji, inline code, links, list markers, blockquotes, and code blocks.
 - [x] Add grapheme fixtures for combining marks, emoji ZWJ sequences, flags, skin tones, and CJK punctuation.
 - [ ] Add bidi fixtures for mixed English/Hebrew/Arabic/numbers/Markdown markers, even if first support is limited to documented behavior.
 - [ ] Add coordinate transform tests for scroll, zoom, device scale factor, and nested canvas/world transforms.
@@ -239,3 +239,4 @@ Acceptance:
 - Added Playwright focus/textarea anchoring coverage for scroll, blur/refocus, and viewport resize. Zoom and mobile visual viewport remain open.
 - Added `vp run test:macos-ime`: it builds Storybook, selects macOS input sources through Carbon, verifies real OS key events can reach the hidden textarea through `CGEventPostToPid`, and attempts real Pinyin only when Chrome can be made foreground. In the current Codex host Chrome cannot become foreground, so the runner records `pinyin-skip.txt` and `pinyin-skipped-no-foreground.png`; `PREMARK_MACOS_IME_STRICT=1` turns that documented gap into a hard failure.
 - Added source granularity helpers on `EditableLayoutIndex`: coordinate hit-test can now return character, word, line, or block source ranges. Keyboard selection intents now cover word movement, line boundaries, and page movement in addition to character, visual line, and document-boundary movement. Browser coverage includes Alt+ArrowRight and Shift+End through the Storybook hidden textarea path.
+- Expanded hit-test fixtures across Latin, CJK, emoji ZWJ, inline code, links, list items, blockquotes, and fenced code blocks. This exposed that code blocks were opaque layout lines with no editable fragments; added an initial code-block fragment so code content can be addressed by source range.
