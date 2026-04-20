@@ -95,9 +95,9 @@ Goal: make rendered Premark output addressable enough to edit directly.
 
 Acceptance:
 
-- [ ] Clicking rendered text places caret at the expected source offset.
-- [ ] Drag selection across blocks produces one continuous source range.
-- [ ] Hit-test works without relying on browser DOM selection.
+- [x] Clicking rendered text places caret at the expected source offset.
+- [x] Drag selection across blocks produces one continuous source range.
+- [x] Hit-test works without relying on browser DOM selection.
 - [ ] Hit-test and caret rect tests pass for hidden-marker and active-marker states.
 
 ## Phase 2: Premark Selection Painting
@@ -105,15 +105,15 @@ Acceptance:
 Goal: paint native selection and caret on the rendered surface.
 
 - [x] Add selection range to renderer input.
-- [ ] Paint multi-line and cross-block selection rects.
-- [ ] Paint caret rect with blink disabled in tests.
+- [x] Paint multi-line and cross-block selection rects.
+- [x] Paint caret rect with blink disabled in tests.
 - [x] Support collapsed, forward, backward, and multi-block selections.
 - [x] Add pure command support for mouse drag selection, drag reversal, keyboard arrows, Shift+arrows, and Shift+Command+arrows.
 - [x] Wire mouse and keyboard selection commands to browser events in the prototype.
 - [ ] Define mobile selection behavior for touch long press, drag handles, soft keyboard focus, scroll, and zoom.
 - [ ] Add tests for select-all, Home/End, PageUp/PageDown, line boundary, word boundary, document boundary, and direction-preserving selection extension.
 - [ ] Add screenshot tests for forward selection, backward selection, wrapped-line selection, cross-block selection, active inline marker selection, and high-DPI canvas selection.
-- [ ] Add visual tests for selection overlays independent of CodeMirror.
+- [x] Add visual tests for selection overlays independent of CodeMirror.
 
 Acceptance:
 
@@ -142,9 +142,9 @@ Goal: receive real OS text input while keeping Premark as the visible editor.
 
 Acceptance:
 
-- [ ] Typing updates Premark-rendered text without remounting the visible document.
-- [ ] Paste and undo/redo operate on source ranges.
-- [ ] Browser selection is not the source of truth.
+- [x] Typing updates Premark-rendered text without remounting the visible document.
+- [x] Paste and undo/redo operate on source ranges.
+- [x] Browser selection is not the source of truth.
 - [ ] Event trace fixtures are saved for critical input cases and compared against expected normalized editor operations.
 
 ## Phase 4: IME
@@ -185,9 +185,9 @@ Goal: replace the removed CodeMirror Storybook examples with a native Premark ed
 
 Acceptance:
 
-- [ ] The story demonstrates multi-line and cross-block selection.
-- [ ] The story has no CodeMirror dependency.
-- [ ] Story screenshots are deterministic enough for Playwright visual comparison and small enough for manual Codex review.
+- [x] The story demonstrates multi-line and cross-block selection.
+- [x] The story has no CodeMirror dependency.
+- [x] Story screenshots are deterministic enough for Playwright visual comparison and small enough for manual Codex review.
 
 ## Phase 6: Pitfall Automation And Screenshot Audit
 
@@ -244,3 +244,4 @@ Acceptance:
 - Updated the accepted design doc with the current supported/deferred editing scope, Chromium/macOS/mobile matrix, IME fallback policy, and screenshot artifact policy. Phase 0 requirements are now closed against that doc and the pitfall matrix.
 - Expanded Playwright focus/anchoring coverage to include CSS zoom and a mobile context with touch input plus visual viewport shrink modeling. This does not claim full native mobile handle support, but it closes the hidden-textarea anchoring case under mobile-style viewport changes.
 - Added a bidi fixture for mixed English, Hebrew, Arabic, numbers, strong markers, and link markers. Current support is explicitly limited to logical UTF-16 source-offset hit-test behavior; precise visual-order bidi caret movement remains a later task.
+- Reconciled plan state with the implemented DOM prototype: Premark paints caret/selection overlays without CodeMirror, browser tests cover rendered click, cross-block drag, typing, paste/cut, and deterministic screenshot crops.
