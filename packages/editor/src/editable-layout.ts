@@ -1,5 +1,6 @@
 import type { DocumentLayout, InlineFragment } from "@pretext-md/layout";
 import type { BlockSpan, MarkdownInlineSourceRecord, SourceRange } from "@pretext-md/parser";
+import { createGraphemeSegments, snapOffsetToGraphemeBoundary } from "./grapheme.ts";
 import { createWordSegments } from "./text-segments.ts";
 
 export interface Rect {
@@ -122,7 +123,7 @@ export class EditableLayoutIndex {
     if (containing !== undefined) {
       return {
         offset,
-        rect: caretRectInFragment(containing, offset),
+        rect: caretRectInFragment(containing, offset, affinity),
         fragment: containing,
       };
     }
@@ -154,7 +155,7 @@ export class EditableLayoutIndex {
         : fallback.sourceRange.from;
     return {
       offset,
-      rect: caretRectInFragment(fallback, targetOffset),
+      rect: caretRectInFragment(fallback, targetOffset, affinity),
       fragment: fallback,
     };
   }
@@ -591,6 +592,18 @@ function findFragmentSourceMapping(
     }
   }
 
+  const inlineRecordMatch = findFragmentSourceMappingInInlineRecords(
+    input.inlineSources,
+    renderedText,
+    sourceCursor,
+  );
+  if (inlineRecordMatch !== null) {
+    return {
+      ...inlineRecordMatch,
+      nextLayoutCursor: layoutCursor,
+    };
+  }
+
   const sourceFrom = findFragmentSource(
     input.markdown,
     comparableText,
@@ -603,6 +616,75 @@ function findFragmentSourceMapping(
     sourceOffsets,
     nextLayoutCursor: layoutCursor,
   };
+}
+
+function findFragmentSourceMappingInInlineRecords(
+  records: readonly MarkdownInlineSourceRecord[],
+  renderedText: string,
+  sourceCursor: number,
+): {
+  sourceRange: SourceRange;
+  sourceOffsets: readonly number[];
+} | null {
+  if (renderedText.length === 0) return null;
+  const orderedRecords = records
+    .filter(
+      (record) =>
+        (record.type === "text" || record.type === "html") &&
+        record.renderedText.length > 0 &&
+        record.source.to >= sourceCursor,
+    )
+    .sort(
+      (left, right) => left.source.from - right.source.from || left.source.to - right.source.to,
+    );
+
+  for (let startIndex = 0; startIndex < orderedRecords.length; startIndex += 1) {
+    let text = "";
+    const sourceOffsets: number[] = [];
+
+    for (let index = startIndex; index < orderedRecords.length; index += 1) {
+      const record = orderedRecords[index]!;
+      if (text.length > 0 && record.source.from < sourceOffsets.at(-1)!) {
+        break;
+      }
+
+      text += record.renderedText;
+      appendSourceOffsets(sourceOffsets, sourceOffsetsForInlineRecord(record));
+      if (!renderedText.startsWith(text)) {
+        break;
+      }
+      if (text === renderedText) {
+        return {
+          sourceRange: sourceRangeFromOffsets(sourceOffsets),
+          sourceOffsets,
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
+function sourceOffsetsForInlineRecord(record: MarkdownInlineSourceRecord): readonly number[] {
+  if (record.renderedText.length === record.source.to - record.source.from) {
+    return createLinearSourceOffsets(record.renderedText, record.source.from);
+  }
+
+  const offsets: number[] = [];
+  for (let index = 0; index <= record.renderedText.length; index += 1) {
+    const ratio = record.renderedText.length === 0 ? 0 : index / record.renderedText.length;
+    offsets.push(Math.round(record.source.from + (record.source.to - record.source.from) * ratio));
+  }
+  return offsets;
+}
+
+function appendSourceOffsets(target: number[], next: readonly number[]): void {
+  if (next.length === 0) return;
+  if (target.length === 0) {
+    target.push(...next);
+    return;
+  }
+  target.push(...next.slice(1));
 }
 
 function findRenderedTextInMarkdown(
@@ -830,7 +912,7 @@ function measureTextWidth(text: string, font: string): number {
 }
 
 function visibleTextWidth(fragment: EditableFragment): number {
-  if (fragment.type === "code_block" || fragment.text.includes("\n")) {
+  if (fragment.text.includes("\n")) {
     return Math.max(0, fragment.rect.width);
   }
   return Math.max(0, fragment.rect.width - fragment.textInsetX * 2);
@@ -842,20 +924,28 @@ function textBoundaryXs(fragment: EditableFragment): readonly number[] {
     return cached;
   }
 
-  const boundaries: number[] = [];
-  if (fragment.type === "code_block" || fragment.text.includes("\n")) {
+  if (fragment.text.includes("\n")) {
+    const proportionalBoundaries: number[] = [];
     for (let offset = 0; offset <= fragment.text.length; offset += 1) {
-      boundaries.push(proportionalWidth(fragment, offset));
+      proportionalBoundaries.push(proportionalWidth(fragment, offset));
     }
-    fragmentBoundaryCache.set(fragment, boundaries);
-    return boundaries;
+    fragmentBoundaryCache.set(fragment, proportionalBoundaries);
+    return proportionalBoundaries;
   }
 
+  const boundaries = Array.from({ length: fragment.text.length + 1 }, () => 0);
   const fullMeasuredWidth = measureTextWidth(fragment.text, fragment.font);
   const renderedTextWidth = visibleTextWidth(fragment);
   const scale = fullMeasuredWidth > 0 ? renderedTextWidth / fullMeasuredWidth : 1;
-  for (let offset = 0; offset <= fragment.text.length; offset += 1) {
-    boundaries.push(measureTextWidth(fragment.text.slice(0, offset), fragment.font) * scale);
+  let previousBoundary = 0;
+  for (const segment of createGraphemeSegments(fragment.text)) {
+    const boundary = measureTextWidth(fragment.text.slice(0, segment.to), fragment.font) * scale;
+    boundaries[segment.from] = previousBoundary;
+    for (let offset = segment.from + 1; offset < segment.to; offset += 1) {
+      boundaries[offset] = previousBoundary;
+    }
+    boundaries[segment.to] = boundary;
+    previousBoundary = boundary;
   }
   fragmentBoundaryCache.set(fragment, boundaries);
   return boundaries;
@@ -881,24 +971,30 @@ function offsetInsideFragment(fragment: EditableFragment, x: number): number {
   const clampedX = Math.min(Math.max(x, textStartX), textEndX);
   const localX = clampedX - textStartX;
   const boundaries = textBoundaryXs(fragment);
-  let delta = fragment.text.length;
-  for (let index = 1; index < boundaries.length; index += 1) {
-    const previous = boundaries[index - 1] ?? 0;
-    const next = boundaries[index] ?? previous;
-    if (localX <= (previous + next) / 2) {
-      delta = index - 1;
-      break;
+  for (const segment of createGraphemeSegments(fragment.text)) {
+    const start = boundaries[segment.from] ?? 0;
+    const end = boundaries[segment.to] ?? start;
+    const middle = (start + end) / 2;
+    if (localX <= middle) {
+      return sourceOffsetAtTextOffset(fragment, segment.from);
+    }
+    if (localX <= end) {
+      return sourceOffsetAtTextOffset(fragment, segment.to);
     }
   }
-  return sourceOffsetAtTextOffset(fragment, delta);
+  return sourceOffsetAtTextOffset(fragment, fragment.text.length);
 }
 
-function caretRectInFragment(fragment: EditableFragment, offset: number): Rect {
+function caretRectInFragment(
+  fragment: EditableFragment,
+  offset: number,
+  affinity: "before" | "after",
+): Rect {
   const clampedOffset = Math.min(
     Math.max(offset, fragment.sourceRange.from),
     fragment.sourceRange.to,
   );
-  const delta = textOffsetAtSourceOffset(fragment, clampedOffset);
+  const delta = textOffsetAtSourceOffset(fragment, clampedOffset, affinity);
   return {
     x: textOffsetToX(fragment, delta),
     y: fragment.rect.y,
@@ -908,8 +1004,8 @@ function caretRectInFragment(fragment: EditableFragment, offset: number): Rect {
 }
 
 function rectForFragmentRange(fragment: EditableFragment, from: number, to: number): Rect {
-  const startDelta = textOffsetAtSourceOffset(fragment, from);
-  const endDelta = textOffsetAtSourceOffset(fragment, to);
+  const startDelta = textOffsetAtSourceOffset(fragment, from, "before");
+  const endDelta = textOffsetAtSourceOffset(fragment, to, "after");
   const x = textOffsetToX(fragment, startDelta);
   const endX = textOffsetToX(fragment, endDelta);
   return {
@@ -925,13 +1021,21 @@ function sourceOffsetAtTextOffset(fragment: EditableFragment, textOffset: number
   return fragment.sourceOffsets[clampedOffset] ?? fragment.sourceRange.from;
 }
 
-function textOffsetAtSourceOffset(fragment: EditableFragment, sourceOffset: number): number {
+function textOffsetAtSourceOffset(
+  fragment: EditableFragment,
+  sourceOffset: number,
+  affinity: "before" | "after",
+): number {
   const offsets = fragment.sourceOffsets;
   if (offsets.length === 0) return 0;
   for (let index = 0; index < offsets.length; index += 1) {
     const current = offsets[index] ?? fragment.sourceRange.from;
     if (current >= sourceOffset) {
-      return index;
+      return snapOffsetToGraphemeBoundary(
+        fragment.text,
+        index,
+        affinity === "before" ? "backward" : "forward",
+      );
     }
   }
   return offsets.length - 1;

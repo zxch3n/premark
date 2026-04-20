@@ -1,8 +1,21 @@
 import type { SyntaxNode } from "@lezer/common";
 
+import { decodeMarkdownEntity } from "./entities.ts";
+import { findPlainUrlMatchAt, findPlainUrlMatches } from "./plain-url.ts";
 import type { IncrementalParseState, MarkdownInline, MarkdownInlineSourceRecord } from "./types.ts";
 
 type InlineRecordType = MarkdownInline["type"];
+
+interface InlineCollectionOptions {
+  readonly plainUrls: boolean;
+}
+
+const defaultInlineCollectionOptions: InlineCollectionOptions = {
+  plainUrls: true,
+};
+const linkLabelInlineCollectionOptions: InlineCollectionOptions = {
+  plainUrls: false,
+};
 
 export function createMarkdownInlineSourceMap(
   state: Pick<IncrementalParseState, "tree" | "text" | "blockSpans">,
@@ -188,6 +201,7 @@ function collectInlineRange(
   records: MarkdownInlineSourceRecord[],
   from = node.from,
   to = node.to,
+  options: InlineCollectionOptions = defaultInlineCollectionOptions,
 ): void {
   let cursor = from;
 
@@ -197,7 +211,7 @@ function collectInlineRange(
     }
 
     if (child.from > cursor) {
-      pushTextRecords(records, blockId, markdown, cursor, Math.min(child.from, to));
+      pushTextRecords(records, blockId, markdown, cursor, Math.min(child.from, to), options);
     }
 
     if (child.from < cursor) {
@@ -205,12 +219,12 @@ function collectInlineRange(
       continue;
     }
 
-    collectInlineNode(child, blockId, markdown, records);
-    cursor = child.to;
+    const consumedTo = collectInlineNode(child, blockId, markdown, records, options);
+    cursor = Math.min(Math.max(consumedTo, child.to), to);
   }
 
   if (cursor < to) {
-    pushTextRecords(records, blockId, markdown, cursor, to);
+    pushTextRecords(records, blockId, markdown, cursor, to, options);
   }
 }
 
@@ -219,17 +233,18 @@ function collectInlineNode(
   blockId: string,
   markdown: string,
   records: MarkdownInlineSourceRecord[],
-): void {
+  options: InlineCollectionOptions,
+): number {
   switch (node.type.name) {
     case "StrongEmphasis":
-      collectWrappedInline(node, blockId, markdown, records, "strong");
-      break;
+      collectWrappedInline(node, blockId, markdown, records, "strong", options);
+      return node.to;
     case "Emphasis":
-      collectWrappedInline(node, blockId, markdown, records, "emphasis");
-      break;
+      collectWrappedInline(node, blockId, markdown, records, "emphasis", options);
+      return node.to;
     case "Strikethrough":
-      collectWrappedInline(node, blockId, markdown, records, "strikethrough");
-      break;
+      collectWrappedInline(node, blockId, markdown, records, "strikethrough", options);
+      return node.to;
     case "InlineCode":
       pushInlineRecord(
         records,
@@ -239,17 +254,30 @@ function collectInlineNode(
         markdown,
         stripCodeMarks(markdown.slice(node.from, node.to)),
       );
-      break;
+      return node.to;
     case "Link":
       collectLinkInline(node, blockId, markdown, records, "link");
-      break;
+      return node.to;
     case "Image":
       collectLinkInline(node, blockId, markdown, records, "image");
-      break;
+      return node.to;
     case "Autolink":
       collectAutolinkInline(node, blockId, markdown, records);
-      break;
+      return node.to;
+    case "URL":
+      return collectBareUrlInline(node, blockId, markdown, records, options);
+    case "Entity":
+      pushInlineRecord(
+        records,
+        blockId,
+        "text",
+        node,
+        markdown,
+        decodeMarkdownEntity(markdown.slice(node.from, node.to)),
+      );
+      return node.to;
     case "HTMLTag":
+    case "Comment":
       pushInlineRecord(
         records,
         blockId,
@@ -258,10 +286,10 @@ function collectInlineNode(
         markdown,
         markdown.slice(node.from, node.to),
       );
-      break;
+      return node.to;
     case "HardBreak":
       pushInlineRecord(records, blockId, "hardbreak", node, markdown, " ");
-      break;
+      return node.to;
     case "Escape":
       pushInlineRecord(
         records,
@@ -271,10 +299,39 @@ function collectInlineNode(
         markdown,
         markdown.slice(node.from + 1, node.to),
       );
-      break;
+      return node.to;
     default:
-      break;
+      pushInlineRecord(
+        records,
+        blockId,
+        "text",
+        node,
+        markdown,
+        markdown.slice(node.from, node.to),
+      );
+      return node.to;
   }
+}
+
+function collectBareUrlInline(
+  node: SyntaxNode,
+  blockId: string,
+  markdown: string,
+  records: MarkdownInlineSourceRecord[],
+  options: InlineCollectionOptions,
+): number {
+  const plainUrl = findPlainUrlMatchAt(markdown, node.from);
+  const isLink = plainUrl !== null && options.plainUrls && isConvertibleBareUrlNode(node, markdown);
+  pushInlineRangeRecord(
+    records,
+    blockId,
+    isLink ? "link" : "text",
+    markdown,
+    node.from,
+    isLink ? plainUrl.to : node.to,
+    isLink ? plainUrl.text : markdown.slice(node.from, node.to),
+  );
+  return isLink ? plainUrl.to : node.to;
 }
 
 function collectWrappedInline(
@@ -283,13 +340,14 @@ function collectWrappedInline(
   markdown: string,
   records: MarkdownInlineSourceRecord[],
   type: "strong" | "emphasis" | "strikethrough",
+  options: InlineCollectionOptions,
 ): void {
   pushInlineRecord(records, blockId, type, node, markdown, markdown.slice(node.from, node.to));
 
   const children = getChildren(node);
   const innerFrom = children[0]?.to ?? node.from;
   const innerTo = children.at(-1)?.from ?? node.to;
-  collectInlineRange(node, blockId, markdown, records, innerFrom, innerTo);
+  collectInlineRange(node, blockId, markdown, records, innerFrom, innerTo, options);
 }
 
 function collectLinkInline(
@@ -309,7 +367,15 @@ function collectLinkInline(
   );
   const labelFrom = openingMark?.to ?? node.from;
   const labelTo = closingBracket?.from ?? node.to;
-  collectInlineRange(node, blockId, markdown, records, labelFrom, labelTo);
+  collectInlineRange(
+    node,
+    blockId,
+    markdown,
+    records,
+    labelFrom,
+    labelTo,
+    linkLabelInlineCollectionOptions,
+  );
 }
 
 function collectAutolinkInline(
@@ -337,6 +403,7 @@ function pushTextRecords(
   markdown: string,
   from: number,
   to: number,
+  options: InlineCollectionOptions = defaultInlineCollectionOptions,
 ): void {
   let segmentFrom = from;
   for (let index = from; index < to; index += 1) {
@@ -345,29 +412,73 @@ function pushTextRecords(
     }
 
     if (segmentFrom < index) {
-      pushInlineRangeRecord(
-        records,
-        blockId,
-        "text",
-        markdown,
-        segmentFrom,
-        index,
-        markdown.slice(segmentFrom, index),
-      );
+      pushTextLineRecords(records, blockId, markdown, segmentFrom, index, options);
     }
     pushInlineRangeRecord(records, blockId, "softbreak", markdown, index, index + 1, " ");
     segmentFrom = index + 1;
   }
 
   if (segmentFrom < to) {
+    pushTextLineRecords(records, blockId, markdown, segmentFrom, to, options);
+  }
+}
+
+function pushTextLineRecords(
+  records: MarkdownInlineSourceRecord[],
+  blockId: string,
+  markdown: string,
+  from: number,
+  to: number,
+  options: InlineCollectionOptions,
+): void {
+  if (from >= to) {
+    return;
+  }
+
+  if (!options.plainUrls) {
+    pushInlineRangeRecord(records, blockId, "text", markdown, from, to, markdown.slice(from, to));
+    return;
+  }
+
+  const text = markdown.slice(from, to);
+  const endsBeforeEscape = markdown[to] === "\\";
+  let cursor = 0;
+  for (const match of findPlainUrlMatches(text)) {
+    if (endsBeforeEscape && match.to === text.length) {
+      continue;
+    }
+    if (cursor < match.from) {
+      pushInlineRangeRecord(
+        records,
+        blockId,
+        "text",
+        markdown,
+        from + cursor,
+        from + match.from,
+        text.slice(cursor, match.from),
+      );
+    }
+    pushInlineRangeRecord(
+      records,
+      blockId,
+      "link",
+      markdown,
+      from + match.from,
+      from + match.to,
+      match.text,
+    );
+    cursor = match.to;
+  }
+
+  if (cursor < text.length) {
     pushInlineRangeRecord(
       records,
       blockId,
       "text",
       markdown,
-      segmentFrom,
+      from + cursor,
       to,
-      markdown.slice(segmentFrom, to),
+      text.slice(cursor),
     );
   }
 }
@@ -450,6 +561,18 @@ function skipWhitespace(markdown: string, from: number, to: number): number {
 
 function stripCodeMarks(value: string): string {
   return value.replace(/^`+/u, "").replace(/`+$/u, "");
+}
+
+function isHttpUrl(value: string): boolean {
+  return /^https?:\/\//iu.test(value);
+}
+
+function isConvertibleBareUrlNode(node: SyntaxNode, markdown: string): boolean {
+  return (
+    isHttpUrl(markdown.slice(node.from, node.to)) &&
+    markdown[node.from - 1] !== "\\" &&
+    markdown[node.to] !== "\\"
+  );
 }
 
 function findFirstChildByName(node: SyntaxNode | undefined, name: string): SyntaxNode | null {

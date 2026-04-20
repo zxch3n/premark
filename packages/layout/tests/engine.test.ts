@@ -29,6 +29,24 @@ describe("createLayoutEngine", () => {
     }
   });
 
+  it("renders bare HTTP URLs as link fragments", () => {
+    const engine = createLayoutEngine({
+      fontTheme: "github",
+    });
+    const url = "https://example.com";
+    const layout = engine.layout(`Visit ${url} now`, 520);
+    const textLine = layout.lines.find((line) => line.kind === "text");
+    const linkFragment =
+      textLine?.kind === "text"
+        ? textLine.fragments.find((fragment) => fragment.text === url)
+        : undefined;
+
+    expect(linkFragment).toMatchObject({
+      type: "link",
+      meta: { type: "link", href: url },
+    });
+  });
+
   it("returns opaque lines for code blocks and tables", () => {
     const engine = createLayoutEngine({
       fontTheme: "github",
