@@ -51,6 +51,27 @@ const REVEALABLE_TYPES: ReadonlySet<MarkdownInlineSourceRecord["type"]> = new Se
 ]);
 
 const ESCAPABLE_MARKDOWN_PUNCTUATION_RE = /[\\`*_[\]{}()#+\-.!<>|~]/gu;
+const ESCAPABLE_MARKDOWN_PUNCTUATION = new Set([
+  "\\",
+  "`",
+  "*",
+  "_",
+  "[",
+  "]",
+  "{",
+  "}",
+  "(",
+  ")",
+  "#",
+  "+",
+  "-",
+  ".",
+  "!",
+  "<",
+  ">",
+  "|",
+  "~",
+]);
 const MARKER_SEPARATOR = String.fromCharCode(0x2060);
 
 export function createActiveMarkerRevealMarkdown(
@@ -299,24 +320,18 @@ function inlineControlSourceMap(
       const escapedOpen = escapeMarkdownAsVisibleText(markers.open);
       const escapedClose = escapeMarkdownAsVisibleText(markers.close);
       return [
-        {
-          from: 0,
-          to: escapedOpen.length,
-          sourceFrom: token.source.from,
-          sourceTo: token.source.from + markers.open.length,
-        },
+        ...escapedVisibleTextSourceMapSegments(markers.open, token.source.from, 0),
         {
           from: escapedOpen.length,
           to: escapedOpen.length + token.sourceText.length,
           sourceFrom: token.source.from,
           sourceTo: token.source.to,
         },
-        {
-          from: text.length - escapedClose.length,
-          to: text.length,
-          sourceFrom: token.source.to - markers.close.length,
-          sourceTo: token.source.to,
-        },
+        ...escapedVisibleTextSourceMapSegments(
+          markers.close,
+          token.source.to - markers.close.length,
+          text.length - escapedClose.length,
+        ),
       ];
     }
     case "code-span": {
@@ -326,24 +341,18 @@ function inlineControlSourceMap(
       const escapedClose = escapeMarkdownAsVisibleText(markers.close);
       const sourceTextFrom = escapedOpen.length + MARKER_SEPARATOR.length;
       return [
-        {
-          from: 0,
-          to: escapedOpen.length,
-          sourceFrom: token.source.from,
-          sourceTo: token.source.from + markers.open.length,
-        },
+        ...escapedVisibleTextSourceMapSegments(markers.open, token.source.from, 0),
         {
           from: sourceTextFrom,
           to: sourceTextFrom + token.sourceText.length,
           sourceFrom: token.source.from,
           sourceTo: token.source.to,
         },
-        {
-          from: text.length - escapedClose.length,
-          to: text.length,
-          sourceFrom: token.source.to - markers.close.length,
-          sourceTo: token.source.to,
-        },
+        ...escapedVisibleTextSourceMapSegments(
+          markers.close,
+          token.source.to - markers.close.length,
+          text.length - escapedClose.length,
+        ),
       ];
     }
     case "link": {
@@ -353,24 +362,18 @@ function inlineControlSourceMap(
         const escapedOpen = "\\[";
         const escapedSuffix = escapeMarkdownAsVisibleText(suffix);
         return [
-          {
-            from: 0,
-            to: escapedOpen.length,
-            sourceFrom: token.source.from,
-            sourceTo: token.source.from + 1,
-          },
+          ...escapedVisibleTextSourceMapSegments("[", token.source.from, 0),
           {
             from: escapedOpen.length,
             to: escapedOpen.length + token.sourceText.length,
             sourceFrom: token.source.from,
             sourceTo: token.source.to,
           },
-          {
-            from: text.length - escapedSuffix.length,
-            to: text.length,
-            sourceFrom: token.source.from + closingBracket,
-            sourceTo: token.source.to,
-          },
+          ...escapedVisibleTextSourceMapSegments(
+            suffix,
+            token.source.from + closingBracket,
+            text.length - escapedSuffix.length,
+          ),
         ];
       }
       break;
@@ -385,6 +388,27 @@ function inlineControlSourceMap(
       sourceTo: token.source.to,
     },
   ];
+}
+
+function escapedVisibleTextSourceMapSegments(
+  sourceText: string,
+  sourceFrom: number,
+  replacementFrom: number,
+): ReplacementSourceMapSegment[] {
+  const segments: ReplacementSourceMapSegment[] = [];
+  let replacementCursor = replacementFrom;
+  for (let index = 0; index < sourceText.length; index += 1) {
+    const char = sourceText[index]!;
+    const replacementLength = ESCAPABLE_MARKDOWN_PUNCTUATION.has(char) ? 2 : 1;
+    segments.push({
+      from: replacementCursor,
+      to: replacementCursor + replacementLength,
+      sourceFrom: sourceFrom + index,
+      sourceTo: sourceFrom + index + 1,
+    });
+    replacementCursor += replacementLength;
+  }
+  return segments;
 }
 
 function wrappingInlineMarkers(

@@ -78,6 +78,19 @@ async function readCanvasGeometry(page: Page) {
   };
 }
 
+function caretIsVisuallyAfter(
+  next: { headCaret: { rect: { x: number; y: number } } },
+  previous: { headCaret: { rect: { x: number; y: number } } },
+): boolean {
+  if (next.headCaret.rect.y > previous.headCaret.rect.y + 0.5) {
+    return true;
+  }
+  return (
+    Math.abs(next.headCaret.rect.y - previous.headCaret.rect.y) <= 0.5 &&
+    next.headCaret.rect.x > previous.headCaret.rect.x
+  );
+}
+
 async function setCanvasCaret(page: Page, offset: number) {
   await page.evaluate(
     (caretOffset) =>
@@ -527,6 +540,25 @@ test.describe("Premark native editor story", () => {
       measuredHeadingTextStart.expectedContentX,
       0,
     );
+
+    const markdownBeforeTyping = await canvasEditorMarkdown(page);
+    const strongMarkerStart = markdownBeforeTyping.indexOf("**bold text**");
+    expect(strongMarkerStart).toBeGreaterThanOrEqual(0);
+    await setCanvasCaret(page, strongMarkerStart + 1);
+    const strongMarkerMiddle = await readCanvasGeometry(page);
+    await setCanvasCaret(page, strongMarkerStart + 2);
+    const strongContentStart = await readCanvasGeometry(page);
+    expect(strongContentStart.headCaret.rect.x).toBeGreaterThan(
+      strongMarkerMiddle.headCaret.rect.x,
+    );
+
+    const linkSuffixStart = markdownBeforeTyping.indexOf("](https://example.com)");
+    expect(linkSuffixStart).toBeGreaterThanOrEqual(0);
+    await setCanvasCaret(page, linkSuffixStart + 9);
+    const linkFirstSlash = await readCanvasGeometry(page);
+    await setCanvasCaret(page, linkSuffixStart + 10);
+    const linkSecondSlash = await readCanvasGeometry(page);
+    expect(caretIsVisuallyAfter(linkSecondSlash, linkFirstSlash)).toBe(true);
 
     const variableStart = await measuredCanvasPointForText(page, "WWWW");
     expect(variableStart.fontReady).toBe(true);
