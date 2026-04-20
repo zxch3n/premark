@@ -67,18 +67,18 @@ Goal: define the minimum editor contract before coding input.
 
 - [x] Define `EditorDocumentState`: markdown, layout, block records, selection, composing range, pending operations.
 - [x] Define source-position model for caret, anchor, head, and composition.
-- [ ] Define supported initial editing scope: paragraph, heading, list item, blockquote, code block.
-- [ ] Define unsupported/deferred scopes: table cell rich editing, image resize, HTML block editing.
-- [ ] Define browser matrix: Chromium first, macOS IME required before claiming success.
-- [ ] Define manual fallback policy if real OS IME exposes a browser bug.
+- [x] Define supported initial editing scope: paragraph, heading, list item, blockquote, code block.
+- [x] Define unsupported/deferred scopes: table cell rich editing, image resize, HTML block editing.
+- [x] Define browser matrix: Chromium first, macOS IME required before claiming success.
+- [x] Define manual fallback policy if real OS IME exposes a browser bug.
 - [x] Create a pitfall-to-test matrix for IME, hidden textarea, selection, mobile, clipboard, Unicode, bidi, accessibility, visual stability, and remote edits.
-- [ ] Define screenshot artifact policy: crop size limits, deterministic fonts/theme, animation disabled, artifact folder, and review checklist.
+- [x] Define screenshot artifact policy: crop size limits, deterministic fonts/theme, animation disabled, artifact folder, and review checklist.
 
 Acceptance:
 
-- [ ] A new contributor can explain how selection, hit-test, input, composition, and rendering connect.
-- [ ] No CodeMirror dependency is needed to understand or run the native editor prototype.
-- [ ] Every known pitfall has an automated test plan or an explicit documented automation gap.
+- [x] A new contributor can explain how selection, hit-test, input, composition, and rendering connect.
+- [x] No CodeMirror dependency is needed to understand or run the native editor prototype.
+- [x] Every known pitfall has an automated test plan or an explicit documented automation gap.
 
 ## Phase 1: Hit-Test And Source Mapping
 
@@ -193,7 +193,7 @@ Acceptance:
 
 Goal: convert the research checklist into automated coverage and visual review gates.
 
-- [ ] Create `tests/editor/pitfalls/README.md` with every known pitfall, source, automation status, and owner.
+- [x] Create `tests/editor/pitfalls/README.md` with every known pitfall, source, automation status, and owner.
 - [x] Create first Playwright suite for the native editor Storybook desktop pointer/input flow and screenshot crops.
 - [x] Add Playwright coverage for desktop keyboard selection and browser clipboard paste/cut in the native editor story.
 - [ ] Expand Playwright suites for visual viewport, DOM debug renderer, Canvas renderer, and more screenshot crops.
@@ -241,3 +241,4 @@ Acceptance:
 - Added source granularity helpers on `EditableLayoutIndex`: coordinate hit-test can now return character, word, line, or block source ranges. Keyboard selection intents now cover word movement, line boundaries, and page movement in addition to character, visual line, and document-boundary movement. Browser coverage includes Alt+ArrowRight and Shift+End through the Storybook hidden textarea path.
 - Expanded hit-test fixtures across Latin, CJK, emoji ZWJ, inline code, links, list items, blockquotes, and fenced code blocks. This exposed that code blocks were opaque layout lines with no editable fragments; added an initial code-block fragment so code content can be addressed by source range.
 - Added editor coordinate transform helpers for client, surface, device-pixel, and nested world coordinates. Tests cover scroll offsets, CSS scale, device scale factor, and world offset/scale round trips before Canvas integration starts.
+- Updated the accepted design doc with the current supported/deferred editing scope, Chromium/macOS/mobile matrix, IME fallback policy, and screenshot artifact policy. Phase 0 requirements are now closed against that doc and the pitfall matrix.
