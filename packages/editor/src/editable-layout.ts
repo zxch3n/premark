@@ -745,8 +745,9 @@ function mapRevealedBoundariesToSourceOffsets(
   }
 
   const offsets: number[] = [];
-  for (const boundary of boundaries) {
-    const mapped = mapRevealedBoundaryToSourceOffset(runs, boundary);
+  for (let index = 0; index < boundaries.length; index += 1) {
+    const boundary = boundaries[index]!;
+    const mapped = mapRevealedBoundaryToSourceOffset(runs, boundary, index === 0 ? "start" : "end");
     if (mapped === null) {
       return null;
     }
@@ -758,6 +759,7 @@ function mapRevealedBoundariesToSourceOffsets(
 function mapRevealedBoundaryToSourceOffset(
   runs: readonly EditableLayoutSourceMapRun[],
   boundary: number,
+  side: "start" | "end",
 ): number | null {
   let previous: EditableLayoutSourceMapRun | null = null;
   let next: EditableLayoutSourceMapRun | null = null;
@@ -786,14 +788,17 @@ function mapRevealedBoundaryToSourceOffset(
   }
 
   if (exactOffsets.length > 0) {
-    return Math.min(...exactOffsets);
+    return side === "start" ? Math.min(...exactOffsets) : Math.max(...exactOffsets);
   }
 
-  if (previous !== null) {
+  if (side === "end" && previous !== null) {
     return previous.sourceOffsets.at(-1) ?? null;
   }
   if (next !== null) {
     return next.sourceOffsets[0] ?? null;
+  }
+  if (previous !== null) {
+    return previous.sourceOffsets.at(-1) ?? null;
   }
   return null;
 }
@@ -1032,9 +1037,25 @@ function textOffsetAtSourceOffset(
 ): number {
   const offsets = fragment.sourceOffsets;
   if (offsets.length === 0) return 0;
+  const exactIndices: number[] = [];
   for (let index = 0; index < offsets.length; index += 1) {
     const current = offsets[index] ?? fragment.sourceRange.from;
-    if (current >= sourceOffset) {
+    if (current === sourceOffset) {
+      exactIndices.push(index);
+    }
+  }
+  if (exactIndices.length > 0) {
+    const index = affinity === "before" ? exactIndices.at(-1)! : exactIndices[0]!;
+    return snapOffsetToGraphemeBoundary(
+      fragment.text,
+      index,
+      affinity === "before" ? "backward" : "forward",
+    );
+  }
+
+  for (let index = 0; index < offsets.length; index += 1) {
+    const current = offsets[index] ?? fragment.sourceRange.from;
+    if (current > sourceOffset) {
       return snapOffsetToGraphemeBoundary(
         fragment.text,
         index,
