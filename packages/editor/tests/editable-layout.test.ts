@@ -58,6 +58,53 @@ describe("EditableLayoutIndex", () => {
     expect(hit.offset).toBeLessThanOrEqual(markdown.indexOf("bold") + "bold".length);
   });
 
+  it("hit-tests supported inline and block fixtures", () => {
+    const markdown = [
+      "Latin 中文输入 emoji 👨‍👩‍👧‍👦 with `code` and [link](https://example.com).",
+      "",
+      "- List marker text",
+      "",
+      "> Quote block text",
+      "",
+      "```ts",
+      "const x = 1;",
+      "```",
+    ].join("\n");
+    const state = createIncrementalParseState(markdown);
+    const inlineSources = createMarkdownInlineSourceMap(state);
+    const layout = createLayoutEngine({ fontTheme: "github" }).layout(markdown, 420);
+    const index = createEditableLayoutIndex({
+      markdown,
+      layout,
+      blockSpans: state.blockSpans,
+      inlineSources,
+    });
+
+    for (const text of [
+      "Latin",
+      "中文输入",
+      "👨‍👩‍👧‍👦",
+      "code",
+      "link",
+      "List marker",
+      "Quote block",
+      "const x",
+    ]) {
+      const fragment = index.fragments.find((candidate) => candidate.text.includes(text));
+      expect(fragment, `fragment for ${text}`).toBeDefined();
+      const startInFragment = fragment!.text.indexOf(text);
+      const hit = index.hitTest(
+        fragment!.rect.x +
+          (fragment!.rect.width * (startInFragment + text.length / 2)) / fragment!.text.length,
+        fragment!.rect.y + fragment!.rect.height / 2,
+      );
+      const sourceOffset = markdown.indexOf(text);
+      expect(hit.fragment?.text).toContain(text);
+      expect(hit.offset).toBeGreaterThanOrEqual(sourceOffset);
+      expect(hit.offset).toBeLessThanOrEqual(sourceOffset + text.length);
+    }
+  });
+
   it("resolves character, word, line and block ranges from source offsets and hit-test points", () => {
     const markdown = [
       "# Heading",

@@ -15,7 +15,7 @@ export interface EditableFragment {
   readonly lineIndex: number;
   readonly fragmentIndex: number;
   readonly text: string;
-  readonly type: InlineFragment["type"];
+  readonly type: InlineFragment["type"] | "code_block";
   readonly sourceRange: SourceRange;
   readonly tokenRange?: SourceRange;
   readonly rect: Rect;
@@ -269,6 +269,39 @@ function buildEditableFragments(input: EditableLayoutIndexInput): EditableFragme
   const output: EditableFragment[] = [];
 
   for (const line of input.layout.lines) {
+    if (line.kind === "opaque" && line.content.type === "code_block") {
+      const blockSpan = input.blockSpans[line.blockIndex];
+      if (blockSpan === undefined || line.content.code.length === 0) continue;
+      const sourceFrom = findFragmentSource(
+        input.markdown,
+        line.content.code,
+        blockSpan.from,
+        blockSpan.to,
+      );
+      output.push({
+        blockId: blockSpan.id,
+        blockIndex: line.blockIndex,
+        lineIndex: line.index,
+        fragmentIndex: 0,
+        text: line.content.code,
+        type: "code_block",
+        sourceRange: {
+          from: sourceFrom,
+          to: sourceFrom + line.content.code.length,
+        },
+        rect: {
+          x: line.x + line.content.padding.left,
+          y: line.y + line.content.padding.top,
+          width: Math.max(1, line.width - line.content.padding.left - line.content.padding.right),
+          height: Math.max(
+            line.content.lineHeight,
+            line.height - line.content.padding.top - line.content.padding.bottom,
+          ),
+        },
+      });
+      continue;
+    }
+
     if (line.kind !== "text") continue;
     const blockSpan = input.blockSpans[line.blockIndex];
     if (blockSpan === undefined) continue;
