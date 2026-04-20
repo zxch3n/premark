@@ -2,10 +2,21 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   testDir: "tests/browser",
+  outputDir: "artifacts/playwright-browser",
   timeout: 30_000,
   expect: {
     timeout: 5_000,
   },
+  reporter: [
+    ["list"],
+    [
+      "html",
+      {
+        open: "never",
+        outputFolder: "artifacts/playwright-browser-html",
+      },
+    ],
+  ],
   use: {
     baseURL: "http://127.0.0.1:6106",
     colorScheme: "light",
