@@ -32,6 +32,17 @@ export function updatePointerSelection(
   editor.setSelection(session.anchorOffset, offset);
 }
 
+export function selectPointerRange(
+  editor: EditorDocumentState,
+  x: number,
+  y: number,
+  granularity: "word" | "block",
+  editableIndex: EditableLayoutIndex = editor.editableIndex,
+): void {
+  const hit = editableIndex.hitTestSourceRange(x, y, granularity);
+  editor.setSelection(hit.range.from, hit.range.to);
+}
+
 export function applyKeyboardSelectionIntent(
   editor: EditorDocumentState,
   intent: NormalizedInputIntent,

@@ -159,6 +159,32 @@ async function canvasSourceOffset(page: Page, text: string, edge: "start" | "end
   return edge === "start" ? offset : offset + text.length;
 }
 
+async function renderedPointForText(page: Page, text: string) {
+  return page.evaluate((needle) => {
+    const surface = document.querySelector<HTMLElement>("[data-editor-surface]");
+    if (surface === null) {
+      throw new Error("Missing editor surface");
+    }
+    const walker = document.createTreeWalker(surface, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const textNode = walker.currentNode as Text;
+      const index = textNode.data.indexOf(needle);
+      if (index < 0) continue;
+      const offset = index + Math.floor(needle.length / 2);
+      const range = document.createRange();
+      range.setStart(textNode, offset);
+      range.setEnd(textNode, Math.min(offset + 1, textNode.data.length));
+      const rect = range.getBoundingClientRect();
+      const surfaceRect = surface.getBoundingClientRect();
+      return {
+        x: rect.left - surfaceRect.left + rect.width / 2,
+        y: rect.top - surfaceRect.top + rect.height / 2,
+      };
+    }
+    throw new Error(`Missing rendered text: ${needle}`);
+  }, text);
+}
+
 async function sourceOffset(page: Page, text: string, edge: "start" | "end" = "start") {
   const markdown = await editorMarkdown(page);
   const offset = markdown.indexOf(text);
@@ -640,6 +666,95 @@ test.describe("Premark native editor story", () => {
     expect(Math.max(...deltas) - Math.min(...deltas)).toBeLessThan(2);
   });
 
+  test("supports double-click word and triple-click block selection", async ({ page }) => {
+    await page.goto(storyUrl);
+
+    const surface = page.locator("[data-editor-surface]");
+    await expect(surface).toContainText("Click text");
+
+    const clickPoint = await renderedPointForText(page, "Click");
+    await surface.click({ position: clickPoint });
+    await surface.click({ position: clickPoint });
+    const wordSelection = await readSelection(page);
+    const clickStart = await sourceOffset(page, "Click text");
+    expect(wordSelection.range).toEqual({
+      from: clickStart,
+      to: clickStart + "Click".length,
+    });
+
+    await surface.click({ position: clickPoint });
+    const blockSelection = await readSelection(page);
+    const markdown = await editorMarkdown(page);
+    const blockStart = markdown.indexOf("Click text");
+    const blockEnd = markdown.indexOf("rendered surface.") + "rendered surface.".length;
+    expect(blockSelection.range).toEqual({
+      from: blockStart,
+      to: blockEnd,
+    });
+  });
+
+  test("supports Canvas double-click word and triple-click block selection", async ({ page }) => {
+    await page.goto(canvasNativeStoryUrl);
+
+    const canvas = page.locator("[data-canvas-native-editor]");
+    const root = page.locator(".pcne-root");
+    await expect(canvas).toBeVisible();
+    await expect(root).toHaveAttribute("data-fonts-ready", "1");
+
+    const wordStartPoint = await canvasPointForText(page, "WWWW");
+    const wordEndPoint = await canvasPointForText(page, "WWWW", "end");
+    const wordPoint = {
+      x: (wordStartPoint.x + wordEndPoint.x) / 2,
+      y: wordStartPoint.y,
+    };
+    await canvas.click({ position: wordPoint });
+    await canvas.click({ position: wordPoint });
+    const wordSelection = await readCanvasSelection(page);
+    const wordStart = await canvasSourceOffset(page, "WWWW");
+    expect(wordSelection).toEqual({
+      anchorOffset: wordStart,
+      headOffset: wordStart + "WWWW".length,
+      isCollapsed: false,
+    });
+
+    await canvas.click({ position: wordPoint });
+    const blockSelection = await readCanvasSelection(page);
+    const markdown = await canvasEditorMarkdown(page);
+    const blockStart = markdown.indexOf("Widths");
+    const blockEnd = markdown.indexOf("done.") + "done.".length;
+    expect(blockSelection).toEqual({
+      anchorOffset: blockStart,
+      headOffset: blockEnd,
+      isCollapsed: false,
+    });
+  });
+
+  test("supports reversed cross-block rendered drag selection", async ({ page }) => {
+    await page.goto(storyUrl);
+
+    const surface = page.locator("[data-editor-surface]");
+    await expect(surface).toContainText("Click text");
+
+    const start = await renderedPointForText(page, "hidden textarea");
+    const end = await renderedPointForText(page, "Click");
+    const box = await surface.boundingBox();
+    expect(box).not.toBeNull();
+    if (box === null) return;
+
+    await page.mouse.move(box.x + start.x, box.y + start.y);
+    await page.mouse.down();
+    await page.mouse.move(box.x + end.x, box.y + end.y, { steps: 8 });
+    await page.mouse.up();
+
+    const selection = await readSelection(page);
+    expect(selection.isCollapsed).toBe(false);
+    expect(selection.direction).toBe("backward");
+    const clickStart = await sourceOffset(page, "Click text");
+    expect(selection.range.from).toBeGreaterThanOrEqual(clickStart);
+    expect(selection.range.from).toBeLessThanOrEqual(clickStart + "Click".length);
+    expect(selection.range.to).toBeGreaterThan(await sourceOffset(page, "hidden textarea"));
+  });
+
   test("reveals Markdown controls only when the active range needs them", async ({ page }) => {
     await page.goto(storyUrl);
 
@@ -918,6 +1033,54 @@ test.describe("Premark native editor story", () => {
     expect(lineBoundarySelection.isCollapsed).toBe(false);
     expect(lineBoundarySelection.anchorOffset).toBe(wordMoved.headOffset);
     expect(lineBoundarySelection.headOffset).toBeGreaterThan(wordMoved.headOffset);
+
+    const bridge = page.locator("[data-input-bridge]");
+    const paragraphStart = await sourceOffset(page, "Click text");
+    const paragraphEnd = await sourceOffset(page, "rendered surface.", "end");
+    await setSourceCaret(page, paragraphEnd);
+    await bridge.focus();
+    await page.keyboard.press("Home");
+    const homeSelection = await readSelection(page);
+    expect(homeSelection.isCollapsed).toBe(true);
+    expect(homeSelection.headOffset).toBe(paragraphStart);
+
+    await page.keyboard.press("End");
+    const endSelection = await readSelection(page);
+    expect(endSelection.isCollapsed).toBe(true);
+    expect(endSelection.headOffset).toBe(paragraphEnd);
+
+    await setSourceCaret(page, paragraphEnd);
+    await bridge.focus();
+    await page.keyboard.down("Shift");
+    await page.keyboard.press("Home");
+    await page.keyboard.up("Shift");
+    const shiftHomeSelection = await readSelection(page);
+    expect(shiftHomeSelection.isCollapsed).toBe(false);
+    expect(shiftHomeSelection.anchorOffset).toBe(paragraphEnd);
+    expect(shiftHomeSelection.headOffset).toBe(paragraphStart);
+
+    await setSourceCaret(page, await sourceOffset(page, "surface", "end"));
+    await bridge.focus();
+    await page.keyboard.down("Alt");
+    await page.keyboard.press("ArrowLeft");
+    await page.keyboard.up("Alt");
+    const altLeftSelection = await readSelection(page);
+    expect(altLeftSelection.isCollapsed).toBe(true);
+    expect(altLeftSelection.headOffset).toBe(await sourceOffset(page, "surface"));
+
+    await setSourceCaret(page, await sourceOffset(page, "surface"));
+    await bridge.focus();
+    await page.keyboard.down("Meta");
+    await page.keyboard.press("ArrowUp");
+    await page.keyboard.up("Meta");
+    const documentStart = await readSelection(page);
+    expect(documentStart.headOffset).toBe(0);
+
+    await page.keyboard.down("Meta");
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.up("Meta");
+    const documentEnd = await readSelection(page);
+    expect(documentEnd.headOffset).toBe((await editorMarkdown(page)).length);
 
     await page.keyboard.press("Control+A");
     const allSelection = await readSelection(page);

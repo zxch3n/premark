@@ -141,9 +141,9 @@ Acceptance:
 
 Goal: improve editing feel after geometry is stable.
 
-- [ ] Add double-click word selection and triple-click block selection.
-- [ ] Harden drag selection across blocks and reversed drags.
-- [ ] Complete line start/end, Option/Alt word movement, Command document movement, and Shift variants in browser stories.
+- [x] Add double-click word selection and triple-click block selection.
+- [x] Harden drag selection across blocks and reversed drags.
+- [x] Complete line start/end, Option/Alt word movement, Command document movement, and Shift variants in browser stories.
 - [ ] Define paste/delete/Enter behavior near Markdown controls.
 - [ ] Add visual crops for Canvas native link/control/emoji editing states.
 
@@ -185,3 +185,4 @@ Acceptance:
 - Phase 7 started. Added a pure text-geometry invariant matrix and a Canvas-native repeated emoji browser fixture. The matrix immediately found a real active-marker source-map bug: exact revealed boundaries shared by adjacent runs were always mapped to the smaller source offset, so `before` caret positions at the end of visible controls could jump backward. Boundary mapping is now side-aware: the first boundary maps as `start`, later boundaries map as `end`.
 - Verification after the first Phase 7 batch: `vp check --fix` passes with the two existing warnings, targeted geometry/reveal tests pass 40 tests, full `vp test` passes 168 tests, `vp run build` passes, and `vp run test:browser` passes 19 Playwright tests.
 - Completed Phase 7. Canvas drawing now treats emoji and Markdown/link control punctuation as boundary-sensitive: normal text still draws in chunks, while boundary-sensitive graphemes are placed at `measureGraphemeBoundaryXs` positions. Added draw tests for repeated emoji, revealed `**` controls, and link suffix controls. Cache review result: font loading is gated before Storybook layout construction, editable boundary caches are WeakMap-keyed by fragment objects, active reveal creates new editable indexes, and resize/refresh rebuild layout plus editable index. Added a regression that switches hidden/revealed indexes and resizes a document after measuring.
+- Phase 8 started. Added pointer word/block selection command support, DOM and Canvas story wiring for double-click word selection and triple-click paragraph selection, and browser coverage for both renderers. Hidden textarea bridges now use `pointer-events: none` so the OS input bridge cannot intercept repeated surface clicks. Added browser coverage for reversed cross-block drag selection and expanded keyboard coverage for Home/End, Shift+Home, Alt+ArrowLeft, and Meta+ArrowUp/Down.

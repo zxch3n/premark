@@ -15,6 +15,7 @@ import {
   createTextareaBridgeSnapshot,
   LocalUndoManager,
   normalizeInputTrace,
+  selectPointerRange,
   updatePointerSelection,
   type EditableLayoutIndex,
   type PointerSelectionSession,
@@ -64,6 +65,12 @@ export const InteractiveNativePrototype = () => {
     let pointerSession: PointerSelectionSession | null = null;
     let composing = false;
     let currentEditableIndex: EditableLayoutIndex = editor.editableIndex;
+    let pointerClickCount = 0;
+    let lastPointerClick: {
+      readonly time: number;
+      readonly x: number;
+      readonly y: number;
+    } | null = null;
     let renderedStyleElement: HTMLStyleElement | null = null;
     let renderedDocumentElement: HTMLElement | null = null;
     let renderedSurfaceElement: HTMLElement | null = null;
@@ -340,7 +347,7 @@ export const InteractiveNativePrototype = () => {
         .join("");
     }
 
-    function pointFromEvent(event: PointerEvent): { x: number; y: number } {
+    function pointFromEvent(event: MouseEvent): { x: number; y: number } {
       const rect = surface.getBoundingClientRect();
       return {
         x: event.clientX - rect.left,
@@ -348,10 +355,60 @@ export const InteractiveNativePrototype = () => {
       };
     }
 
+    function clickCountFromPointer(event: PointerEvent, point: { x: number; y: number }): number {
+      if (
+        lastPointerClick !== null &&
+        event.timeStamp - lastPointerClick.time < 500 &&
+        Math.hypot(point.x - lastPointerClick.x, point.y - lastPointerClick.y) < 6
+      ) {
+        pointerClickCount += 1;
+      } else {
+        pointerClickCount = 1;
+      }
+      lastPointerClick = {
+        time: event.timeStamp,
+        x: point.x,
+        y: point.y,
+      };
+      return Math.max(event.detail, pointerClickCount);
+    }
+
     surface.addEventListener("pointerdown", (event) => {
       event.preventDefault();
       const point = pointFromEvent(event);
+      const clickCount = clickCountFromPointer(event, point);
+      if (clickCount >= 3) {
+        selectPointerRange(editor, point.x, point.y, "block", currentEditableIndex);
+        pointerSession = null;
+        textarea.focus();
+        render();
+        return;
+      }
+      if (clickCount === 2) {
+        selectPointerRange(editor, point.x, point.y, "word", currentEditableIndex);
+        pointerSession = null;
+        textarea.focus();
+        render();
+        return;
+      }
       pointerSession = beginPointerSelection(editor, point.x, point.y, currentEditableIndex);
+      textarea.focus();
+      render();
+    });
+
+    surface.addEventListener("click", (event) => {
+      if (event.detail < 2) {
+        return;
+      }
+      const point = pointFromEvent(event);
+      selectPointerRange(
+        editor,
+        point.x,
+        point.y,
+        event.detail >= 3 ? "block" : "word",
+        currentEditableIndex,
+      );
+      pointerSession = null;
       textarea.focus();
       render();
     });
@@ -592,6 +649,7 @@ const storyCss = `
   .pne-input-bridge {
     position: absolute;
     z-index: 3;
+    pointer-events: none;
     width: 2px;
     min-width: 2px;
     padding: 0;

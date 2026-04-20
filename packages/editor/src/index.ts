@@ -76,6 +76,7 @@ export {
 export {
   applyKeyboardSelectionIntent,
   beginPointerSelection,
+  selectPointerRange,
   updatePointerSelection,
 } from "./selection-commands.ts";
 export type { PointerSelectionSession } from "./selection-commands.ts";
