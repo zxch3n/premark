@@ -94,6 +94,11 @@ export const inputTraceFixtures = [
     ],
   },
   {
+    name: "textarea-insert-linebreak",
+    events: [{ type: "beforeinput", inputType: "insertLineBreak", cancelable: true }],
+    expectedIntents: [{ type: "insert-paragraph" }],
+  },
+  {
     name: "selection-and-clipboard",
     events: [
       { type: "selectionchange", anchor: 3, head: 9 },

@@ -8,6 +8,7 @@
     "dev": "vp run playground#dev",
     "build": "vp run @pretext-md/parser#build && vp run @pretext-md/layout#build && vp run @pretext-md/editor#build && vp run @pretext-md/workspace#build && vp run @pretext-md/highlight#build && vp run @pretext-md/html-renderer#build && vp run playground#build",
     "benchmark:incremental": "vp run @pretext-md/parser#build && vp run @pretext-md/layout#build && vp run @pretext-md/highlight#build && jiti scripts/benchmark-incremental.ts",
+    "benchmark:native-editor": "jiti scripts/benchmark-native-editor.ts",
     "benchmark:workspace": "vp run @pretext-md/parser#build && vp run @pretext-md/layout#build && vp run @pretext-md/workspace#build && jiti scripts/benchmark-workspace-search.ts",
     "render:markdown": "jiti scripts/render-markdown.ts",
     "render:examples": "jiti scripts/render-markdown.ts examples/markdown --output examples/rendered --width 920 --scale 2",

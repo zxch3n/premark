@@ -20,10 +20,28 @@ async function editorMarkdown(page: Page) {
   );
 }
 
+async function canvasEditorMarkdown(page: Page) {
+  return page.evaluate(
+    () =>
+      (
+        window as typeof window & {
+          __premarkCanvasNativeEditor?: { markdown(): string };
+        }
+      ).__premarkCanvasNativeEditor?.markdown() ?? "",
+  );
+}
+
 async function sourceOffset(page: Page, text: string, edge: "start" | "end" = "start") {
   const markdown = await editorMarkdown(page);
   const offset = markdown.indexOf(text);
   expect(offset, `source offset for ${text}`).toBeGreaterThanOrEqual(0);
+  return edge === "start" ? offset : offset + text.length;
+}
+
+async function canvasSourceOffset(page: Page, text: string, edge: "start" | "end" = "start") {
+  const markdown = await canvasEditorMarkdown(page);
+  const offset = markdown.indexOf(text);
+  expect(offset, `canvas source offset for ${text}`).toBeGreaterThanOrEqual(0);
   return edge === "start" ? offset : offset + text.length;
 }
 
@@ -47,6 +65,18 @@ async function setSourceCaret(page: Page, offset: number) {
           __premarkNativeEditor?: { setCaret(offset: number): void };
         }
       ).__premarkNativeEditor?.setCaret(caretOffset),
+    offset,
+  );
+}
+
+async function setCanvasSourceCaret(page: Page, offset: number) {
+  await page.evaluate(
+    (caretOffset) =>
+      (
+        window as typeof window & {
+          __premarkCanvasNativeEditor?: { setCaret(offset: number): void };
+        }
+      ).__premarkCanvasNativeEditor?.setCaret(caretOffset),
     offset,
   );
 }
@@ -120,6 +150,33 @@ test.describe("Premark native editor visual baselines", () => {
     const canvas = page.locator("[data-canvas-native-editor]");
     await expect(canvas).toBeVisible();
     await expect(canvas).toHaveScreenshot("native-editor-visual-canvas-native-editor.png", {
+      animations: "disabled",
+      maxDiffPixelRatio: 0.01,
+    });
+  });
+
+  test("matches Canvas native control, link and emoji editing crops", async ({ page }) => {
+    await page.goto(canvasNativeStoryUrl);
+    const canvas = page.locator("[data-canvas-native-editor]");
+    await expect(canvas).toBeVisible();
+
+    await setCanvasSourceCaret(page, (await canvasSourceOffset(page, "**bold text**")) + 2);
+    await expect(canvas).toHaveScreenshot(
+      "native-editor-visual-canvas-native-control-editing.png",
+      {
+        animations: "disabled",
+        maxDiffPixelRatio: 0.01,
+      },
+    );
+
+    await setCanvasSourceCaret(page, (await canvasSourceOffset(page, "https://example.com")) + 8);
+    await expect(canvas).toHaveScreenshot("native-editor-visual-canvas-native-link-editing.png", {
+      animations: "disabled",
+      maxDiffPixelRatio: 0.01,
+    });
+
+    await setCanvasSourceCaret(page, await canvasSourceOffset(page, "👨‍👩‍👧‍👦", "end"));
+    await expect(canvas).toHaveScreenshot("native-editor-visual-canvas-native-emoji-editing.png", {
       animations: "disabled",
       maxDiffPixelRatio: 0.01,
     });

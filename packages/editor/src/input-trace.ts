@@ -152,7 +152,7 @@ export function normalizeInputTrace(events: readonly InputTraceEvent[]): Normali
           break;
         }
 
-        if (event.inputType === "insertParagraph") {
+        if (event.inputType === "insertParagraph" || event.inputType === "insertLineBreak") {
           pushPlainIntent(intents, { type: "insert-paragraph" });
           break;
         }
