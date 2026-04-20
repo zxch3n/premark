@@ -122,6 +122,37 @@ describe("applyInputIntent", () => {
     });
   });
 
+  it("cancels composition without changing source, selection, or undo history", () => {
+    const editor = createInMemoryEditorDocumentState("Hello world", 600);
+    const undoManager = new LocalUndoManager();
+    const worldFrom = editor.markdown.indexOf("world");
+    const worldTo = worldFrom + "world".length;
+    editor.setSelection(worldFrom, worldTo);
+
+    applyInputIntent(editor, { type: "composition-start" }, { undoManager });
+    const update = applyInputIntent(
+      editor,
+      {
+        type: "composition-update",
+        text: "shi",
+      },
+      { undoManager },
+    );
+
+    expect(update.type).toBe("composition-update");
+    expect(editor.markdown).toBe("Hello world");
+    expect(editor.compositionView?.virtualText).toBe("Hello shi");
+    expect(undoManager.undoDepth).toBe(0);
+
+    const cancel = applyInputIntent(editor, { type: "composition-cancel" }, { undoManager });
+
+    expect(cancel).toEqual({ type: "composition-cancel" });
+    expect(editor.markdown).toBe("Hello world");
+    expect(editor.compositionView).toBeNull();
+    expect(editor.selectionSourceRange).toEqual({ from: worldFrom, to: worldTo });
+    expect(undoManager.undoDepth).toBe(0);
+  });
+
   it("records text edits into the local undo manager and applies history intents", () => {
     const editor = createInMemoryEditorDocumentState("Hello world", 600);
     const undoManager = new LocalUndoManager();
