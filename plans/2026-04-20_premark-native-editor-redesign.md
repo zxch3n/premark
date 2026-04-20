@@ -36,6 +36,8 @@ Last Updated: 2026-04-20
 - Synthetic browser composition events are useful as a fast guard for DOM event wiring, but they are not a substitute for real macOS IME automation because they do not exercise OS candidate windows or native event ordering.
 - The DOM prototype now renders composition preedit with a lightweight Premark overlay underline. It is acceptable for the debug renderer but still needs real OS IME screenshots before claiming platform parity.
 - Hidden textarea anchoring needs browser-level checks because pure geometry tests cannot catch focus loss or wrong absolute positioning after scrolling.
+- macOS automation has two separate layers: targeted `CGEventPostToPid` can prove real OS key events reach the browser process and hidden textarea, but it bypasses macOS input-method composition. Real Pinyin/candidate-window coverage must use System Events or HID events with the browser as the foreground app.
+- The current Codex host cannot make Chrome the foreground app; the macOS runner records this as a skip artifact by default and can be made strict with `PREMARK_MACOS_IME_STRICT=1`.
 
 ## Removed From This Branch
 
@@ -152,6 +154,7 @@ Goal: support real composition without hiding behind CodeMirror.
 - [x] Track `compositionstart/update/end` as a composing source range.
 - [x] Render preedit text in Premark with underline/style matching platform expectation as closely as practical for the DOM debug prototype.
 - [ ] Commit and cancel composition without losing source selection.
+- [x] Create macOS-only runner with input-source selection, real OS key-event focus probe, screenshot artifacts, and strict/skip behavior.
 - [ ] Run macOS Pinyin real IME tests.
 - [ ] Add Japanese and Korean scenarios after Pinyin stabilizes.
 - [ ] Test browser/spec event-order variants: `beforeinput`/`compositionupdate`/`input`/`compositionend` can arrive in different orders and must normalize to the same editor operation.
@@ -195,7 +198,7 @@ Goal: convert the research checklist into automated coverage and visual review g
 - [x] Add Playwright coverage for desktop keyboard selection and browser clipboard paste/cut in the native editor story.
 - [ ] Expand Playwright suites for visual viewport, DOM debug renderer, Canvas renderer, and more screenshot crops.
 - [x] Add first browser composition suite using synthetic `composition*` events against the Storybook hidden textarea.
-- [ ] Create macOS-only IME suite using real OS input where possible and clear skips where CI cannot provide the OS permission or input source.
+- [x] Create macOS-only IME suite using real OS input where possible and clear skips where CI cannot provide the OS permission, foreground app, or input source.
 - [ ] Create mobile-emulation suite for touch, visual viewport, soft keyboard modeling, and selection geometry; record gaps requiring real-device validation.
 - [ ] Create screenshot review artifacts with one small crop per scenario and a Codex-reviewed `review.md` that records pass/fail and visual notes.
 - [ ] Add CI/reporting guidance so screenshot failures include the actual/expected/diff images and event traces.
@@ -234,3 +237,4 @@ Acceptance:
 - Added `tests/browser/screenshot-review.md` with the first Codex visual review entry and pending screenshot categories.
 - Added Storybook paste/cut event wiring and Playwright coverage for Shift+Arrow, Shift+Command+Arrow, paste, and cut. Added a DOM debug composition underline overlay and reviewed the generated composition preedit screenshot.
 - Added Playwright focus/textarea anchoring coverage for scroll, blur/refocus, and viewport resize. Zoom and mobile visual viewport remain open.
+- Added `vp run test:macos-ime`: it builds Storybook, selects macOS input sources through Carbon, verifies real OS key events can reach the hidden textarea through `CGEventPostToPid`, and attempts real Pinyin only when Chrome can be made foreground. In the current Codex host Chrome cannot become foreground, so the runner records `pinyin-skip.txt` and `pinyin-skipped-no-foreground.png`; `PREMARK_MACOS_IME_STRICT=1` turns that documented gap into a hard failure.
