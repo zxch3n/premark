@@ -68,17 +68,110 @@ describe("applyInputIntent", () => {
     expect(editor.selectionSourceRange).toEqual({ from: 1, to: 1 });
   });
 
-  it("inserts paragraph source for Enter-style input", () => {
+  it("inserts one source newline for Enter-style input", () => {
     const editor = createInMemoryEditorDocumentState("Hello world", 600);
     const split = editor.markdown.indexOf("world");
     editor.setSelection(split, split);
 
     applyInputIntent(editor, { type: "insert-paragraph" });
 
-    expect(editor.markdown).toBe("Hello \n\nworld");
+    expect(editor.markdown).toBe("Hello \nworld");
     expect(editor.selectionSourceRange).toEqual({
-      from: split + 2,
-      to: split + 2,
+      from: split + 1,
+      to: split + 1,
+    });
+  });
+
+  it("edits inline control characters exactly when the caret is inside them", () => {
+    const editor = createInMemoryEditorDocumentState("A **bold** Z", 600);
+    const markerMiddle = editor.markdown.indexOf("**") + 1;
+    editor.setSelection(markerMiddle, markerMiddle);
+
+    applyInputIntent(editor, {
+      type: "insert-text",
+      text: "!",
+    });
+
+    expect(editor.markdown).toBe("A *!*bold** Z");
+    expect(editor.selectionSourceRange).toEqual({
+      from: markerMiddle + 1,
+      to: markerMiddle + 1,
+    });
+
+    applyInputIntent(editor, {
+      type: "delete",
+      direction: "backward",
+    });
+
+    expect(editor.markdown).toBe("A **bold** Z");
+    expect(editor.selectionSourceRange).toEqual({
+      from: markerMiddle,
+      to: markerMiddle,
+    });
+  });
+
+  it("keeps inline controls when replacing only rendered inline content", () => {
+    const editor = createInMemoryEditorDocumentState("A **bold** Z", 600);
+    const contentFrom = editor.markdown.indexOf("bold");
+    editor.setSelection(contentFrom, contentFrom + "bold".length);
+
+    applyInputIntent(editor, {
+      type: "insert-text",
+      text: "strong",
+    });
+
+    expect(editor.markdown).toBe("A **strong** Z");
+    expect(editor.selectionSourceRange).toEqual({
+      from: contentFrom + "strong".length,
+      to: contentFrom + "strong".length,
+    });
+  });
+
+  it("pastes and deletes inside link suffix controls as plain source edits", () => {
+    const editor = createInMemoryEditorDocumentState("A [docs](https://example.com) Z", 600);
+    const urlMiddle = editor.markdown.indexOf("https://") + "https".length;
+    editor.setSelection(urlMiddle, urlMiddle);
+
+    applyInputIntent(editor, {
+      type: "clipboard",
+      action: "paste",
+      markdown: "+md",
+      plainText: "+plain",
+    });
+
+    expect(editor.markdown).toBe("A [docs](https+md://example.com) Z");
+    expect(editor.selectionSourceRange).toEqual({
+      from: urlMiddle + "+md".length,
+      to: urlMiddle + "+md".length,
+    });
+
+    applyInputIntent(editor, {
+      type: "delete",
+      direction: "backward",
+    });
+
+    expect(editor.markdown).toBe("A [docs](https+m://example.com) Z");
+  });
+
+  it("inserts source newlines inside block and inline controls without expanding the edit", () => {
+    const heading = createInMemoryEditorDocumentState("### Heading", 600);
+    heading.setSelection(1, 1);
+
+    applyInputIntent(heading, { type: "insert-paragraph" });
+
+    expect(heading.markdown).toBe("#\n## Heading");
+    expect(heading.selectionSourceRange).toEqual({ from: 2, to: 2 });
+
+    const link = createInMemoryEditorDocumentState("[docs](https://example.com)", 600);
+    const linkSuffixOffset = link.markdown.indexOf("https://") + "https".length;
+    link.setSelection(linkSuffixOffset, linkSuffixOffset);
+
+    applyInputIntent(link, { type: "insert-paragraph" });
+
+    expect(link.markdown).toBe("[docs](https\n://example.com)");
+    expect(link.selectionSourceRange).toEqual({
+      from: linkSuffixOffset + 1,
+      to: linkSuffixOffset + 1,
     });
   });
 

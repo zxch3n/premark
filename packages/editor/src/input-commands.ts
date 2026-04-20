@@ -29,7 +29,7 @@ export function applyInputIntent(
     case "insert-text":
       return replaceSelection(editor, intent.text, options);
     case "insert-paragraph":
-      return replaceSelection(editor, "\n\n", options);
+      return replaceSelection(editor, "\n", options);
     case "delete":
       return applyDeleteIntent(editor, intent.direction, options);
     case "selection-change":

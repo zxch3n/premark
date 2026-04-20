@@ -7,7 +7,7 @@ Compaction Rule: after memory reload or compaction, reread this whole file befor
 
 ## Current Objective
 
-- Execute Phase 7: harden text geometry and renderer invariants.
+- Execute Phase 10: make editable sidecar incremental enough that native editing can actually use the fast layout path.
 - Keep the native Premark-rendered editor as the product path; CodeMirror overlay remains removed.
 - Do not run macOS HID/IME tests while the machine is actively used unless Zixuan explicitly asks.
 
@@ -22,6 +22,9 @@ Compaction Rule: after memory reload or compaction, reread this whole file befor
 - Font readiness is part of correctness. Layout and editable caches must be built after target fonts load; tests should compare fragment width against fresh `canvas.measureText`.
 - Canvas painting must use the same boundary model as editor geometry. Emoji-like runs cannot be painted as one `fillText` run if the layout/editor uses grapheme boundaries; repeated ZWJ emoji otherwise drift in Canvas while DOM looks correct.
 - Most text-geometry bugs should be caught without Browser. Browser tests should prove Storybook wiring, font loading, Canvas paint, and visual baselines.
+- Control-adjacent editing should stay source-exact. If the caret is inside a revealed Markdown marker or link suffix, insert/delete/paste/Enter edits that source position only; replacing rendered inline content should leave its surrounding controls intact.
+- Enter in the native editor now means one source newline. Browser `insertParagraph` and textarea `insertLineBreak` both normalize to the same source operation because editor layout preserves every `\n`.
+- Phase 9 benchmarks show the core layout engine is already incremental for local edit, remote edit, and AI append, but editable sidecar rebuild is still full-document and dominates large editor updates. The next architecture step is dirty-block/viewport editable indexing, not more CodeMirror fallback.
 
 ## Architecture Direction
 
@@ -144,29 +147,45 @@ Goal: improve editing feel after geometry is stable.
 - [x] Add double-click word selection and triple-click block selection.
 - [x] Harden drag selection across blocks and reversed drags.
 - [x] Complete line start/end, Option/Alt word movement, Command document movement, and Shift variants in browser stories.
-- [ ] Define paste/delete/Enter behavior near Markdown controls.
-- [ ] Add visual crops for Canvas native link/control/emoji editing states.
+- [x] Define paste/delete/Enter behavior near Markdown controls.
+- [x] Add visual crops for Canvas native link/control/emoji editing states.
 
 Acceptance:
 
-- [ ] Common desktop editing gestures match expected rendered-surface behavior.
-- [ ] Control-adjacent editing does not corrupt Markdown source.
+- [x] Common desktop editing gestures match expected rendered-surface behavior.
+- [x] Control-adjacent editing does not corrupt Markdown source.
 
 ## Phase 9: Performance And Incremental Rendering
 
 Goal: validate that the native Premark route can deliver the intended speed advantage.
 
-- [ ] Add large-document layout and editable-index benchmarks.
-- [ ] Add incremental layout benchmark for local edit, remote edit, and AI streaming append.
-- [ ] Add Canvas tile dirty-region redraw benchmark.
-- [ ] Stress range rebasing for local selection/caret during remote CRDT patches.
-- [ ] Measure streaming AI output while user edits another region.
+- [x] Add large-document layout and editable-index benchmarks.
+- [x] Add incremental layout benchmark for local edit, remote edit, and AI streaming append.
+- [x] Add Canvas tile dirty-region redraw benchmark.
+- [x] Stress range rebasing for local selection/caret during remote CRDT patches.
+- [x] Measure streaming AI output while user edits another region.
 
 Acceptance:
 
-- [ ] Benchmarks report stable numbers in CI or local scripts.
+- [x] Benchmarks report stable numbers in CI or local scripts.
 - [ ] Incremental edit paths avoid full-document work where the architecture allows it.
-- [ ] Performance data is good enough to decide whether to keep optimizing this route.
+- [x] Performance data is good enough to decide whether to keep optimizing this route.
+
+## Phase 10: Incremental Editable Sidecar
+
+Goal: remove the full-document editable-index rebuild found by Phase 9.
+
+- [ ] Design dirty-block/viewport editable index ownership and cache invalidation.
+- [ ] Add an API that can rebuild editable fragments for dirty source/layout blocks while reusing stable fragments outside the dirty range.
+- [ ] Keep active-marker reveal and composition views correct when only the active block is rebuilt.
+- [ ] Add benchmarks proving editable-index work scales with dirty fragments, not whole document size.
+- [ ] Add regression tests for source offset shifts, blank source lines, code blocks, links, emoji, and hidden/revealed controls across reused fragments.
+
+Acceptance:
+
+- [ ] 100KB local edit, remote edit, and AI append no longer spend over 1s rebuilding editable index.
+- [ ] Reused editable fragments keep caret, hit-test, and selection geometry equivalent to a fresh full index.
+- [ ] Browser Storybook behavior remains unchanged after enabling incremental sidecar updates.
 
 ## Iteration Log
 
@@ -186,3 +205,5 @@ Acceptance:
 - Verification after the first Phase 7 batch: `vp check --fix` passes with the two existing warnings, targeted geometry/reveal tests pass 40 tests, full `vp test` passes 168 tests, `vp run build` passes, and `vp run test:browser` passes 19 Playwright tests.
 - Completed Phase 7. Canvas drawing now treats emoji and Markdown/link control punctuation as boundary-sensitive: normal text still draws in chunks, while boundary-sensitive graphemes are placed at `measureGraphemeBoundaryXs` positions. Added draw tests for repeated emoji, revealed `**` controls, and link suffix controls. Cache review result: font loading is gated before Storybook layout construction, editable boundary caches are WeakMap-keyed by fragment objects, active reveal creates new editable indexes, and resize/refresh rebuild layout plus editable index. Added a regression that switches hidden/revealed indexes and resizes a document after measuring.
 - Phase 8 started. Added pointer word/block selection command support, DOM and Canvas story wiring for double-click word selection and triple-click paragraph selection, and browser coverage for both renderers. Hidden textarea bridges now use `pointer-events: none` so the OS input bridge cannot intercept repeated surface clicks. Added browser coverage for reversed cross-block drag selection and expanded keyboard coverage for Home/End, Shift+Home, Alt+ArrowLeft, and Meta+ArrowUp/Down.
+- Completed Phase 8. Enter now inserts one source newline, and `insertParagraph` plus textarea `insertLineBreak` normalize to the same intent. Added pure and browser coverage for source-exact insert/delete/paste/Enter inside strong markers, heading markers, link suffix controls, and rendered-inline-content replacement that preserves surrounding controls. Canvas native story now supports paste/cut through the same hidden textarea bridge. Added committed Canvas-native visual baselines for control, link, and emoji editing states; reviewed all three crops manually.
+- Phase 9 benchmark script added as `vp run benchmark:native-editor`. It reports large-document layout plus editable index, local/remote/AI incremental layout, Canvas dirty tile command counts, stable range rebasing, and concurrent workspace edit+AI streaming. On 2026-04-20 with `--chars 100000 --docs 120 --iterations 3`, layout stayed roughly tens of milliseconds and local/remote/AI parse mode stayed incremental with one dirty block, but editable index rebuild was about 1.4-1.5s before sidecar optimization attempts and remained over 1s after a reverted local optimization attempt. Assumption conflict: core Premark layout is fast enough to keep pursuing, but the current editable sidecar is not yet incremental. Plan changed by adding Phase 10.

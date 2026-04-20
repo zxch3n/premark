@@ -31,6 +31,7 @@ Status legend:
 | Grapheme boundaries                       | Combining marks, emoji ZWJ, flags, variation selectors, CJK punctuation                           | logic          |
 | Bidi hit-test                             | Mixed English/Hebrew/Arabic/numbers/Markdown markers fixtures                                     | logic          |
 | Multi-format clipboard                    | Markdown, plain text, HTML, cross-block cut/paste                                                 | browser        |
+| Control-adjacent source edits             | Insert/delete/paste/Enter inside revealed Markdown controls and hidden link suffixes              | logic+browser  |
 | DOM mutation by extensions                | Mutation-injection tests prove source of truth remains Premark state                              | browser        |
 | Accessibility                             | Label, focus, multiline textbox semantics, hidden textarea behavior                               | browser        |
 | Screenshot stability                      | Small deterministic crops, actual/expected/diff, event trace, review log                          | browser        |

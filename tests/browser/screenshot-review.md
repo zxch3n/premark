@@ -178,3 +178,20 @@ Current generated folder pattern:
 - Notes:
   - The old baseline differed because layout was allowed to happen before the Storybook font stylesheet and FontFaceSet had finished loading.
   - The browser test now asserts target fragment font readiness and that the layout fragment width matches a fresh `canvas.measureText` width within 1px, so this visual baseline is backed by a geometry check rather than only pixel comparison.
+
+### 2026-04-20 Canvas Native Control Editing Crops
+
+- Reviewer: Codex
+- Scenario: Canvas-native editor visual baselines for editing states near Markdown controls, link suffix controls, and emoji.
+- Result: pass on the local macOS Chromium baseline.
+- Artifact size check:
+  - `native-editor-visual-canvas-native-control-editing-darwin.png`: `780x430`, about `162K`.
+  - `native-editor-visual-canvas-native-link-editing-darwin.png`: `780x430`, about `165K`.
+  - `native-editor-visual-canvas-native-emoji-editing-darwin.png`: `780x430`, about `161K`.
+- Reviewed baseline screenshots:
+  - `native-editor-visual-canvas-native-control-editing-darwin.png`: Canvas is nonblank; strong Markdown controls are revealed around `bold text`; caret is inside the source-addressed strong token without shifting the line.
+  - `native-editor-visual-canvas-native-link-editing-darwin.png`: Canvas reveals `[docs](https://example.com)`; caret sits inside the URL suffix rather than snapping back to the rendered link label.
+  - `native-editor-visual-canvas-native-emoji-editing-darwin.png`: caret lands immediately after the family emoji; the Canvas text run does not show the repeated-emoji drift class of bug.
+- Notes:
+  - These crops are committed Playwright visual baselines, not only generated artifacts.
+  - They specifically guard the states that manual testing tends to catch late: hidden controls becoming visible, hidden link suffixes becoming editable, and emoji caret placement staying on grapheme boundaries.

@@ -310,6 +310,21 @@ async function pasteMarkdown(page: Page, markdown: string) {
   }, markdown);
 }
 
+async function pasteCanvasMarkdown(page: Page, markdown: string) {
+  await page.locator("[data-canvas-input-bridge]").evaluate((element, value) => {
+    const data = new DataTransfer();
+    data.setData("text/markdown", value);
+    data.setData("text/plain", value);
+    element.dispatchEvent(
+      new ClipboardEvent("paste", {
+        bubbles: true,
+        cancelable: true,
+        clipboardData: data,
+      }),
+    );
+  }, markdown);
+}
+
 test.describe("Premark native editor story", () => {
   test("captures deterministic screenshot-mode editor states", async ({ page }, testInfo) => {
     await page.goto(screenshotStoryUrl);
@@ -1136,6 +1151,75 @@ test.describe("Premark native editor story", () => {
     });
 
     await expect(source).not.toContainText("**Pasted**");
+  });
+
+  test("edits rendered Markdown controls through source-exact input, paste, delete and Enter", async ({
+    page,
+  }) => {
+    await page.goto(storyUrl);
+
+    const surface = page.locator("[data-editor-surface]");
+    const bridge = page.locator("[data-input-bridge]");
+    const source = page.locator("[data-debug-source]");
+    await expect(surface).toContainText("Native rendered Markdown");
+
+    const strongMiddle = (await sourceOffset(page, "**bold text**")) + 1;
+    await setSourceCaret(page, strongMiddle);
+    await expect(surface).toContainText("**bold text**");
+    await bridge.focus();
+    await page.keyboard.type("!");
+    await expect(source).toContainText("*!*bold text**");
+
+    await page.keyboard.press("Backspace");
+    await expect(source).toContainText("**bold text**");
+    await expect(source).not.toContainText("*!*bold text**");
+
+    const urlMiddle = (await sourceOffset(page, "https://example.com")) + "https".length;
+    await setSourceCaret(page, urlMiddle);
+    await bridge.focus();
+    await expect(surface).toContainText("[docs](https://example.com)");
+    await pasteMarkdown(page, "+md");
+    await expect(source).toContainText("[docs](https+md://example.com)");
+
+    await page.keyboard.press("Backspace");
+    await expect(source).toContainText("[docs](https+m://example.com)");
+
+    await page.keyboard.press("Enter");
+    expect(await editorMarkdown(page)).toContain("[docs](https+m\n://example.com)");
+
+    const boldContent = await sourceOffset(page, "bold text");
+    await setSourceSelection(page, boldContent, boldContent + "bold text".length);
+    await bridge.focus();
+    await page.keyboard.type("strong");
+    await expect(source).toContainText("**strong**");
+  });
+
+  test("edits Canvas Markdown controls through the same source-exact input path", async ({
+    page,
+  }) => {
+    await page.goto(canvasNativeStoryUrl);
+
+    const canvas = page.locator("[data-canvas-native-editor]");
+    const bridge = page.locator("[data-canvas-input-bridge]");
+    await expect(canvas).toBeVisible();
+
+    const strongMiddle = (await canvasSourceOffset(page, "**bold text**")) + 1;
+    await setCanvasCaret(page, strongMiddle);
+    await bridge.focus();
+    await page.keyboard.type("!");
+    expect(await canvasEditorMarkdown(page)).toContain("*!*bold text**");
+
+    await page.keyboard.press("Backspace");
+    expect(await canvasEditorMarkdown(page)).toContain("**bold text**");
+
+    const urlMiddle = (await canvasSourceOffset(page, "https://example.com")) + "https".length;
+    await setCanvasCaret(page, urlMiddle);
+    await bridge.focus();
+    await pasteCanvasMarkdown(page, "+md");
+    expect(await canvasEditorMarkdown(page)).toContain("[docs](https+md://example.com)");
+
+    await page.keyboard.press("Enter");
+    expect(await canvasEditorMarkdown(page)).toContain("[docs](https+md\n://example.com)");
   });
 
   test("keeps Premark source authoritative after rendered DOM mutation", async ({ page }) => {

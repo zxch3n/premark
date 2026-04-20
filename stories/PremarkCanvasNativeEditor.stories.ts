@@ -449,6 +449,28 @@ export const InteractiveCanvasNativeEditor = () => {
       render();
     });
 
+    textarea.addEventListener("paste", (event) => {
+      event.preventDefault();
+      applyInputIntent(
+        editor,
+        {
+          type: "clipboard",
+          action: "paste",
+          markdown: event.clipboardData?.getData("text/markdown") || undefined,
+          plainText: event.clipboardData?.getData("text/plain") || undefined,
+          html: event.clipboardData?.getData("text/html") || undefined,
+        },
+        { undoManager },
+      );
+      render();
+    });
+
+    textarea.addEventListener("cut", (event) => {
+      event.preventDefault();
+      applyInputIntent(editor, { type: "clipboard", action: "cut" }, { undoManager });
+      render();
+    });
+
     textarea.addEventListener("input", () => {
       if (composing) {
         return;
