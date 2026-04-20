@@ -7,6 +7,15 @@ import { createActiveMarkerRevealMarkdown, createEditableLayoutIndex } from "../
 
 installNodeCanvas();
 
+function measuredTextWidth(text: string, font: string): number {
+  const context = new OffscreenCanvas(1, 1).getContext("2d");
+  if (context === null) {
+    throw new Error("Missing measurement context");
+  }
+  context.font = font;
+  return context.measureText(text).width;
+}
+
 describe("EditableLayoutIndex", () => {
   it("maps rendered strong, code and link fragments back to raw source ranges", () => {
     const markdown = "Hello **bold** and `code` plus [docs](https://example.com).";
@@ -173,8 +182,71 @@ describe("EditableLayoutIndex", () => {
     const hiddenLinkUrl = index.sourceOffsetToCaretRect(markdown.indexOf("https://example.com"));
 
     expect(hiddenStrongOpening.rect.x).toBeCloseTo(bold!.rect.x, 0);
-    expect(hiddenCodeOpening.rect.x).toBeCloseTo(code!.rect.x, 0);
+    expect(hiddenCodeOpening.rect.x).toBeCloseTo(code!.rect.x + 6, 0);
     expect(hiddenLinkUrl.rect.x).toBeCloseTo(docs!.rect.x + docs!.rect.width, 0);
+  });
+
+  it("uses measured inline text widths for caret and hit-test placement", () => {
+    const markdown = "iiiiiiii WWWW done";
+    const state = createIncrementalParseState(markdown);
+    const inlineSources = createMarkdownInlineSourceMap(state);
+    const layout = createLayoutEngine({ fontTheme: "github" }).layout(markdown, 800);
+    const index = createEditableLayoutIndex({
+      markdown,
+      layout,
+      blockSpans: state.blockSpans,
+      inlineSources,
+    });
+
+    const fragment = index.fragments.find((candidate) => candidate.text.includes("WWWW"));
+    expect(fragment).toBeDefined();
+    const wOffset = markdown.indexOf("WWWW");
+    const localOffset = wOffset - fragment!.sourceRange.from;
+    const measuredPrefixWidth = measuredTextWidth(
+      fragment!.text.slice(0, localOffset),
+      fragment!.font,
+    );
+    const measuredFullWidth = measuredTextWidth(fragment!.text, fragment!.font);
+    const expectedX =
+      fragment!.rect.x + (measuredPrefixWidth / measuredFullWidth) * fragment!.rect.width;
+    const proportionalX =
+      fragment!.rect.x + (fragment!.rect.width * localOffset) / fragment!.text.length;
+
+    const caret = index.sourceOffsetToCaretRect(wOffset);
+    expect(caret.rect.x).toBeCloseTo(expectedX, 0);
+    expect(Math.abs(caret.rect.x - proportionalX)).toBeGreaterThan(8);
+
+    const nextCaret = index.sourceOffsetToCaretRect(wOffset + 1);
+    const hit = index.hitTest((caret.rect.x + nextCaret.rect.x) / 2, caret.rect.y + 1);
+    expect(hit.offset).toBe(wOffset);
+  });
+
+  it("keeps inline-code caret positions inside the code pill padding", () => {
+    const markdown = "Try `code` now";
+    const state = createIncrementalParseState(markdown);
+    const inlineSources = createMarkdownInlineSourceMap(state);
+    const layout = createLayoutEngine({ fontTheme: "github" }).layout(markdown, 800);
+    const index = createEditableLayoutIndex({
+      markdown,
+      layout,
+      blockSpans: state.blockSpans,
+      inlineSources,
+    });
+
+    const code = index.fragments.find((fragment) => fragment.text === "code");
+    expect(code).toBeDefined();
+
+    const start = index.sourceOffsetToCaretRect(markdown.indexOf("code"));
+    const end = index.sourceOffsetToCaretRect(markdown.indexOf("code") + "code".length);
+    expect(start.rect.x).toBeCloseTo(code!.rect.x + 6, 0);
+    expect(end.rect.x).toBeCloseTo(code!.rect.x + code!.rect.width - 6, 0);
+
+    const selectionRects = index.sourceRangeToSelectionRects({
+      from: markdown.indexOf("code"),
+      to: markdown.indexOf("code") + "code".length,
+    });
+    expect(selectionRects[0]?.x).toBeCloseTo(start.rect.x, 0);
+    expect(selectionRects[0]?.width).toBeCloseTo(end.rect.x - start.rect.x, 0);
   });
 
   it("reveals active strong, code and link markers with source-addressable hit-test", () => {
@@ -370,8 +442,16 @@ describe("EditableLayoutIndex", () => {
     expect(index.fragments).toHaveLength(1);
     expect(index.fragments[0]?.sourceRange).toEqual({ from: 0, to: 5 });
     const selectionRects = index.sourceRangeToSelectionRects({ from: 1, to: 4 });
+    const fragment = index.fragments[0]!;
+    const scale = fragment.rect.width / measuredTextWidth(fragment.text, fragment.font);
+    const expectedX = measuredTextWidth("H", fragment.font) * scale;
+    const expectedWidth = measuredTextWidth("ell", fragment.font) * scale;
 
-    expect(selectionRects).toEqual([{ x: 10, y: 0, width: 30, height: 20 }]);
+    expect(selectionRects).toHaveLength(1);
+    expect(selectionRects[0]?.x).toBeCloseTo(expectedX, 5);
+    expect(selectionRects[0]?.y).toBe(0);
+    expect(selectionRects[0]?.width).toBeCloseTo(expectedWidth, 5);
+    expect(selectionRects[0]?.height).toBe(20);
     expect(selectionRects.length).toBeGreaterThan(0);
     expect(selectionRects.every((rect) => rect.width > 0 && rect.height > 0)).toBe(true);
   });
