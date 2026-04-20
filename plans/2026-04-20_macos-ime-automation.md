@@ -102,10 +102,14 @@ Acceptance:
 - Added Swift/TIS input source switching fallback because `im-select` is not installed on the current machine.
 - Tried direct `System Events` automation on this machine; it hung until killed, consistent with missing Accessibility permission for the current runner.
 - Ran the opt-in Pinyin command with `PREMARK_RUN_MACOS_IME=1 PREMARK_MACOS_IME_INPUT_SOURCE_ID=com.apple.inputmethod.SCIM.ITABC`; it failed immediately in preflight because `System Events` is not authorized for the current runner. This confirms the suite now fails clearly instead of hanging.
+- After Accessibility permission was granted, real macOS Pinyin automation ran. The stable path is selected-range replacement with native composition; direct composition into a truly empty CodeMirror document still reproduces a CodeMirror/Chromium composition tile blocker and is tracked as an explicit fixme.
+- Changed the runner to send text one character at a time and to preserve CodeMirror selection by focusing instead of clicking before OS key dispatch. This matches real typing more closely and fixed the selected-replacement path.
+- Redo after IME commit uses a shortcut fallback matrix, matching the browser test behavior.
 - Validation:
   - `vp run test:ime:browser` passed with 3 passing tests and 1 explicit CDP preedit fixme.
-  - `vp run test:ime:macos` skipped cleanly without `PREMARK_RUN_MACOS_IME=1`; 5 opt-in macOS real IME tests are registered.
+  - `vp run test:ime:macos` skipped cleanly without `PREMARK_RUN_MACOS_IME=1`; 6 opt-in macOS real IME tests are registered.
   - `PREMARK_RUN_MACOS_IME=1 PREMARK_MACOS_IME_INPUT_SOURCE_ID=com.apple.inputmethod.SCIM.ITABC vp run test:ime:macos` failed at preflight due to missing Accessibility permission for `System Events`.
+  - After Accessibility permission: `PREMARK_RUN_MACOS_IME=1 vp run test:ime:macos` passed with 5 passing real IME tests and 1 explicit empty-document fixme.
   - `vp run test:browser` passed with 10 passing tests and 1 explicit CDP preedit fixme.
   - `vp check --fix` passed with the two unrelated existing wiki-canvas warnings.
   - `vp run build` passed with the existing large playground chunk warning.
