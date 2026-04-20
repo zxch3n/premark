@@ -1,6 +1,6 @@
 # Screenshot Review Log
 
-Current artifact source: `vp run test:browser`
+Current artifact sources: `vp run test:browser`, `vp run test:macos-ime`
 
 Current generated folder pattern:
 
@@ -8,6 +8,7 @@ Current generated folder pattern:
 - `test-results/native-editor-Premark-nati-*/native-editor-after-typing.png`
 - `test-results/native-editor-Premark-nati-*/native-editor-selection.png`
 - `test-results/native-editor-Premark-nati-*/native-editor-after-replace.png`
+- `test-results/macos-ime/pinyin-skipped-no-foreground.png`
 
 ## Review Entries
 
@@ -35,3 +36,15 @@ Current generated folder pattern:
 - Notes:
   - This verifies the Storybook DOM event path and virtual rendering path.
   - It does not verify macOS Pinyin candidate window placement, real event order, or candidate-window screenshots.
+
+### 2026-04-20 macOS IME Foreground Gap
+
+- Reviewer: Codex
+- Scenario: macOS real IME runner foreground check
+- Result: documented automation gap in the current Codex host
+- Recorded artifacts:
+  - `pinyin-skipped-no-foreground.png`: the editor is loaded and focused through Playwright before the real Pinyin path is skipped.
+  - `pinyin-skip.txt`: records that Chrome cannot become the foreground app and that targeted `CGEventPostToPid` bypasses input-method composition.
+- Notes:
+  - The runner still verifies real macOS key events reach the hidden textarea by posting US key codes to the browser process.
+  - Real Pinyin candidate-window screenshots remain pending until the browser can safely become the foreground app; `PREMARK_MACOS_IME_STRICT=1` makes that requirement fail hard.

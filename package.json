@@ -14,6 +14,7 @@
     "wiki-canvas": "jiti tools/wiki-canvas/src/cli.ts",
     "test": "vp test",
     "test:browser": "vp run storybook:build && NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost playwright test",
+    "test:macos-ime": "vp run storybook:build && NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost node tests/macos-ime/run-macos-ime.mjs",
     "typecheck": "vp exec tsc --noEmit -p tsconfig.json",
     "storybook": "vp exec storybook dev -p 6006",
     "storybook:build": "vp exec storybook build",
