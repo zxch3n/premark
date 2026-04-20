@@ -62,6 +62,18 @@ describe("normalizeInputTrace", () => {
     ).toEqual([{ type: "insert-text", text: "autocorrected" }]);
   });
 
+  it("normalizes browser history undo and redo input types", () => {
+    expect(
+      normalizeInputTrace([
+        { type: "beforeinput", inputType: "historyUndo", cancelable: true },
+        { type: "beforeinput", inputType: "historyRedo", cancelable: true },
+      ]),
+    ).toEqual([
+      { type: "history", action: "undo" },
+      { type: "history", action: "redo" },
+    ]);
+  });
+
   it("records keyboard selection granularity for Shift and Command arrows", () => {
     expect(
       normalizeInputTrace([

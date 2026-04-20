@@ -1,7 +1,11 @@
 import { installNodeCanvas } from "../../layout/src/node-canvas.ts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { applyInputIntent, createInMemoryEditorDocumentState } from "../src/index.ts";
+import {
+  applyInputIntent,
+  createInMemoryEditorDocumentState,
+  LocalUndoManager,
+} from "../src/index.ts";
 
 installNodeCanvas();
 
@@ -116,5 +120,54 @@ describe("applyInputIntent", () => {
       from: worldFrom + "世界".length,
       to: worldFrom + "世界".length,
     });
+  });
+
+  it("records text edits into the local undo manager and applies history intents", () => {
+    const editor = createInMemoryEditorDocumentState("Hello world", 600);
+    const undoManager = new LocalUndoManager();
+    const worldFrom = editor.markdown.indexOf("world");
+    editor.setSelection(worldFrom, worldFrom + "world".length);
+
+    applyInputIntent(
+      editor,
+      {
+        type: "insert-text",
+        text: "Premark",
+      },
+      { undoManager },
+    );
+
+    expect(editor.markdown).toBe("Hello Premark");
+    expect(undoManager.undoDepth).toBe(1);
+
+    expect(applyInputIntent(editor, { type: "history", action: "undo" }, { undoManager })).toEqual({
+      type: "history",
+      action: "undo",
+    });
+    expect(editor.markdown).toBe("Hello world");
+    expect(undoManager.redoDepth).toBe(1);
+
+    expect(applyInputIntent(editor, { type: "history", action: "redo" }, { undoManager })).toEqual({
+      type: "history",
+      action: "redo",
+    });
+    expect(editor.markdown).toBe("Hello Premark");
+  });
+
+  it("records composition commits into the local undo manager", () => {
+    const editor = createInMemoryEditorDocumentState("Hello world", 600);
+    const undoManager = new LocalUndoManager();
+    const worldFrom = editor.markdown.indexOf("world");
+    editor.setSelection(worldFrom, worldFrom + "world".length);
+
+    applyInputIntent(editor, { type: "composition-start" }, { undoManager });
+    applyInputIntent(editor, { type: "composition-commit", text: "世界" }, { undoManager });
+
+    expect(editor.markdown).toBe("Hello 世界");
+    expect(undoManager.undoDepth).toBe(1);
+
+    applyInputIntent(editor, { type: "history", action: "undo" }, { undoManager });
+
+    expect(editor.markdown).toBe("Hello world");
   });
 });

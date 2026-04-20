@@ -47,6 +47,7 @@ export type NormalizedInputIntent =
   | { readonly type: "insert-text"; readonly text: string }
   | { readonly type: "delete"; readonly direction: "backward" | "forward" }
   | { readonly type: "insert-paragraph" }
+  | { readonly type: "history"; readonly action: "undo" | "redo" }
   | { readonly type: "clipboard"; readonly action: "copy" | "cut" | "paste" }
   | { readonly type: "selection-change"; readonly anchor: number; readonly head: number }
   | {
@@ -145,6 +146,16 @@ export function normalizeInputTrace(events: readonly InputTraceEvent[]): Normali
 
         if (event.inputType === "insertParagraph") {
           pushPlainIntent(intents, { type: "insert-paragraph" });
+          break;
+        }
+
+        if (event.inputType === "historyUndo") {
+          pushPlainIntent(intents, { type: "history", action: "undo" });
+          break;
+        }
+
+        if (event.inputType === "historyRedo") {
+          pushPlainIntent(intents, { type: "history", action: "redo" });
           break;
         }
 

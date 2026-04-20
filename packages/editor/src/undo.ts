@@ -1,7 +1,13 @@
 import type { SourceRange } from "@pretext-md/parser";
 
 import { applyEditOperation } from "./edit-ops.ts";
-import type { EditOperation, StableRange, TextDocumentAdapter } from "./types.ts";
+import type {
+  AppliedEditOperation,
+  EditOperation,
+  StableRange,
+  TextChange,
+  TextDocumentAdapter,
+} from "./types.ts";
 
 interface UndoEntry {
   readonly target: StableRange;
@@ -24,17 +30,25 @@ export class LocalUndoManager {
 
   apply(adapter: TextDocumentAdapter, operation: EditOperation): boolean {
     const applied = applyEditOperation(adapter, operation);
-    const target = adapter.createRange(applied.insertedRange.from, applied.insertedRange.to, {
+    this.recordApplied(adapter, applied);
+    return true;
+  }
+
+  recordApplied(adapter: TextDocumentAdapter, applied: AppliedEditOperation): void {
+    this.recordChange(adapter, applied.change);
+  }
+
+  recordChange(adapter: TextDocumentAdapter, change: TextChange): void {
+    const target = adapter.createRange(change.from, change.from + change.insert.length, {
       kind: "undo-target",
       bias: "expand",
     });
     this.undoStack.push({
       target,
-      expectedText: applied.change.insert,
-      replacementText: applied.change.deleted,
+      expectedText: change.insert,
+      replacementText: change.deleted,
     });
     this.clearRedo(adapter);
-    return true;
   }
 
   undo(adapter: TextDocumentAdapter): boolean {
