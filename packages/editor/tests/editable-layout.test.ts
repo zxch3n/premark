@@ -294,6 +294,35 @@ describe("EditableLayoutIndex", () => {
     expect(rightHit.offset).toBe(emojiTo);
   });
 
+  it("keeps repeated emoji ZWJ caret positions on measured grapheme boundaries", () => {
+    const emoji = "👨‍👩‍👧‍👦";
+    const markdown = emoji.repeat(7);
+    const { index } = createTestIndex(markdown);
+    const fragment = index.fragments.find((candidate) => candidate.text === markdown);
+    expect(fragment).toBeDefined();
+
+    const boundaryXs = measureGraphemeBoundaryXs(fragment!.text, fragment!.font);
+    const measuredWidth = boundaryXs.at(-1)!;
+    const visibleWidth = fragment!.rect.width - fragment!.textInsetX * 2;
+    const scale = measuredWidth > 0 ? visibleWidth / measuredWidth : 1;
+    const carets = Array.from({ length: 8 }, (_, emojiIndex) => {
+      const offset = emojiIndex * emoji.length;
+      const caret = index.sourceOffsetToCaretRect(offset);
+      const expectedX = fragment!.rect.x + fragment!.textInsetX + boundaryXs[offset]! * scale;
+      expect(caret.rect.x, `emoji boundary ${emojiIndex}`).toBeCloseTo(expectedX, 0);
+      return caret;
+    });
+
+    for (let index = 1; index < carets.length; index += 1) {
+      expect(carets[index]!.rect.x).toBeGreaterThan(carets[index - 1]!.rect.x);
+    }
+
+    const fifthStart = carets[4]!.rect.x;
+    const fifthEnd = carets[5]!.rect.x;
+    const hit = index.hitTest((fifthStart + fifthEnd) / 2, carets[4]!.rect.y + 1);
+    expect([4 * emoji.length, 5 * emoji.length]).toContain(hit.offset);
+  });
+
   it("keeps inline-code caret positions inside the code pill padding", () => {
     const markdown = "Try `code` now";
     const state = createIncrementalParseState(markdown);
