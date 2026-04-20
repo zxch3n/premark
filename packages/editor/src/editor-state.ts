@@ -12,6 +12,7 @@ import {
   createEditableLayoutIndex,
   createIncrementalEditableLayoutIndex,
   type EditableLayoutIndex,
+  type EditableLayoutViewport,
 } from "./editable-layout.ts";
 import { applyEditOperation } from "./edit-ops.ts";
 import {
@@ -31,8 +32,25 @@ import type {
 export interface EditorDocumentStateOptions {
   readonly markdown: string;
   readonly containerWidth: number;
+  readonly scrollTop?: number;
+  readonly viewportHeight?: number | null;
+  readonly overscanY?: number;
   readonly layoutStyle?: StyleConfig;
   readonly adapter?: TextDocumentAdapter;
+}
+
+export interface EditorViewportState {
+  readonly containerWidth: number;
+  readonly scrollTop: number;
+  readonly height: number | null;
+  readonly overscanY: number;
+}
+
+export interface EditorDocumentSetViewportOptions {
+  readonly containerWidth?: number;
+  readonly scrollTop?: number;
+  readonly height?: number | null;
+  readonly overscanY?: number;
 }
 
 export class EditorDocumentState {
@@ -41,6 +59,12 @@ export class EditorDocumentState {
   private readonly layoutEngine;
 
   private containerWidth: number;
+
+  private scrollTop: number;
+
+  private viewportHeight: number | null;
+
+  private overscanY: number;
 
   private selectionRange: StableRange;
 
@@ -61,6 +85,9 @@ export class EditorDocumentState {
       options.adapter ??
       createInMemoryTextDocumentAdapter(options.markdown, { idPrefix: "editor" });
     this.containerWidth = options.containerWidth;
+    this.scrollTop = options.scrollTop ?? 0;
+    this.viewportHeight = options.viewportHeight ?? null;
+    this.overscanY = options.overscanY ?? 0;
     this.layoutEngine = createLayoutEngine({
       ...(options.layoutStyle ?? { fontTheme: "github" }),
       lineBreakMode: options.layoutStyle?.lineBreakMode ?? "source",
@@ -88,9 +115,23 @@ export class EditorDocumentState {
     return this.adapter.getVersion();
   }
 
-  get viewport(): { readonly containerWidth: number } {
+  get viewport(): EditorViewportState {
     return {
       containerWidth: this.containerWidth,
+      scrollTop: this.scrollTop,
+      height: this.viewportHeight,
+      overscanY: this.overscanY,
+    };
+  }
+
+  get editableViewport(): EditableLayoutViewport | undefined {
+    if (this.viewportHeight === null) {
+      return undefined;
+    }
+    return {
+      y: this.scrollTop,
+      height: this.viewportHeight,
+      overscanY: this.overscanY,
     };
   }
 
@@ -187,6 +228,20 @@ export class EditorDocumentState {
     this.editableIndex = this.createEditableIndex();
   }
 
+  setViewport(options: EditorDocumentSetViewportOptions): void {
+    const nextContainerWidth = options.containerWidth ?? this.containerWidth;
+    const widthChanged = nextContainerWidth !== this.containerWidth;
+    this.containerWidth = nextContainerWidth;
+    this.scrollTop = options.scrollTop ?? this.scrollTop;
+    this.viewportHeight = options.height === undefined ? this.viewportHeight : options.height;
+    this.overscanY = options.overscanY ?? this.overscanY;
+
+    if (widthChanged) {
+      this.layout = this.layoutEngine.resize(this.layout, this.containerWidth);
+    }
+    this.editableIndex = this.createEditableIndex();
+  }
+
   layoutMarkdownView(markdown: string): DocumentLayout {
     return this.layoutEngine.layout(markdown, this.containerWidth);
   }
@@ -212,6 +267,7 @@ export class EditorDocumentState {
       layout: this.layout,
       blockSpans: this.parseState.blockSpans,
       inlineSources: this.inlineSources,
+      viewport: this.editableViewport,
     };
     return previous === undefined
       ? createEditableLayoutIndex(input)

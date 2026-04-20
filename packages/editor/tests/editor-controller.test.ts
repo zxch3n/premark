@@ -9,6 +9,24 @@ import {
 
 installNodeCanvas();
 
+function buildLargeViewportFixture(targetLength = 110_000): string {
+  const section = [
+    "## Section",
+    "",
+    "User edit anchor paragraph with **bold**, `code`, [docs](https://example.com), and emoji 👨‍👩‍👧‍👦.",
+    "",
+    "AI stream target paragraph with enough text to append generated content away from the user.",
+    "",
+    "Remote patch target paragraph with enough text to keep block ranges stable.",
+    "",
+  ].join("\n");
+  let markdown = "# Large editor\n\n";
+  while (markdown.length < targetLength) {
+    markdown += section;
+  }
+  return markdown;
+}
+
 describe("PremarkEditorController", () => {
   it("exposes markdown, selection, version and render snapshot through the public API", () => {
     const controller = createInMemoryPremarkEditorController("Hello **world**", 600);
@@ -155,5 +173,188 @@ describe("PremarkEditorController", () => {
     });
     expect(controller.undo()).toBe(true);
     expect(controller.markdown()).toBe("- [ ] todo");
+  });
+
+  it("keeps render snapshots on a viewport editable index for large documents", () => {
+    const markdown = buildLargeViewportFixture();
+    const controller = createPremarkEditorController({
+      markdown,
+      containerWidth: 560,
+      viewportHeight: 260,
+      overscanY: 120,
+    });
+    const fullController = createInMemoryPremarkEditorController(markdown, 560);
+
+    const snapshot = controller.renderSnapshot({ activeControls: false });
+    const fullSnapshot = fullController.renderSnapshot({ activeControls: false });
+
+    expect(snapshot.viewport).toMatchObject({
+      containerWidth: 560,
+      scrollTop: 0,
+      height: 260,
+      overscanY: 120,
+    });
+    expect(snapshot.renderUpdate.editableIndex.viewport).toBeDefined();
+    expect(snapshot.editableIndex.fragments.length).toBeLessThan(
+      fullSnapshot.editableIndex.fragments.length / 20,
+    );
+
+    const boldOffset = markdown.indexOf("bold") + 1;
+    controller.setCaret(boldOffset);
+    const activeSnapshot = controller.renderSnapshot();
+    expect(activeSnapshot.renderMode).toBe("active-controls");
+    expect(activeSnapshot.renderUpdate.editableIndex.viewport).toBeDefined();
+    expect(activeSnapshot.editableIndex.fragments.length).toBeLessThan(
+      fullSnapshot.editableIndex.fragments.length / 20,
+    );
+  });
+
+  it("does not rebuild a full editable index for offscreen AI appends", () => {
+    const markdown = buildLargeViewportFixture();
+    const controller = createPremarkEditorController({
+      markdown,
+      containerWidth: 560,
+      viewportHeight: 260,
+      overscanY: 120,
+    });
+    const fullController = createInMemoryPremarkEditorController(markdown, 560);
+    const fullFragmentCount = fullController.renderSnapshot({
+      activeControls: false,
+    }).editableIndex.fragments.length;
+    const appendOffset =
+      markdown.lastIndexOf("AI stream target paragraph") + "AI stream target paragraph".length;
+
+    controller.applyEdit(
+      {
+        type: "insert",
+        offset: appendOffset,
+        text: " streamed token",
+      },
+      { recordUndo: false, selection: "preserve" },
+    );
+    const snapshot = controller.renderSnapshot({ activeControls: false });
+
+    expect(snapshot.renderUpdate.layout?.mode).toBe("incremental");
+    expect(snapshot.renderUpdate.editableIndex.mode).toBe("incremental");
+    expect(snapshot.renderUpdate.editableIndex.viewport).toBeDefined();
+    expect(snapshot.renderUpdate.editableIndex.rebuiltFragmentCount).toBeLessThan(
+      fullFragmentCount / 20,
+    );
+    expect(snapshot.editableIndex.fragments.length).toBeLessThan(fullFragmentCount / 20);
+    expect(snapshot.renderUpdate.dirtyRects).toEqual([]);
+  });
+
+  it("applies remote patches without recording local undo and rebases selection", () => {
+    const controller = createInMemoryPremarkEditorController("alpha beta gamma", 560);
+    controller.setSelection(6, 10);
+
+    const result = controller.applyRemotePatch({
+      actorId: "peer-1",
+      changes: [
+        { from: 0, to: 0, insert: "pre " },
+        { from: "alpha beta gamma".length, to: "alpha beta gamma".length, insert: " tail" },
+      ],
+    });
+
+    expect(controller.markdown()).toBe("pre alpha beta gamma tail");
+    expect(result.actorId).toBe("peer-1");
+    expect(result.beforeSelection).toMatchObject({ from: 6, to: 10 });
+    expect(result.afterSelection).toMatchObject({ from: 10, to: 14 });
+    expect(controller.markdown().slice(result.afterSelection.from, result.afterSelection.to)).toBe(
+      "beta",
+    );
+    expect(controller.undo()).toBe(false);
+  });
+
+  it("preserves or reports composition conflicts around remote patches", () => {
+    const controller = createInMemoryPremarkEditorController("alpha beta gamma", 560);
+    controller.setSelection(6, 10);
+    controller.updateComposition("测试");
+
+    const preserved = controller.applyRemotePatch({
+      actorId: "peer-1",
+      changes: [{ from: 0, to: 0, insert: "pre " }],
+    });
+
+    expect(preserved.composition).toBe("preserved");
+    expect(controller.renderSnapshot().compositionView).toMatchObject({
+      replacementRange: { from: 10, to: 14 },
+      hasConflict: false,
+    });
+    controller.commitComposition();
+    expect(controller.markdown()).toBe("pre alpha 测试 gamma");
+
+    const conflicting = createInMemoryPremarkEditorController("alpha beta gamma", 560);
+    conflicting.setSelection(6, 10);
+    conflicting.updateComposition("测试");
+    const conflict = conflicting.applyRemotePatch({
+      actorId: "peer-2",
+      changes: [{ from: 8, to: 8, insert: "REMOTE" }],
+    });
+
+    expect(conflict.composition).toBe("conflict");
+    expect(conflicting.renderSnapshot().compositionView?.hasConflict).toBe(true);
+    expect(() => conflicting.commitComposition()).toThrow(/replacement range changed/u);
+  });
+
+  it("keeps offscreen AI remote patches on the viewport incremental path", () => {
+    const markdown = buildLargeViewportFixture();
+    const controller = createPremarkEditorController({
+      markdown,
+      containerWidth: 560,
+      viewportHeight: 260,
+      overscanY: 120,
+    });
+    const userOffset = markdown.indexOf("User edit anchor") + "User".length;
+    controller.setCaret(userOffset);
+    const appendOffset =
+      markdown.lastIndexOf("AI stream target paragraph") + "AI stream target paragraph".length;
+
+    const result = controller.applyRemotePatch({
+      origin: "ai",
+      actorId: "assistant",
+      changes: [{ from: appendOffset, to: appendOffset, insert: " streamed token" }],
+    });
+
+    expect(result.origin).toBe("ai");
+    expect(result.afterSelection).toMatchObject({ from: userOffset, to: userOffset });
+    expect(result.snapshot.renderUpdate.editableIndex.mode).toBe("incremental");
+    expect(result.snapshot.renderUpdate.editableIndex.viewport).toBeDefined();
+    expect(result.snapshot.renderUpdate.dirtyRects).toEqual([]);
+  });
+
+  it("simulates AI same-block modification without moving local selection elsewhere", () => {
+    const markdown = [
+      "# Draft",
+      "",
+      "User edit anchor paragraph.",
+      "",
+      "AI stream target paragraph with draft wording.",
+    ].join("\n");
+    const controller = createPremarkEditorController({
+      markdown,
+      containerWidth: 560,
+      viewportHeight: 260,
+      overscanY: 120,
+    });
+    const userOffset = markdown.indexOf("User edit anchor") + "User".length;
+    const draftFrom = markdown.indexOf("draft wording");
+    controller.setCaret(userOffset);
+
+    const result = controller.applyRemotePatch({
+      origin: "ai",
+      actorId: "assistant",
+      changes: [
+        {
+          from: draftFrom,
+          to: draftFrom + "draft".length,
+          insert: "revised",
+        },
+      ],
+    });
+
+    expect(controller.markdown()).toContain("AI stream target paragraph with revised wording.");
+    expect(result.afterSelection).toMatchObject({ from: userOffset, to: userOffset });
+    expect(result.snapshot.renderUpdate.editableIndex.mode).toBe("incremental");
   });
 });

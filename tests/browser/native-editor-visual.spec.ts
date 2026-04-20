@@ -8,6 +8,8 @@ const canvasSelectionStoryUrl =
   "/iframe.html?id=editing-premark-canvas-selection--canvas-selection&viewMode=story";
 const canvasNativeStoryUrl =
   "/iframe.html?id=editing-premark-canvas-native-editor--interactive-canvas-native-editor&viewMode=story";
+const visualParityStoryUrl =
+  "/iframe.html?id=editing-premark-visual-parity--fixture-gallery&viewMode=story";
 
 async function editorMarkdown(page: Page) {
   return page.evaluate(
@@ -81,7 +83,59 @@ async function setCanvasSourceCaret(page: Page, offset: number) {
   );
 }
 
+async function readVisualParityReports(page: Page) {
+  return page.evaluate(
+    () =>
+      (
+        window as typeof window & {
+          __premarkVisualParity?: {
+            fixtures(): Array<{
+              id: string;
+              title: string;
+              blockCount: number;
+              lineCount: number;
+              totalHeight: number;
+              caretRect: { x: number; y: number; width: number; height: number };
+              selectionRects: Array<{ x: number; y: number; width: number; height: number }>;
+              expectedText: string[];
+              issues: string[];
+            }>;
+          };
+        }
+      ).__premarkVisualParity?.fixtures() ?? [],
+  );
+}
+
 test.describe("Premark native editor visual baselines", () => {
+  test("matches DOM and Canvas rendered Markdown parity fixtures", async ({ page }) => {
+    await page.goto(visualParityStoryUrl);
+
+    const root = page.locator(".pvp-root");
+    await expect(root).toHaveAttribute("data-fonts-ready", "1");
+    const reports = await readVisualParityReports(page);
+    expect(reports.length).toBeGreaterThanOrEqual(6);
+
+    for (const report of reports) {
+      expect(report.issues, report.id).toEqual([]);
+      expect(report.blockCount, report.id).toBeGreaterThan(0);
+      expect(report.lineCount, report.id).toBeGreaterThan(0);
+      expect(report.totalHeight, report.id).toBeGreaterThan(0);
+      expect(report.caretRect.height, report.id).toBeGreaterThan(0);
+      expect(report.selectionRects.length, report.id).toBeGreaterThan(0);
+
+      const row = page.locator(`[data-fixture="${report.id}"]`);
+      const domText = (await row.locator(".pvp-dom").textContent()) ?? "";
+      for (const expected of report.expectedText) {
+        expect(domText, `${report.id}: ${expected}`).toContain(expected);
+      }
+
+      await expect(row).toHaveScreenshot(`native-editor-visual-parity-${report.id}.png`, {
+        animations: "disabled",
+        maxDiffPixelRatio: 0.01,
+      });
+    }
+  });
+
   test("matches deterministic DOM editor crops", async ({ page }) => {
     await page.goto(screenshotStoryUrl);
 

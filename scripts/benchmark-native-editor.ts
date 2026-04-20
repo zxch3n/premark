@@ -12,6 +12,7 @@ import {
   createEditableLayoutIndex,
   createIncrementalEditableLayoutIndex,
   createInMemoryTextDocumentAdapter,
+  createPremarkEditorController,
 } from "../packages/editor/src/index.ts";
 import {
   createCanvasTileRenderCommands,
@@ -49,6 +50,17 @@ interface IncrementalScenarioResult {
   readonly reusedFragments: number;
   readonly lineCount: number;
   readonly fragmentCount: number;
+}
+
+interface ViewportEditorLoopResult {
+  readonly scenario: string;
+  readonly editAndSnapshotMs: number;
+  readonly editableIndexMode: string;
+  readonly dirtyRectCount: number;
+  readonly rebuiltFragments: number;
+  readonly viewportFragments: number;
+  readonly fullDocumentFragments: number;
+  readonly viewportFragmentRatio: number;
 }
 
 function parseArgs(argv: string[]): BenchmarkOptions {
@@ -296,6 +308,77 @@ function benchmarkIncremental(markdown: string, options: BenchmarkOptions) {
   ];
 }
 
+function benchmarkViewportEditorLoop(markdown: string, options: BenchmarkOptions) {
+  const viewportHeight = 420;
+  const overscanY = 420;
+  const fullFragmentCount = layoutAndIndex(markdown, options.width).fragmentCount;
+  const localNeedle = "User edit anchor";
+  const remoteNeedle = "Remote collaborator benchmark patch";
+  const streamNeedle = "AI stream target paragraph";
+
+  function runScenario(
+    scenario: string,
+    edit: (controller: ReturnType<typeof createPremarkEditorController>, text: string) => void,
+  ): ViewportEditorLoopResult {
+    const runs = Array.from({ length: options.iterations }, () => {
+      const controller = createPremarkEditorController({
+        markdown,
+        containerWidth: options.width,
+        viewportHeight,
+        overscanY,
+        layoutStyle: {
+          fontTheme: "github",
+          highlighter: createHighlighter(),
+          lineBreakMode: "source",
+        },
+      });
+      const anchor = markdown.indexOf(localNeedle);
+      controller.setCaret(anchor + Math.floor(localNeedle.length / 2));
+      const result = time(() => {
+        edit(controller, controller.markdown());
+        return controller.renderSnapshot({ activeControls: false });
+      });
+      const update = result.value.renderUpdate.editableIndex;
+      return {
+        scenario,
+        editAndSnapshotMs: Number(result.ms.toFixed(2)),
+        editableIndexMode: update.mode,
+        dirtyRectCount: result.value.renderUpdate.dirtyRects.length,
+        rebuiltFragments: update.rebuiltFragmentCount,
+        viewportFragments: result.value.editableIndex.fragments.length,
+        fullDocumentFragments: fullFragmentCount,
+        viewportFragmentRatio: Number(
+          (result.value.editableIndex.fragments.length / fullFragmentCount).toFixed(4),
+        ),
+      };
+    });
+    return medianByKey(runs);
+  }
+
+  return [
+    runScenario("viewport-local-edit", (controller, text) => {
+      const offset = text.indexOf(localNeedle) + localNeedle.length;
+      controller.applyEdit(
+        { type: "insert", offset, text: " typed" },
+        { recordUndo: false, selection: "preserve" },
+      );
+    }),
+    runScenario("viewport-remote-patch", (controller) => {
+      controller.applyEdit(
+        { type: "insert", offset: 0, text: `> ${remoteNeedle}\n\n` },
+        { recordUndo: false, selection: "preserve" },
+      );
+    }),
+    runScenario("viewport-ai-append-offscreen", (controller, text) => {
+      const offset = text.lastIndexOf(streamNeedle) + streamNeedle.length;
+      controller.applyEdit(
+        { type: "insert", offset, text: " streamed token".repeat(12) },
+        { recordUndo: false, selection: "preserve" },
+      );
+    }),
+  ];
+}
+
 function benchmarkRangeRebasing(markdown: string, options: BenchmarkOptions) {
   const adapter = createInMemoryTextDocumentAdapter(markdown, { idPrefix: "benchmark" });
   const anchor = markdown.indexOf("User edit anchor");
@@ -441,6 +524,7 @@ function main(): void {
     },
     largeDocument: benchmarkLargeDocument(markdown, options),
     incremental: benchmarkIncremental(markdown, options),
+    viewportEditorLoop: benchmarkViewportEditorLoop(markdown, options),
     rangeRebasing: benchmarkRangeRebasing(markdown, options),
     canvasDirtyTilesAndConcurrent: benchmarkWorkspaceAndDirtyTiles(options),
   };

@@ -1,13 +1,13 @@
 # Premark Native Editor Redesign Plan
 
-Status: Phase 13 complete; Phase 14 next; OS IME deferred
+Status: Phase 16 complete; Phase 17 OS IME gate deferred
 Owner: Codex / Zixuan
 Last Updated: 2026-04-21
 Compaction Rule: after memory reload or compaction, reread this whole file before continuing.
 
 ## Current Objective
 
-- Start Phase 14 viewport and incremental rendering.
+- Hold at Phase 17 until Zixuan explicitly allows real macOS HID/IME validation.
 - Keep the native Premark-rendered editor as the product path; CodeMirror overlay remains removed.
 - Do not run macOS HID/IME tests while the machine is actively used unless Zixuan explicitly asks.
 
@@ -28,6 +28,12 @@ Compaction Rule: after memory reload or compaction, reread this whole file befor
 - Word hit-test fallback must be point-aware, not just source-offset/affinity-aware. Caret placement can legitimately resolve to the end of a grapheme, while double-click word selection should still select the grapheme that visually received the hit.
 - Phase 9 benchmarks show the core layout engine is already incremental for local edit, remote edit, and AI append, but editable sidecar rebuild is still full-document and dominates large editor updates. The next architecture step is dirty-block/viewport editable indexing, not more CodeMirror fallback.
 - macOS IME automation can be prepared without posting OS events: dry-run now validates helpers/input sources and scenario selection for Pinyin, Japanese, and Korean. Real IME correctness still requires foreground HID.
+- Viewport editable indexes need layout blocks to carry their source block index. Without that, a viewport built from the middle of a large document can map repeated text to an earlier identical paragraph.
+- Render dirty regions should stay in layout coordinates and be clipped by viewport at the edge of Canvas drawing. A dirty offscreen AI append should produce no visible dirty rect.
+- Active-control and composition render views can use viewport-bounded full rebuilds as the conservative path; the normal source render path remains the incremental path for offscreen local/remote/AI edits.
+- Visual parity needs both screenshots and source-addressed geometry metadata. Screenshots catch paint regressions, while fixture reports classify caret/selection failures without relying on pixel diffs alone.
+- Remote patches should be an explicit controller API, not just `applyEdit(recordUndo:false)`. Batch patches are applied from higher source offsets to lower ones so CRDT/remote callers can provide current-document coordinates without earlier changes shifting later ranges.
+- Composition under remote patches has three product states: preserved when the replacement text is unchanged, conflict when a remote patch touches the replacement range, and optional cancel-on-conflict for integrations that prefer fail-closed composition.
 
 ## Architecture Direction
 
@@ -252,46 +258,46 @@ Acceptance:
 
 Goal: make benchmark wins visible in the real editor loop.
 
-- [ ] Add viewport-aware editable indexing with overscan.
-- [ ] Connect Canvas dirty tile cache to editor state, not just benchmarks.
-- [ ] Rebuild active-marker and composition views locally where safe, with conservative fallback.
-- [ ] Add dirty-region debug overlay and large-document Storybook fixtures.
-- [ ] Verify AI append and remote patch do not force full editable rebuild when editing elsewhere.
+- [x] Add viewport-aware editable indexing with overscan.
+- [x] Connect Canvas dirty tile cache to editor state, not just benchmarks.
+- [x] Rebuild active-marker and composition views locally where safe, with conservative fallback.
+- [x] Add dirty-region debug overlay and large-document Storybook fixtures.
+- [x] Verify AI append and remote patch do not force full editable rebuild when editing elsewhere.
 
 Acceptance:
 
-- [ ] 100KB typing stays on incremental path in tests/benchmarks.
-- [ ] AI streaming append plus user editing remains responsive in Storybook.
+- [x] 100KB typing stays on incremental path in tests/benchmarks.
+- [x] AI streaming append plus user editing remains responsive in Storybook.
 
 ## Phase 15: Visual Parity Harness
 
 Goal: keep DOM, Canvas, and rendered Markdown behavior aligned by fixture instead of manual guessing.
 
-- [ ] Build a fixture gallery for headings, lists, quotes, code, tables, links, images, emoji, CJK, and bidi.
-- [ ] Render each fixture through Premark DOM and Canvas paths with stable small screenshot crops.
-- [ ] Diff text/caret/selection geometry and classify expected vs unexpected differences.
-- [ ] Keep fixing until no new non-expected mismatch is found in the current fixture matrix.
+- [x] Build a fixture gallery for headings, lists, quotes, code, tables, links, images, emoji, CJK, and bidi.
+- [x] Render each fixture through Premark DOM and Canvas paths with stable small screenshot crops.
+- [x] Diff text/caret/selection geometry and classify expected vs unexpected differences.
+- [x] Keep fixing until no new non-expected mismatch is found in the current fixture matrix.
 
 Acceptance:
 
-- [ ] Fixture screenshots are deterministic and small enough to review.
-- [ ] New mismatches identify whether layout, paint, editable sidecar, or input state is responsible.
+- [x] Fixture screenshots are deterministic and small enough to review.
+- [x] New mismatches identify whether layout, paint, editable sidecar, or input state is responsible.
 
 ## Phase 16: Collaboration And AI Streaming
 
 Goal: prove the Premark-native path supports the intended collaboration and AI behavior.
 
-- [ ] Define a remote source patch API suitable for later CRDT integration.
-- [ ] Rebase local caret/selection through remote patches deterministically.
-- [ ] Define composition behavior when remote patches arrive.
-- [ ] Add AI append and same-block modification simulations.
-- [ ] Add a Storybook demo where AI streams while the user edits another block.
+- [x] Define a remote source patch API suitable for later CRDT integration.
+- [x] Rebase local caret/selection through remote patches deterministically.
+- [x] Define composition behavior when remote patches arrive.
+- [x] Add AI append and same-block modification simulations.
+- [x] Add a Storybook demo where AI streams while the user edits another block.
 
 Acceptance:
 
-- [ ] Remote patches do not interrupt local input.
-- [ ] AI append avoids full layout/editable rebuild when possible.
-- [ ] Selection rebasing is deterministic under tests.
+- [x] Remote patches do not interrupt local input.
+- [x] AI append avoids full layout/editable rebuild when possible.
+- [x] Selection rebasing is deterministic under tests.
 
 ## Phase 17: Real macOS IME Final Gate
 
@@ -354,3 +360,17 @@ Acceptance:
 - Storybook now exposes a read-only `pointForSourceRange` test helper for stable rendered-surface interaction tests without making DOM selection authoritative.
 - Current verification for Phase 13 completion: `vp check --fix` passes, `vp test` passes 200 tests, `vp run build` passes, and `vp run test:browser` passes 28 Playwright tests.
 - Next planned experiments: Phase 14 viewport-aware editable indexing, Canvas dirty tile integration in the live editor loop, large-document Storybook fixtures, and AI append plus user editing without full editable rebuilds.
+- Completed Phase 14 viewport and incremental rendering. Layout blocks now expose `sourceBlockIndex`, editable indexes accept viewport+overscan, controller snapshots expose viewport/update/dirty rect metadata, Canvas drawing supports scroll and dirty clipping, and the Canvas native Storybook has a 110KB large-document fixture with render-update debug output.
+- Added regression coverage for viewport source mapping with repeated text, large-controller viewport snapshots, offscreen AI append, and Storybook large-document scrolling/dirty paths. Active marker and composition views use viewport-bounded full rebuilds as the conservative fallback while normal source snapshots stay incremental.
+- 100KB benchmark on 2026-04-21 with `--chars 100000 --docs 20 --iterations 1 --json`: viewport local edit, remote patch, and offscreen AI append all reported `editableIndexMode: incremental`, about 56-57 viewport fragments vs 7196 full-document fragments, and `viewportFragmentRatio: 0.01`; offscreen AI append produced `dirtyRectCount: 0`.
+- Current verification for Phase 14 completion: `vp check --fix` passes, `vp test` passes 203 tests, `vp run build` passes, `vp run test:browser` passes 29 Playwright tests, and `vp run benchmark:native-editor -- --chars 100000 --docs 20 --iterations 1 --json` passes.
+- Next planned experiments: Phase 15 visual parity harness. Start with a compact fixture gallery, then add deterministic DOM/Canvas screenshot crops and classify mismatches by layout, paint, editable sidecar, or input state.
+- Completed Phase 15 visual parity harness. Added `Editing/Premark Visual Parity` with shared fixtures for headings/inline styles, lists/quotes, code/table, links/images, emoji/CJK, and bidi. Each fixture renders DOM and Canvas side by side and exposes caret/selection geometry plus issue classification through a Storybook debug API.
+- Added six small visual parity screenshot baselines and browser assertions that expected text appears in the DOM renderer, caret/selection geometry is non-empty, and no current fixture reports unexpected geometry issues. Reviewed all six screenshots manually; current differences are visible style/paint differences, not layout-addressing failures.
+- Current verification for Phase 15 completion: `vp check --fix` passes, `vp test` passes 203 tests, `vp run build` passes, `vp run test:browser` passes 30 Playwright tests, and targeted visual parity screenshot update plus non-update runs pass.
+- Next planned experiments: Phase 16 remote patch API, local selection rebasing through remote edits, composition behavior under remote patches, AI append simulations, and a Storybook demo where AI streams while the user edits another block.
+- Completed Phase 16 collaboration and AI streaming. Added `PremarkEditorController.applyRemotePatch` with `remote`/`ai` origins, actor metadata, multi-change patches, deterministic selection rebasing, local-undo isolation, composition preserved/conflict/canceled status, and render snapshot output.
+- Added controller tests for remote selection rebasing, composition preservation and conflict, offscreen AI append on the viewport incremental path, and AI same-block modification while local selection stays elsewhere.
+- Added a Canvas native streaming fixture. `fixture=streaming` demonstrates AI chunks appending through the remote patch API while the user edits a different block; `autostream=1` runs a short automatic stream for manual Storybook inspection. Browser coverage types locally, streams two AI chunks, and verifies local selection plus incremental rendering stay stable.
+- Current verification for Phase 16 completion: `vp check --fix` passes, `vp test` passes 207 tests, `vp run build` passes, and `vp run test:browser` passes 31 Playwright tests.
+- Remaining plan work is Phase 17 only. It is an OS-level macOS HID/IME validation gate and remains deferred by instruction while the machine is actively used.

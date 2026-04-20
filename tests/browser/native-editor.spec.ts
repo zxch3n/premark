@@ -9,6 +9,8 @@ const canvasSelectionStoryUrl =
 const canvasNativeStoryUrl =
   "/iframe.html?id=editing-premark-canvas-native-editor--interactive-canvas-native-editor&viewMode=story";
 const canvasNativeRepeatedEmojiStoryUrl = `${canvasNativeStoryUrl}&fixture=repeated-emoji`;
+const canvasNativeLargeStoryUrl = `${canvasNativeStoryUrl}&fixture=large`;
+const canvasNativeStreamingStoryUrl = `${canvasNativeStoryUrl}&fixture=streaming`;
 const canvasNativeContentPadding = 28;
 
 async function readSelection(page: Page) {
@@ -77,6 +79,44 @@ async function readCanvasGeometry(page: Page) {
     headCaret: { rect: { x: number; y: number; width: number; height: number } };
     caret?: { rect: { x: number; y: number; width: number; height: number } };
   };
+}
+
+async function readCanvasRenderDebug(page: Page) {
+  return JSON.parse((await page.locator("[data-canvas-debug-render]").textContent()) ?? "{}") as {
+    viewport: { scrollTop: number; height: number; overscanY: number };
+    editableIndex: {
+      mode: string;
+      viewport?: { fromBlock: number; toBlock: number };
+      fragmentCount: number;
+      rebuiltFragmentCount: number;
+    };
+    dirtyRects: Array<{ x: number; y: number; width: number; height: number }>;
+    clipRect?: { x: number; y: number; width: number; height: number };
+  };
+}
+
+async function insertCanvasTextAt(page: Page, offset: number, text: string) {
+  await page.evaluate(
+    ({ offset, text }) =>
+      (
+        window as typeof window & {
+          __premarkCanvasNativeEditor?: { insertAt(offset: number, text: string): void };
+        }
+      ).__premarkCanvasNativeEditor!.insertAt(offset, text),
+    { offset, text },
+  );
+}
+
+async function streamCanvasAIChunk(page: Page, chunk: string) {
+  await page.evaluate(
+    (chunkText) =>
+      (
+        window as typeof window & {
+          __premarkCanvasNativeEditor?: { streamAIChunk(chunk: string): void };
+        }
+      ).__premarkCanvasNativeEditor!.streamAIChunk(chunkText),
+    chunk,
+  );
 }
 
 function caretIsVisuallyAfter(
@@ -690,6 +730,70 @@ test.describe("Premark native editor story", () => {
       element.dispatchEvent(new CompositionEvent("compositionend", { data: "链" }));
     });
     await expect(source).toContainText("链docs");
+  });
+
+  test("keeps Canvas native large documents on viewport and dirty-render paths", async ({
+    page,
+  }) => {
+    await page.goto(canvasNativeLargeStoryUrl);
+
+    const canvas = page.locator("[data-canvas-native-editor]");
+    const root = page.locator(".pcne-root");
+    await expect(canvas).toBeVisible();
+    await expect(root).toHaveAttribute("data-fonts-ready", "1");
+
+    const initialRender = await readCanvasRenderDebug(page);
+    expect(initialRender.viewport.height).toBe(374);
+    expect(initialRender.editableIndex.viewport).toBeDefined();
+    expect(initialRender.editableIndex.fragmentCount).toBeLessThan(80);
+
+    const markdown = await canvasEditorMarkdown(page);
+    await setCanvasCaret(page, markdown.indexOf("User edit anchor") + "User".length);
+    const appendOffset =
+      markdown.lastIndexOf("AI stream target paragraph") + "AI stream target paragraph".length;
+    await insertCanvasTextAt(page, appendOffset, " streamed token");
+    const afterAppend = await readCanvasRenderDebug(page);
+    expect(afterAppend.editableIndex.mode).toBe("incremental");
+    expect(afterAppend.editableIndex.viewport).toBeDefined();
+    expect(afterAppend.editableIndex.rebuiltFragmentCount).toBeLessThan(80);
+    expect(afterAppend.dirtyRects).toEqual([]);
+
+    await canvas.hover();
+    await page.mouse.wheel(0, 900);
+    await expect
+      .poll(async () => (await readCanvasRenderDebug(page)).viewport.scrollTop)
+      .toBeGreaterThan(0);
+    const afterScroll = await readCanvasRenderDebug(page);
+    expect(afterScroll.viewport.scrollTop).toBeGreaterThan(0);
+    expect(afterScroll.editableIndex.viewport).toBeDefined();
+  });
+
+  test("streams AI chunks while Canvas native editing stays local", async ({ page }) => {
+    await page.goto(canvasNativeStreamingStoryUrl);
+
+    const canvas = page.locator("[data-canvas-native-editor]");
+    const bridge = page.locator("[data-canvas-input-bridge]");
+    const root = page.locator(".pcne-root");
+    await expect(canvas).toBeVisible();
+    await expect(root).toHaveAttribute("data-fonts-ready", "1");
+
+    const userOffset = await canvasSourceOffset(page, "User edit anchor", "end");
+    await setCanvasCaret(page, userOffset);
+    await bridge.focus();
+    await page.keyboard.type(" local");
+    const selectionBeforeStream = await readCanvasSelection(page);
+
+    await streamCanvasAIChunk(page, " token-1");
+    await streamCanvasAIChunk(page, " token-2");
+    const selectionAfterStream = await readCanvasSelection(page);
+    const markdown = await canvasEditorMarkdown(page);
+    const renderDebug = await readCanvasRenderDebug(page);
+
+    expect(markdown).toContain("User edit anchor local paragraph");
+    expect(markdown).toContain("AI stream target paragraph: token-1 token-2");
+    expect(selectionAfterStream).toEqual(selectionBeforeStream);
+    expect(renderDebug.editableIndex.mode).toBe("incremental");
+    expect(renderDebug.dirtyRects.length).toBeGreaterThan(0);
   });
 
   test("keeps Canvas native repeated emoji carets on stable grapheme boundaries", async ({
