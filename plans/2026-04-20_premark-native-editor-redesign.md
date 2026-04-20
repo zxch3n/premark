@@ -1,13 +1,13 @@
 # Premark Native Editor Redesign Plan
 
-Status: in progress
+Status: non-OS phases complete; OS IME deferred
 Owner: Codex / Zixuan
 Last Updated: 2026-04-20
 Compaction Rule: after memory reload or compaction, reread this whole file before continuing.
 
 ## Current Objective
 
-- Execute Phase 10: make editable sidecar incremental enough that native editing can actually use the fast layout path.
+- Keep non-OS native editor path verified and ready.
 - Keep the native Premark-rendered editor as the product path; CodeMirror overlay remains removed.
 - Do not run macOS HID/IME tests while the machine is actively used unless Zixuan explicitly asks.
 
@@ -168,7 +168,7 @@ Goal: validate that the native Premark route can deliver the intended speed adva
 Acceptance:
 
 - [x] Benchmarks report stable numbers in CI or local scripts.
-- [ ] Incremental edit paths avoid full-document work where the architecture allows it.
+- [x] Incremental edit paths avoid full-document work where the architecture allows it.
 - [x] Performance data is good enough to decide whether to keep optimizing this route.
 
 ## Phase 10: Incremental Editable Sidecar
@@ -221,3 +221,4 @@ Acceptance:
 - Editor refresh now computes one incremental parse result and passes it into layout via `applyParseResult`, so editor state, layout update metadata, and future sidecar reuse can share the same source change instead of parsing twice. Targeted editor/input/layout tests pass.
 - Incremental editable sidecar API added. `createIncrementalEditableLayoutIndex` rebuilds dirty layout blocks, reuses stable prefix fragments as-is, transforms stable suffix fragments through source-change and layout suffix metadata, then regenerates virtual source-newline fragments. Source-mapped active marker views still rebuild conservatively. Editor state now uses this path for normal hidden-marker editing. Benchmark result on 2026-04-21 with `--chars 100000 --docs 120 --iterations 3`: full editable index was about `1.67-1.73s`; incremental editable index was about `37-55ms` for local edit, remote edit, and AI append. `vp check --fix`, `vp test`, `vp run build`, and `vp run test:browser` pass; browser coverage stayed at 25 passing tests.
 - Phase 10 completed with a conservative boundary: hidden-marker editor state uses incremental editable fragments; active-marker/source-mapped and virtual composition render views rebuild full indexes for now because their rendered markdown/source-map identity differs from the hidden view. This keeps correctness while leaving source-map-aware sidecar reuse as a future optimization, not a blocker for the current native editor route.
+- Non-OS phases are complete. Remaining unchecked items are real macOS IME/candidate-window validation and Japanese/Korean OS scenarios, intentionally deferred until Zixuan allows OS-level input automation again. Cleaned the two unrelated persistent check warnings in wiki-canvas files so routine validation should be warning-free.
