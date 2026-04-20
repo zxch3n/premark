@@ -118,6 +118,35 @@ describe("Markdown control reveal", () => {
     }
   });
 
+  it("emits explicit editable runs for revealed control characters", () => {
+    const strong = reveal("**abc**", 1);
+    const strongControls = strong.sourceMap.runs.filter(
+      (run) => run.kind === "control" && run.controlType === "strong",
+    );
+    expect(strongControls.map((run) => run.sourceOffsets)).toEqual([
+      [0, 1],
+      [1, 2],
+      [5, 6],
+      [6, 7],
+    ]);
+
+    const linkMarkdown = "[hello](https://example.com)";
+    const link = reveal(linkMarkdown, linkMarkdown.indexOf("https") + 1);
+    const suffixStart = linkMarkdown.indexOf("]");
+    const suffixControls = link.sourceMap.runs.filter(
+      (run) =>
+        run.kind === "control" &&
+        run.controlType === "link" &&
+        run.sourceOffsets[0]! >= suffixStart,
+    );
+    expect(suffixControls.map((run) => run.sourceOffsets).slice(0, 4)).toEqual([
+      [suffixStart, suffixStart + 1],
+      [suffixStart + 1, suffixStart + 2],
+      [suffixStart + 2, suffixStart + 3],
+      [suffixStart + 3, suffixStart + 4],
+    ]);
+  });
+
   it("hides inline controls when the selection contains the full styled source range", () => {
     const markdown = "abc **123** 456";
     const revealed = reveal(markdown, markdown.indexOf("abc"), markdown.indexOf("456") + 3);
