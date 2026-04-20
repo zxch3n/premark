@@ -521,6 +521,38 @@ test.describe("Premark native editor story", () => {
     expect(domSelection.renderedSurfaceStable).toBe(true);
   });
 
+  test("exposes the hidden textarea as the focused input bridge", async ({ page }) => {
+    await page.goto(storyUrl);
+
+    const surface = page.locator("[data-editor-surface]");
+    const bridge = page.getByRole("textbox", { name: "Native editor input bridge" });
+    await expect(surface).toContainText("Native rendered Markdown");
+    await expect(bridge).toHaveAttribute("aria-label", "Native editor input bridge");
+
+    await surface.click({ position: { x: 118, y: 86 } });
+    await expect(bridge).toBeFocused();
+
+    const bridgeSemantics = await bridge.evaluate((element) => {
+      const textarea = element as HTMLTextAreaElement;
+      const style = window.getComputedStyle(textarea);
+      return {
+        tagName: textarea.tagName,
+        multiline: textarea instanceof HTMLTextAreaElement,
+        opacity: style.opacity,
+        ariaHidden: textarea.getAttribute("aria-hidden"),
+        tabIndex: textarea.tabIndex,
+        valueLength: textarea.value.length,
+      };
+    });
+
+    expect(bridgeSemantics.tagName).toBe("TEXTAREA");
+    expect(bridgeSemantics.multiline).toBe(true);
+    expect(bridgeSemantics.opacity).not.toBe("0");
+    expect(bridgeSemantics.ariaHidden).toBeNull();
+    expect(bridgeSemantics.tabIndex).toBe(0);
+    expect(bridgeSemantics.valueLength).toBeGreaterThanOrEqual(0);
+  });
+
   test("supports desktop keyboard selection intents in the browser story", async ({ page }) => {
     await page.goto(storyUrl);
 
