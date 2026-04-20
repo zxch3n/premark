@@ -113,7 +113,13 @@ describe("InputEventTraceRecorder", () => {
     expect(recorder.snapshot()).toHaveLength(2);
     expect(recorder.normalize()).toEqual([
       { type: "selection-change", anchor: 1, head: 3 },
-      { type: "clipboard", action: "paste" },
+      {
+        type: "clipboard",
+        action: "paste",
+        plainText: "hello",
+        html: undefined,
+        markdown: undefined,
+      },
     ]);
 
     recorder.clear();

@@ -48,7 +48,14 @@ export type NormalizedInputIntent =
   | { readonly type: "delete"; readonly direction: "backward" | "forward" }
   | { readonly type: "insert-paragraph" }
   | { readonly type: "history"; readonly action: "undo" | "redo" }
-  | { readonly type: "clipboard"; readonly action: "copy" | "cut" | "paste" }
+  | { readonly type: "clipboard"; readonly action: "copy" | "cut" }
+  | {
+      readonly type: "clipboard";
+      readonly action: "paste";
+      readonly plainText?: string;
+      readonly html?: string;
+      readonly markdown?: string;
+    }
   | { readonly type: "selection-change"; readonly anchor: number; readonly head: number }
   | {
       readonly type: "keyboard-selection";
@@ -175,10 +182,18 @@ export function normalizeInputTrace(events: readonly InputTraceEvent[]): Normali
           head: event.head,
         });
         break;
-      case "copy":
       case "cut":
-      case "paste":
+      case "copy":
         intents.push({ type: "clipboard", action: event.type });
+        break;
+      case "paste":
+        intents.push({
+          type: "clipboard",
+          action: "paste",
+          plainText: event.plainText,
+          html: event.html,
+          markdown: event.markdown,
+        });
         break;
       case "keydown": {
         const selectionIntent = keyboardSelectionIntent(event);

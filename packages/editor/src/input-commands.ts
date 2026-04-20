@@ -73,7 +73,7 @@ export function applyInputIntent(
       editor.cancelComposition();
       return { type: "composition-cancel" };
     case "clipboard":
-      return { type: "ignored" };
+      return applyClipboardIntent(editor, intent, options);
   }
 }
 
@@ -136,6 +136,57 @@ function applyDeleteIntent(
     type: "edit",
     applied,
   };
+}
+
+function applyClipboardIntent(
+  editor: EditorDocumentState,
+  intent: Extract<NormalizedInputIntent, { type: "clipboard" }>,
+  options: ApplyInputIntentOptions,
+): AppliedInputIntent {
+  if (intent.action === "paste") {
+    const text = clipboardText(intent);
+    if (text.length === 0) {
+      return { type: "ignored" };
+    }
+    return replaceSelection(editor, text, options);
+  }
+
+  if (
+    intent.action === "cut" &&
+    editor.selectionSourceRange.from !== editor.selectionSourceRange.to
+  ) {
+    return replaceSelection(editor, "", options);
+  }
+
+  return { type: "ignored" };
+}
+
+function clipboardText(
+  intent: Extract<NormalizedInputIntent, { type: "clipboard"; action: "paste" }>,
+): string {
+  if (intent.markdown !== undefined) {
+    return intent.markdown;
+  }
+  if (intent.plainText !== undefined) {
+    return intent.plainText;
+  }
+  if (intent.html !== undefined) {
+    return htmlToPlainText(intent.html);
+  }
+  return "";
+}
+
+function htmlToPlainText(html: string): string {
+  return html
+    .replaceAll(/<br\s*\/?>/giu, "\n")
+    .replaceAll(/<\/p\s*>/giu, "\n\n")
+    .replaceAll(/<[^>]+>/gu, "")
+    .replaceAll("&nbsp;", " ")
+    .replaceAll("&amp;", "&")
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replace(/\n{3,}/gu, "\n\n")
+    .trim();
 }
 
 function deleteRange(text: string, offset: number, direction: "backward" | "forward"): SourceRange {
