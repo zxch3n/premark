@@ -197,6 +197,26 @@ test.describe("Premark native editor story", () => {
     await expect(source).not.toContainText("**Pasted**");
   });
 
+  test("keeps Premark source authoritative after rendered DOM mutation", async ({ page }) => {
+    await page.goto(storyUrl);
+
+    const surface = page.locator("[data-editor-surface]");
+    const source = page.locator("[data-debug-source]");
+    await expect(surface).toContainText("Native rendered Markdown");
+
+    await surface.click({ position: { x: 118, y: 86 } });
+    await surface.evaluate((element) => {
+      element.textContent = "MUTATED BY EXTENSION";
+    });
+
+    await page.keyboard.type("source ");
+
+    await expect(source).toContainText("source");
+    await expect(source).not.toContainText("MUTATED BY EXTENSION");
+    await expect(surface).toContainText("Native rendered Markdown");
+    await expect(surface).not.toContainText("MUTATED BY EXTENSION");
+  });
+
   test("keeps hidden textarea focused and anchored after scroll, blur and resize", async ({
     page,
   }) => {

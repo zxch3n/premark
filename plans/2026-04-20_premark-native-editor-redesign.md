@@ -247,3 +247,4 @@ Acceptance:
 - Reconciled plan state with the implemented DOM prototype: Premark paints caret/selection overlays without CodeMirror, browser tests cover rendered click, cross-block drag, typing, paste/cut, and deterministic screenshot crops.
 - Added composition cancel coverage: virtual preedit updates leave source and undo history unchanged, cancel clears the composition view, and the original selected source range is preserved.
 - Added select-all as an explicit normalized input intent and expanded keyboard selection coverage for Home/End, PageUp/PageDown, word, line boundary, document boundary, and anchor-preserving extension. Browser coverage now includes Control+A through the Storybook input bridge.
+- Added a browser mutation-injection test for the DOM debug renderer. If rendered Markdown DOM is changed externally, the next Premark input render restores the surface from editor source and the injected text never enters Markdown.
