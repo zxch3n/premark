@@ -3,6 +3,16 @@ import { test, expect } from "@playwright/test";
 const storyUrl =
   "/iframe.html?id=editing-premark-native-editor--interactive-native-prototype&viewMode=story";
 
+async function readSelection(page: import("@playwright/test").Page) {
+  return JSON.parse((await page.locator("[data-debug-selection]").textContent()) ?? "{}") as {
+    anchorOffset: number;
+    headOffset: number;
+    isCollapsed: boolean;
+    direction: string;
+    range: { from: number; to: number };
+  };
+}
+
 test.describe("Premark native editor story", () => {
   test("supports rendered-surface click, typing, drag selection, replacement and screenshots", async ({
     page,
@@ -41,7 +51,7 @@ test.describe("Premark native editor story", () => {
 
   test("commits synthetic composition events through the hidden textarea bridge", async ({
     page,
-  }) => {
+  }, testInfo) => {
     await page.goto(storyUrl);
 
     const surface = page.locator("[data-editor-surface]");
@@ -56,11 +66,94 @@ test.describe("Premark native editor story", () => {
     });
     await expect(surface).toContainText("shi");
     await expect(source).not.toContainText("shi");
+    await page
+      .locator(".pne-editor-wrap")
+      .screenshot({ path: testInfo.outputPath("native-editor-composition-preedit.png") });
 
     await bridge.evaluate((element) => {
       element.dispatchEvent(new CompositionEvent("compositionend", { data: "世界" }));
     });
 
     await expect(source).toContainText("世界");
+  });
+
+  test("supports desktop keyboard selection intents in the browser story", async ({ page }) => {
+    await page.goto(storyUrl);
+
+    const surface = page.locator("[data-editor-surface]");
+    await expect(surface).toContainText("Native rendered Markdown");
+
+    await surface.click({ position: { x: 118, y: 86 } });
+    const initial = await readSelection(page);
+    expect(initial.isCollapsed).toBe(true);
+
+    await page.keyboard.down("Shift");
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.up("Shift");
+
+    const extended = await readSelection(page);
+    expect(extended.isCollapsed).toBe(false);
+    expect(extended.anchorOffset).toBe(initial.headOffset);
+    expect(extended.headOffset).toBeGreaterThan(initial.headOffset);
+
+    await page.keyboard.down("Meta");
+    await page.keyboard.down("Shift");
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.up("Shift");
+    await page.keyboard.up("Meta");
+
+    const documentSelection = await readSelection(page);
+    expect(documentSelection.isCollapsed).toBe(false);
+    expect(documentSelection.headOffset).toBeGreaterThan(extended.headOffset);
+  });
+
+  test("supports browser paste and cut events through clipboard intents", async ({ page }) => {
+    await page.goto(storyUrl);
+
+    const surface = page.locator("[data-editor-surface]");
+    const bridge = page.locator("[data-input-bridge]");
+    const source = page.locator("[data-debug-source]");
+    await expect(surface).toContainText("Native rendered Markdown");
+
+    await surface.click({ position: { x: 118, y: 86 } });
+    await bridge.evaluate((element) => {
+      const data = new DataTransfer();
+      data.setData("text/markdown", "**Pasted**");
+      data.setData("text/plain", "Pasted");
+      element.dispatchEvent(
+        new ClipboardEvent("paste", {
+          bubbles: true,
+          cancelable: true,
+          clipboardData: data,
+        }),
+      );
+    });
+
+    await expect(source).toContainText("**Pasted**");
+
+    await page.keyboard.down("Shift");
+    await page.keyboard.press("ArrowLeft");
+    await page.keyboard.press("ArrowLeft");
+    await page.keyboard.press("ArrowLeft");
+    await page.keyboard.press("ArrowLeft");
+    await page.keyboard.press("ArrowLeft");
+    await page.keyboard.press("ArrowLeft");
+    await page.keyboard.press("ArrowLeft");
+    await page.keyboard.press("ArrowLeft");
+    await page.keyboard.press("ArrowLeft");
+    await page.keyboard.press("ArrowLeft");
+    await page.keyboard.up("Shift");
+
+    await bridge.evaluate((element) => {
+      element.dispatchEvent(
+        new ClipboardEvent("cut", {
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+
+    await expect(source).not.toContainText("**Pasted**");
   });
 });
