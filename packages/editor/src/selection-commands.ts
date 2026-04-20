@@ -1,6 +1,7 @@
 import type { EditorDocumentState } from "./editor-state.ts";
 import { createGraphemeSegments, snapOffsetToGraphemeBoundary } from "./grapheme.ts";
 import type { NormalizedInputIntent } from "./input-trace.ts";
+import { createWordSegments } from "./text-segments.ts";
 
 export interface PointerSelectionSession {
   readonly anchorOffset: number;
@@ -64,8 +65,14 @@ function keyboardTargetOffset(
   switch (intent.by) {
     case "character":
       return moveByCharacter(editor.markdown, headOffset, intent.key);
+    case "word":
+      return moveByWord(editor.markdown, headOffset, intent.key);
     case "line":
       return moveByLine(editor, headOffset, intent.key);
+    case "line-boundary":
+      return moveToLineBoundary(editor, headOffset, intent.key);
+    case "page":
+      return moveByPage(editor, headOffset, intent.key);
     case "document-boundary":
       return moveToDocumentBoundary(editor.markdown, intent.key);
   }
@@ -81,6 +88,34 @@ function moveByCharacter(text: string, offset: number, key: string): number | nu
   return null;
 }
 
+function moveByWord(text: string, offset: number, key: string): number | null {
+  const bounded = Math.min(Math.max(offset, 0), text.length);
+  const segments = createWordSegments(text).filter((segment) => segment.isWordLike);
+  if (key === "ArrowLeft") {
+    for (const segment of [...segments].reverse()) {
+      if (segment.from < bounded && bounded <= segment.to) {
+        return segment.from;
+      }
+      if (segment.to < bounded) {
+        return segment.from;
+      }
+    }
+    return 0;
+  }
+  if (key === "ArrowRight") {
+    for (const segment of segments) {
+      if (segment.from <= bounded && bounded < segment.to) {
+        return segment.to;
+      }
+      if (segment.from > bounded) {
+        return segment.to;
+      }
+    }
+    return text.length;
+  }
+  return null;
+}
+
 function moveByLine(editor: EditorDocumentState, offset: number, key: string): number | null {
   if (key !== "ArrowUp" && key !== "ArrowDown") {
     return null;
@@ -90,6 +125,35 @@ function moveByLine(editor: EditorDocumentState, offset: number, key: string): n
   const direction = key === "ArrowUp" ? -1 : 1;
   const lineHeight = Math.max(caret.rect.height, 1);
   const targetY = caret.rect.y + direction * lineHeight + lineHeight / 2;
+  const hit = editor.editableIndex.hitTest(caret.rect.x, targetY);
+  return hit.offset;
+}
+
+function moveToLineBoundary(
+  editor: EditorDocumentState,
+  offset: number,
+  key: string,
+): number | null {
+  if (key !== "ArrowLeft" && key !== "ArrowRight" && key !== "Home" && key !== "End") {
+    return null;
+  }
+
+  const lineRange = editor.editableIndex.sourceLineRangeAtOffset(
+    offset,
+    key === "ArrowLeft" || key === "Home" ? "before" : "after",
+  );
+  return key === "ArrowLeft" || key === "Home" ? lineRange.from : lineRange.to;
+}
+
+function moveByPage(editor: EditorDocumentState, offset: number, key: string): number | null {
+  if (key !== "PageUp" && key !== "PageDown") {
+    return null;
+  }
+
+  const caret = editor.editableIndex.sourceOffsetToCaretRect(offset);
+  const lineHeight = Math.max(caret.rect.height, 1);
+  const direction = key === "PageUp" ? -1 : 1;
+  const targetY = caret.rect.y + direction * lineHeight * 8 + lineHeight / 2;
   const hit = editor.editableIndex.hitTest(caret.rect.x, targetY);
   return hit.offset;
 }

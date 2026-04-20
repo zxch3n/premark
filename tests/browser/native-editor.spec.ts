@@ -121,6 +121,25 @@ test.describe("Premark native editor story", () => {
     const documentSelection = await readSelection(page);
     expect(documentSelection.isCollapsed).toBe(false);
     expect(documentSelection.headOffset).toBeGreaterThan(extended.headOffset);
+
+    await surface.click({ position: { x: 118, y: 86 } });
+    const wordStart = await readSelection(page);
+    await page.keyboard.down("Alt");
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.up("Alt");
+
+    const wordMoved = await readSelection(page);
+    expect(wordMoved.isCollapsed).toBe(true);
+    expect(wordMoved.headOffset).toBeGreaterThan(wordStart.headOffset + 1);
+
+    await page.keyboard.down("Shift");
+    await page.keyboard.press("End");
+    await page.keyboard.up("Shift");
+
+    const lineBoundarySelection = await readSelection(page);
+    expect(lineBoundarySelection.isCollapsed).toBe(false);
+    expect(lineBoundarySelection.anchorOffset).toBe(wordMoved.headOffset);
+    expect(lineBoundarySelection.headOffset).toBeGreaterThan(wordMoved.headOffset);
   });
 
   test("supports browser paste and cut events through clipboard intents", async ({ page }) => {

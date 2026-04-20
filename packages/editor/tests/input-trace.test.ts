@@ -78,8 +78,12 @@ describe("normalizeInputTrace", () => {
     expect(
       normalizeInputTrace([
         { type: "keydown", key: "ArrowRight", shiftKey: true },
+        { type: "keydown", key: "ArrowRight", altKey: true },
         { type: "keydown", key: "ArrowDown", shiftKey: true },
+        { type: "keydown", key: "ArrowLeft", shiftKey: true, metaKey: true },
         { type: "keydown", key: "ArrowUp", shiftKey: true, metaKey: true },
+        { type: "keydown", key: "End", shiftKey: true },
+        { type: "keydown", key: "PageDown", shiftKey: true },
       ]),
     ).toEqual([
       {
@@ -90,14 +94,38 @@ describe("normalizeInputTrace", () => {
       },
       {
         type: "keyboard-selection",
+        key: "ArrowRight",
+        by: "word",
+        extend: false,
+      },
+      {
+        type: "keyboard-selection",
         key: "ArrowDown",
         by: "line",
         extend: true,
       },
       {
         type: "keyboard-selection",
+        key: "ArrowLeft",
+        by: "line-boundary",
+        extend: true,
+      },
+      {
+        type: "keyboard-selection",
         key: "ArrowUp",
         by: "document-boundary",
+        extend: true,
+      },
+      {
+        type: "keyboard-selection",
+        key: "End",
+        by: "line-boundary",
+        extend: true,
+      },
+      {
+        type: "keyboard-selection",
+        key: "PageDown",
+        by: "page",
         extend: true,
       },
     ]);

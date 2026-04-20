@@ -58,6 +58,60 @@ describe("EditableLayoutIndex", () => {
     expect(hit.offset).toBeLessThanOrEqual(markdown.indexOf("bold") + "bold".length);
   });
 
+  it("resolves character, word, line and block ranges from source offsets and hit-test points", () => {
+    const markdown = [
+      "# Heading",
+      "",
+      "Paragraph alpha beta gamma delta epsilon wraps for line ranges.",
+      "",
+      "- List item text",
+      "",
+      "> Quote line",
+      "",
+      "```ts",
+      "const x = 1;",
+      "```",
+    ].join("\n");
+    const state = createIncrementalParseState(markdown);
+    const inlineSources = createMarkdownInlineSourceMap(state);
+    const layout = createLayoutEngine({ fontTheme: "github" }).layout(markdown, 220);
+    const index = createEditableLayoutIndex({
+      markdown,
+      layout,
+      blockSpans: state.blockSpans,
+      inlineSources,
+    });
+
+    const betaOffset = markdown.indexOf("beta") + 1;
+    const betaCaret = index.sourceOffsetToCaretRect(betaOffset);
+    const betaWord = index.hitTestSourceRange(
+      betaCaret.rect.x + 1,
+      betaCaret.rect.y + betaCaret.rect.height / 2,
+      "word",
+    );
+    expect(markdown.slice(betaWord.range.from, betaWord.range.to)).toBe("beta");
+    expect(index.sourceRangeAtOffset(betaOffset, "character")).toEqual({
+      from: betaOffset,
+      to: betaOffset,
+    });
+
+    const betaLine = index.sourceRangeAtOffset(betaOffset, "line");
+    expect(betaLine.from).toBeLessThanOrEqual(betaOffset);
+    expect(betaLine.to).toBeGreaterThan(betaOffset);
+    expect(markdown.slice(betaLine.from, betaLine.to)).toContain("beta");
+    expect(markdown.slice(betaLine.from, betaLine.to)).not.toContain("List item");
+
+    const listOffset = markdown.indexOf("List item");
+    const listBlock = index.sourceRangeAtOffset(listOffset, "block");
+    expect(markdown.slice(listBlock.from, listBlock.to)).toContain("- List item text");
+    expect(markdown.slice(listBlock.from, listBlock.to)).not.toContain("> Quote line");
+
+    const codeOffset = markdown.indexOf("const x");
+    const codeBlock = index.sourceRangeAtOffset(codeOffset, "block");
+    expect(markdown.slice(codeBlock.from, codeBlock.to)).toContain("const x = 1;");
+    expect(markdown.slice(codeBlock.from, codeBlock.to)).toContain("```");
+  });
+
   it("returns caret and multi-line selection rects from source ranges", () => {
     const markdown = "First line with **bold** text that should wrap before `code` appears.";
     const state = createIncrementalParseState(markdown);
