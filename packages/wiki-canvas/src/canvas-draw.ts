@@ -66,6 +66,8 @@ export interface TileDrawOptions {
   caretColor?: string;
   compositionRects?: readonly CanvasOverlayRect[];
   compositionColor?: string;
+  clipRect?: CanvasOverlayRect;
+  scrollY?: number;
 }
 
 export interface CanvasOverlayRect {
@@ -94,7 +96,24 @@ export function drawTile(
   const titleBarHeight = options.title ? (options.titleBarHeight ?? DEFAULTS.titleBarHeight) : 0;
 
   ctx.save();
-  ctx.clearRect(0, 0, width, height);
+  if (options.clipRect !== undefined) {
+    ctx.beginPath();
+    ctx.rect(
+      options.clipRect.x,
+      options.clipRect.y,
+      options.clipRect.width,
+      options.clipRect.height,
+    );
+    ctx.clip();
+    ctx.clearRect(
+      options.clipRect.x,
+      options.clipRect.y,
+      options.clipRect.width,
+      options.clipRect.height,
+    );
+  } else {
+    ctx.clearRect(0, 0, width, height);
+  }
 
   const bg = ctx.createLinearGradient(0, 0, width, height);
   bg.addColorStop(0, palette.background);
@@ -142,7 +161,7 @@ export function drawTile(
   ctx.clip();
 
   const originX = contentPadding;
-  const originY = bodyTop + contentPadding;
+  const originY = bodyTop + contentPadding - (options.scrollY ?? 0);
 
   for (const block of layout.blocks) {
     const blockLines = layout.lines.slice(

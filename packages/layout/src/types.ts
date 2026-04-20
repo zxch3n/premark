@@ -112,6 +112,7 @@ export interface LayoutUpdateMetadata {
 
 export interface BlockLayout {
   index: number;
+  sourceBlockIndex: number;
   type: BlockType;
   firstLineIndex: number;
   lineCount: number;

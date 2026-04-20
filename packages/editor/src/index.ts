@@ -20,6 +20,7 @@ export {
 } from "./editor-controller.ts";
 export type {
   CreatePremarkEditorControllerOptions,
+  PremarkEditorApplyRemotePatchOptions,
   PremarkEditorApplyEditOptions,
   PremarkEditorChangeEvent,
   PremarkEditorCompositionChangeEvent,
@@ -27,13 +28,18 @@ export type {
   PremarkEditorControllerOptions,
   PremarkEditorEvent,
   PremarkEditorEventMap,
+  PremarkEditorRemotePatchChange,
+  PremarkEditorRemotePatchResult,
   PremarkEditorRenderSnapshot,
   PremarkEditorRenderSnapshotOptions,
   PremarkEditorSelectionChangeEvent,
   PremarkEditorSelectionSnapshot,
   PremarkEditorSetMarkdownOptions,
+  PremarkEditorSetViewportOptions,
   PremarkEditorViewportChangeEvent,
 } from "./editor-controller.ts";
+export { createLayoutDirtyRects } from "./render-dirty-regions.ts";
+export type { EditorRenderViewport } from "./render-dirty-regions.ts";
 export {
   createEditorDocumentState,
   createInMemoryEditorDocumentState,
@@ -50,6 +56,9 @@ export type {
   EditableLayoutSourceMap,
   EditableLayoutSourceMapRun,
   EditableLayoutSourceMapSegment,
+  EditableLayoutIndexUpdateMetadata,
+  EditableLayoutResolvedViewport,
+  EditableLayoutViewport,
   GranularHitTestResult,
   HitTestGranularity,
   HitTestResult,

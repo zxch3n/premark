@@ -60,6 +60,37 @@ export interface EditableLayoutIndexInput {
   readonly blockSpans: readonly BlockSpan[];
   readonly inlineSources: readonly MarkdownInlineSourceRecord[];
   readonly sourceMap?: EditableLayoutSourceMap;
+  readonly viewport?: EditableLayoutViewport;
+}
+
+export interface EditableLayoutViewport {
+  readonly y: number;
+  readonly height: number;
+  readonly overscanY?: number;
+}
+
+export interface EditableLayoutResolvedViewport {
+  readonly y: number;
+  readonly height: number;
+  readonly overscanY: number;
+  readonly top: number;
+  readonly bottom: number;
+  readonly fromBlock: number;
+  readonly toBlock: number;
+}
+
+export interface EditableLayoutIndexUpdateMetadata {
+  readonly mode: "full" | "incremental" | "fallback";
+  readonly fallbackReason?: string;
+  readonly layoutUpdateMode?: LayoutUpdateMetadata["mode"];
+  readonly dirtyFromBlock?: number;
+  readonly dirtyToBlock?: number;
+  readonly viewport?: EditableLayoutResolvedViewport;
+  readonly previousFragmentCount: number;
+  readonly fragmentCount: number;
+  readonly rebuiltFragmentCount: number;
+  readonly reusedFragmentCount: number;
+  readonly transformedFragmentCount: number;
 }
 
 export interface EditableLayoutSourceMap {
@@ -87,12 +118,18 @@ export class EditableLayoutIndex {
   readonly layout: DocumentLayout;
   readonly blockSpans: readonly BlockSpan[];
   readonly fragments: readonly EditableFragment[];
+  readonly update: EditableLayoutIndexUpdateMetadata;
 
-  constructor(input: EditableLayoutIndexInput, fragments?: readonly EditableFragment[]) {
+  constructor(
+    input: EditableLayoutIndexInput,
+    fragments?: readonly EditableFragment[],
+    update?: EditableLayoutIndexUpdateMetadata,
+  ) {
     this.markdown = input.markdown;
     this.layout = input.layout;
     this.blockSpans = input.blockSpans;
     this.fragments = fragments ?? buildEditableFragments(input);
+    this.update = update ?? createFullEditableLayoutIndexUpdate(input, this.fragments.length);
   }
 
   hitTest(x: number, y: number): HitTestResult {
@@ -418,22 +455,37 @@ function clampOffset(offset: number, length: number): number {
 }
 
 export function createEditableLayoutIndex(input: EditableLayoutIndexInput): EditableLayoutIndex {
-  return new EditableLayoutIndex(input);
+  const fragments = buildEditableFragments(input);
+  return new EditableLayoutIndex(
+    input,
+    fragments,
+    createFullEditableLayoutIndexUpdate(input, fragments.length),
+  );
 }
 
 export function createIncrementalEditableLayoutIndex(
   input: EditableLayoutIndexInput,
   previous: EditableLayoutIndex,
 ): EditableLayoutIndex {
-  const fragments = buildIncrementalEditableFragments(input, previous);
-  return new EditableLayoutIndex(input, fragments ?? undefined);
+  const incremental = buildIncrementalEditableFragments(input, previous);
+  if (incremental !== null) {
+    return new EditableLayoutIndex(input, incremental.fragments, incremental.update);
+  }
+
+  const fragments = buildEditableFragments(input);
+  return new EditableLayoutIndex(
+    input,
+    fragments,
+    createFallbackEditableLayoutIndexUpdate(input, previous, fragments.length),
+  );
 }
 
 function buildEditableFragments(input: EditableLayoutIndexInput): EditableFragment[] {
+  const buildRange = resolveEditableBuildRange(input);
   const fragments = buildEditableTextFragments(input, {
-    fromBlock: 0,
-    toBlock: Number.POSITIVE_INFINITY,
-    sourceCursor: 0,
+    fromBlock: buildRange.fromBlock,
+    toBlock: buildRange.toBlock,
+    sourceCursor: sourceCursorForLayoutBlock(input, buildRange.fromBlock),
   });
   return addVirtualSourceLineBreakFragments(fragments, input.markdown, input.blockSpans);
 }
@@ -441,7 +493,10 @@ function buildEditableFragments(input: EditableLayoutIndexInput): EditableFragme
 function buildIncrementalEditableFragments(
   input: EditableLayoutIndexInput,
   previous: EditableLayoutIndex,
-): readonly EditableFragment[] | null {
+): {
+  readonly fragments: readonly EditableFragment[];
+  readonly update: EditableLayoutIndexUpdateMetadata;
+} | null {
   const update = input.layout.update;
   if (
     update === undefined ||
@@ -450,6 +505,19 @@ function buildIncrementalEditableFragments(
     input.sourceMap !== undefined
   ) {
     return null;
+  }
+
+  if (input.viewport !== undefined) {
+    const fragments = buildEditableFragments(input);
+    return {
+      fragments,
+      update: createIncrementalEditableLayoutIndexUpdate(input, previous, {
+        fragmentCount: fragments.length,
+        rebuiltFragmentCount: nonVirtualFragmentCount(fragments),
+        reusedFragmentCount: 0,
+        transformedFragmentCount: 0,
+      }),
+    };
   }
 
   const prefix: EditableFragment[] = [];
@@ -487,8 +555,21 @@ function buildIncrementalEditableFragments(
     toBlock: update.dirtyToBlock,
     sourceCursor,
   });
-  const fragments = [...prefix, ...dirty, ...suffix].sort(compareEditableFragments);
-  return addVirtualSourceLineBreakFragments(fragments, input.markdown, input.blockSpans);
+  const textFragments = [...prefix, ...dirty, ...suffix].sort(compareEditableFragments);
+  const fragments = addVirtualSourceLineBreakFragments(
+    textFragments,
+    input.markdown,
+    input.blockSpans,
+  );
+  return {
+    fragments,
+    update: createIncrementalEditableLayoutIndexUpdate(input, previous, {
+      fragmentCount: fragments.length,
+      rebuiltFragmentCount: dirty.length,
+      reusedFragmentCount: prefix.length,
+      transformedFragmentCount: suffix.length,
+    }),
+  };
 }
 
 function isVirtualLineBreakFragment(fragment: EditableFragment): boolean {
@@ -560,6 +641,149 @@ function transformSourceOffsetAfterChange(offset: number, change: ParserTextChan
     return offset + (change.toB - change.fromB) - (change.toA - change.fromA);
   }
   return change.fromB;
+}
+
+function createFullEditableLayoutIndexUpdate(
+  input: EditableLayoutIndexInput,
+  fragmentCount: number,
+): EditableLayoutIndexUpdateMetadata {
+  return {
+    mode: "full",
+    layoutUpdateMode: input.layout.update?.mode,
+    dirtyFromBlock: input.layout.update?.dirtyFromBlock,
+    dirtyToBlock: input.layout.update?.dirtyToBlock,
+    viewport: resolveEditableBuildRange(input).viewport,
+    previousFragmentCount: 0,
+    fragmentCount,
+    rebuiltFragmentCount: fragmentCount,
+    reusedFragmentCount: 0,
+    transformedFragmentCount: 0,
+  };
+}
+
+function createFallbackEditableLayoutIndexUpdate(
+  input: EditableLayoutIndexInput,
+  previous: EditableLayoutIndex,
+  fragmentCount: number,
+): EditableLayoutIndexUpdateMetadata {
+  return {
+    mode: "fallback",
+    fallbackReason: editableIndexFallbackReason(input),
+    layoutUpdateMode: input.layout.update?.mode,
+    dirtyFromBlock: input.layout.update?.dirtyFromBlock,
+    dirtyToBlock: input.layout.update?.dirtyToBlock,
+    viewport: resolveEditableBuildRange(input).viewport,
+    previousFragmentCount: previous.fragments.length,
+    fragmentCount,
+    rebuiltFragmentCount: fragmentCount,
+    reusedFragmentCount: 0,
+    transformedFragmentCount: 0,
+  };
+}
+
+function createIncrementalEditableLayoutIndexUpdate(
+  input: EditableLayoutIndexInput,
+  previous: EditableLayoutIndex,
+  counts: {
+    readonly fragmentCount: number;
+    readonly rebuiltFragmentCount: number;
+    readonly reusedFragmentCount: number;
+    readonly transformedFragmentCount: number;
+  },
+): EditableLayoutIndexUpdateMetadata {
+  const update = input.layout.update;
+  return {
+    mode: "incremental",
+    layoutUpdateMode: update?.mode,
+    dirtyFromBlock: update?.dirtyFromBlock,
+    dirtyToBlock: update?.dirtyToBlock,
+    viewport: resolveEditableBuildRange(input).viewport,
+    previousFragmentCount: previous.fragments.length,
+    fragmentCount: counts.fragmentCount,
+    rebuiltFragmentCount: counts.rebuiltFragmentCount,
+    reusedFragmentCount: counts.reusedFragmentCount,
+    transformedFragmentCount: counts.transformedFragmentCount,
+  };
+}
+
+function editableIndexFallbackReason(input: EditableLayoutIndexInput): string {
+  const update = input.layout.update;
+  if (input.sourceMap !== undefined) {
+    return "source-map";
+  }
+  if (update === undefined) {
+    return "missing-layout-update";
+  }
+  if (update.mode !== "incremental") {
+    return "full-layout";
+  }
+  if (update.sourceChange === null) {
+    return "missing-source-change";
+  }
+  return "unknown";
+}
+
+function nonVirtualFragmentCount(fragments: readonly EditableFragment[]): number {
+  return fragments.filter((fragment) => !isVirtualLineBreakFragment(fragment)).length;
+}
+
+function resolveEditableBuildRange(input: EditableLayoutIndexInput): {
+  readonly fromBlock: number;
+  readonly toBlock: number;
+  readonly viewport?: EditableLayoutResolvedViewport;
+} {
+  const blockCount = input.layout.blocks.length;
+  if (input.viewport === undefined || blockCount === 0) {
+    return {
+      fromBlock: 0,
+      toBlock: blockCount,
+    };
+  }
+
+  const overscanY = input.viewport.overscanY ?? 0;
+  const top = Math.max(0, input.viewport.y - overscanY);
+  const bottom = input.viewport.y + input.viewport.height + overscanY;
+  const visibleBlocks = input.layout.blocks.filter(
+    (block) => block.y + block.height >= top && block.y <= bottom,
+  );
+  const targetBlocks =
+    visibleBlocks.length > 0
+      ? visibleBlocks
+      : [closestLayoutBlock(input.layout, input.viewport.y + input.viewport.height / 2)];
+  const firstBlock = targetBlocks[0]!;
+  const lastBlock = targetBlocks[targetBlocks.length - 1]!;
+  const fromBlock = Math.max(0, firstBlock.index - 1);
+  const toBlock = Math.min(blockCount, lastBlock.index + 2);
+
+  return {
+    fromBlock,
+    toBlock,
+    viewport: {
+      y: input.viewport.y,
+      height: input.viewport.height,
+      overscanY,
+      top,
+      bottom,
+      fromBlock,
+      toBlock,
+    },
+  };
+}
+
+function closestLayoutBlock(layout: DocumentLayout, y: number): DocumentLayout["blocks"][number] {
+  return [...layout.blocks].sort((left, right) => {
+    const leftCenter = left.y + left.height / 2;
+    const rightCenter = right.y + right.height / 2;
+    return Math.abs(leftCenter - y) - Math.abs(rightCenter - y);
+  })[0]!;
+}
+
+function sourceCursorForLayoutBlock(input: EditableLayoutIndexInput, blockIndex: number): number {
+  const block = input.layout.blocks[blockIndex];
+  if (block === undefined) {
+    return 0;
+  }
+  return input.blockSpans[block.sourceBlockIndex]?.from ?? 0;
 }
 
 function buildEditableTextFragments(

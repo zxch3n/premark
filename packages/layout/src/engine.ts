@@ -509,6 +509,7 @@ export class LayoutEngineImpl implements LayoutEngine {
     const renderType = getRenderType(normalized);
     const createBlock = (height: number, width: number, lines: LayoutLine[]): BlockLayout => ({
       index: blockIndex,
+      sourceBlockIndex: normalized.sourceBlockIndex,
       type: renderType,
       firstLineIndex,
       lineCount: lines.length,

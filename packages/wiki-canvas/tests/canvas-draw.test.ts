@@ -52,6 +52,7 @@ describe("drawTile", () => {
       blocks: [
         {
           index: 0,
+          sourceBlockIndex: 0,
           type: "paragraph",
           firstLineIndex: 0,
           lineCount: 1,

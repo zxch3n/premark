@@ -11,6 +11,8 @@ import {
   createEditorDocumentState,
   type EditorDocumentState,
   type EditorDocumentStateOptions,
+  type EditorDocumentSetViewportOptions,
+  type EditorViewportState,
 } from "./editor-state.ts";
 import {
   applyInputIntent,
@@ -19,6 +21,7 @@ import {
 } from "./input-commands.ts";
 import type { NormalizedInputIntent } from "./input-trace.ts";
 import { createActiveMarkerRevealMarkdown, type ActiveMarkdownControl } from "./marker-reveal.ts";
+import { createLayoutDirtyRects } from "./render-dirty-regions.ts";
 import { LocalUndoManager } from "./undo.ts";
 import type {
   AppliedEditOperation,
@@ -26,6 +29,7 @@ import type {
   DocumentChangeEvent,
   EditOperation,
   ResolvedRange,
+  SourceRange,
   TextChange,
   Unsubscribe,
 } from "./types.ts";
@@ -68,8 +72,11 @@ export interface PremarkEditorRenderSnapshot {
   readonly activeControls: readonly ActiveMarkdownControl[];
   readonly layout: DocumentLayout;
   readonly editableIndex: EditableLayoutIndex;
-  readonly viewport: {
-    readonly containerWidth: number;
+  readonly viewport: EditorViewportState;
+  readonly renderUpdate: {
+    readonly layout: DocumentLayout["update"] | null;
+    readonly editableIndex: EditableLayoutIndex["update"];
+    readonly dirtyRects: readonly Rect[];
   };
 }
 
@@ -127,6 +134,29 @@ export interface PremarkEditorApplyEditOptions {
         readonly anchor: number;
         readonly head: number;
       };
+}
+
+export type PremarkEditorSetViewportOptions = EditorDocumentSetViewportOptions;
+
+export interface PremarkEditorRemotePatchChange extends SourceRange {
+  readonly insert: string;
+}
+
+export interface PremarkEditorApplyRemotePatchOptions {
+  readonly origin?: "remote" | "ai";
+  readonly actorId?: string;
+  readonly changes: readonly PremarkEditorRemotePatchChange[];
+  readonly cancelCompositionOnConflict?: boolean;
+}
+
+export interface PremarkEditorRemotePatchResult {
+  readonly origin: "remote" | "ai";
+  readonly actorId?: string;
+  readonly changes: readonly TextChange[];
+  readonly beforeSelection: PremarkEditorSelectionSnapshot;
+  readonly afterSelection: PremarkEditorSelectionSnapshot;
+  readonly composition: "none" | "preserved" | "conflict" | "canceled";
+  readonly snapshot: PremarkEditorRenderSnapshot;
 }
 
 export class PremarkEditorController {
@@ -187,6 +217,7 @@ export class PremarkEditorController {
         layout,
         blockSpans: parseState.blockSpans,
         inlineSources: createMarkdownInlineSourceMap(parseState),
+        viewport: this.state.editableViewport,
       });
       return this.createRenderSnapshot({
         viewMarkdown: compositionView.virtualText,
@@ -227,6 +258,7 @@ export class PremarkEditorController {
             blockSpans: this.state.parseState.blockSpans,
             inlineSources: this.state.inlineSources,
             sourceMap: reveal.sourceMap,
+            viewport: this.state.editableViewport,
           }),
         });
       }
@@ -264,6 +296,11 @@ export class PremarkEditorController {
       layout: input.layout,
       editableIndex: input.editableIndex,
       viewport: this.state.viewport,
+      renderUpdate: {
+        layout: input.layout.update ?? null,
+        editableIndex: input.editableIndex.update,
+        dirtyRects: createLayoutDirtyRects(input.layout, this.state.viewport),
+      },
     };
   }
 
@@ -361,6 +398,49 @@ export class PremarkEditorController {
     return applied;
   }
 
+  applyRemotePatch(options: PremarkEditorApplyRemotePatchOptions): PremarkEditorRemotePatchResult {
+    const beforeSelection = this.selection();
+    const hadComposition = this.state.compositionView !== null;
+    let changes: readonly TextChange[] = [];
+
+    this.runDocumentMutation(() => {
+      const orderedChanges = [...options.changes].sort(
+        (left, right) => right.from - left.from || right.to - left.to,
+      );
+      changes = this.state.adapter.transact((tx) => {
+        for (const change of orderedChanges) {
+          tx.replaceRange({ from: change.from, to: change.to }, change.insert);
+        }
+      });
+    });
+
+    let composition: PremarkEditorRemotePatchResult["composition"] = "none";
+    const compositionView = this.state.compositionView;
+    if (hadComposition || compositionView !== null) {
+      if (compositionView?.hasConflict === true) {
+        if (options.cancelCompositionOnConflict === true) {
+          this.state.cancelComposition();
+          composition = "canceled";
+        } else {
+          composition = "conflict";
+        }
+      } else {
+        composition = compositionView === null ? "none" : "preserved";
+      }
+      this.emitCompositionChange();
+    }
+
+    return {
+      origin: options.origin ?? "remote",
+      actorId: options.actorId,
+      changes,
+      beforeSelection,
+      afterSelection: this.selection(),
+      composition,
+      snapshot: this.renderSnapshot(),
+    };
+  }
+
   applyInputIntent(intent: NormalizedInputIntent): AppliedInputIntent {
     const applied = this.runDocumentMutation(() =>
       applyInputIntent(this.state, intent, { undoManager: this.undoManager }),
@@ -426,6 +506,11 @@ export class PremarkEditorController {
 
   resize(containerWidth: number): void {
     this.state.resize(containerWidth);
+    this.emitViewportChange();
+  }
+
+  setViewport(options: PremarkEditorSetViewportOptions): void {
+    this.state.setViewport(options);
     this.emitViewportChange();
   }
 
@@ -511,6 +596,9 @@ export function createPremarkEditorController(
     createEditorDocumentState({
       markdown: options.markdown,
       containerWidth: options.containerWidth,
+      scrollTop: options.scrollTop,
+      viewportHeight: options.viewportHeight,
+      overscanY: options.overscanY,
       layoutStyle: options.layoutStyle,
       adapter: options.adapter,
     }),

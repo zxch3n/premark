@@ -42,16 +42,57 @@ Widths iiiii WWWW done.
 
 Try **bold text**, \`inline code\`, [docs](https://example.com).`;
 
+function largeMarkdown(): string {
+  const section = [
+    "## Viewport section",
+    "",
+    "User edit anchor paragraph with **bold**, `code`, [docs](https://example.com), 中文文本, and emoji 👨‍👩‍👧‍👦.",
+    "",
+    "AI stream target paragraph with enough text to append generated tokens while editing another area.",
+    "",
+    "- item one",
+    "- item two",
+    "",
+  ].join("\n");
+  let markdown = "# Large Canvas native editor\n\n";
+  while (markdown.length < 110_000) {
+    markdown += section;
+  }
+  return markdown;
+}
+
+function streamingMarkdown(): string {
+  return [
+    "# Streaming collaboration canvas",
+    "",
+    "User edit anchor paragraph. Click here and type while the assistant streams below.",
+    "",
+    "AI stream target paragraph:",
+    "",
+    "- Remote peers may patch other blocks.",
+    "- Local selection should stay where the user is editing.",
+  ].join("\n");
+}
+
 function initialMarkdown(): string {
-  return new URLSearchParams(window.location.search).get("fixture") === "repeated-emoji"
-    ? repeatedEmojiMarkdown
-    : defaultMarkdown;
+  const fixture = new URLSearchParams(window.location.search).get("fixture");
+  if (fixture === "repeated-emoji") {
+    return repeatedEmojiMarkdown;
+  }
+  if (fixture === "large") {
+    return largeMarkdown();
+  }
+  if (fixture === "streaming") {
+    return streamingMarkdown();
+  }
+  return defaultMarkdown;
 }
 
 const width = 780;
 const height = 430;
 const contentPadding = 28;
 const editorWidth = width - contentPadding * 2;
+const editorViewportHeight = height - contentPadding * 2;
 const highlighter = createHighlighter();
 
 export const InteractiveCanvasNativeEditor = () => {
@@ -78,6 +119,7 @@ export const InteractiveCanvasNativeEditor = () => {
         position: relative;
         width: ${width}px;
         height: ${height}px;
+        overflow: hidden;
       }
 
       .pcne-canvas {
@@ -148,6 +190,10 @@ export const InteractiveCanvasNativeEditor = () => {
           <pre data-canvas-debug-selection></pre>
         </section>
         <section>
+          <h2>Render update</h2>
+          <pre data-canvas-debug-render></pre>
+        </section>
+        <section>
           <h2>Markdown source</h2>
           <pre data-canvas-debug-source></pre>
         </section>
@@ -158,6 +204,7 @@ export const InteractiveCanvasNativeEditor = () => {
   const canvas = root.querySelector<HTMLCanvasElement>("[data-canvas-native-editor]")!;
   const textarea = root.querySelector<HTMLTextAreaElement>("[data-canvas-input-bridge]")!;
   const debugSelection = root.querySelector<HTMLPreElement>("[data-canvas-debug-selection]")!;
+  const debugRender = root.querySelector<HTMLPreElement>("[data-canvas-debug-render]")!;
   const debugSource = root.querySelector<HTMLPreElement>("[data-canvas-debug-source]")!;
   const maybeContext = canvas.getContext("2d");
   if (maybeContext === null) {
@@ -189,6 +236,16 @@ export const InteractiveCanvasNativeEditor = () => {
       readonly x: number;
       readonly y: number;
     } | null = null;
+    let hasRendered = false;
+    let lastRenderedVersion = -1;
+
+    controller.setViewport({
+      scrollTop: 0,
+      height: editorViewportHeight,
+      overscanY: editorViewportHeight,
+    });
+    const searchParams = new URLSearchParams(window.location.search);
+    let autoStreamTimer: number | null = null;
 
     function render() {
       const view = controller.renderSnapshot();
@@ -197,9 +254,17 @@ export const InteractiveCanvasNativeEditor = () => {
         editor.compositionView === null
           ? createSelectionGeometry(editor, view.editableIndex)
           : createCompositionGeometry(view.editableIndex);
+      const clipRect =
+        hasRendered &&
+        view.version !== lastRenderedVersion &&
+        view.renderUpdate.dirtyRects.length === 1
+          ? canvasClipFromDirtyRect(view.renderUpdate.dirtyRects[0]!, view.viewport.scrollTop)
+          : undefined;
       drawTile(ctx, view.layout, width, height, {
         cardRadius: 0,
         contentPadding,
+        scrollY: view.viewport.scrollTop,
+        clipRect,
         selectionRects: geometry.selectionRects,
         selectionColor: "rgba(52, 139, 99, 0.34)",
         caretRect: geometry.caret?.rect,
@@ -208,9 +273,55 @@ export const InteractiveCanvasNativeEditor = () => {
         compositionColor: "#7dd3ae",
         palette: darkTilePalette,
       });
+      drawDirtyOverlay(view.renderUpdate.dirtyRects, view.viewport.scrollTop);
+      hasRendered = true;
+      lastRenderedVersion = view.version;
       debugSelection.textContent = JSON.stringify(geometry, null, 2);
+      debugRender.textContent = JSON.stringify(
+        {
+          viewport: view.viewport,
+          editableIndex: view.renderUpdate.editableIndex,
+          dirtyRects: view.renderUpdate.dirtyRects,
+          clipRect,
+        },
+        null,
+        2,
+      );
       debugSource.textContent = controller.markdown();
-      syncTextareaBridge(geometry.caret?.rect ?? geometry.headCaret.rect);
+      syncTextareaBridge(geometry.caret?.rect ?? geometry.headCaret.rect, view.viewport.scrollTop);
+    }
+
+    function canvasClipFromDirtyRect(
+      rect: { x: number; y: number; width: number; height: number },
+      scrollTop: number,
+    ) {
+      const margin = 4;
+      const x = Math.max(0, contentPadding + rect.x - margin);
+      const y = Math.max(0, contentPadding + rect.y - scrollTop - margin);
+      return {
+        x,
+        y,
+        width: Math.min(width - x, rect.width + margin * 2),
+        height: Math.min(height - y, rect.height + margin * 2),
+      };
+    }
+
+    function drawDirtyOverlay(
+      rects: readonly { x: number; y: number; width: number; height: number }[],
+      scrollTop: number,
+    ) {
+      ctx.save();
+      ctx.strokeStyle = "rgba(248, 113, 113, 0.82)";
+      ctx.setLineDash([6, 4]);
+      for (const rect of rects) {
+        ctx.strokeRect(
+          contentPadding + rect.x + 0.5,
+          contentPadding + rect.y - scrollTop + 0.5,
+          rect.width,
+          rect.height,
+        );
+      }
+      ctx.restore();
     }
 
     function createCompositionGeometry(index: EditableLayoutIndex) {
@@ -233,20 +344,24 @@ export const InteractiveCanvasNativeEditor = () => {
       };
     }
 
-    function syncTextareaBridge(caretRect: { x: number; y: number; height: number }) {
+    function syncTextareaBridge(
+      caretRect: { x: number; y: number; height: number },
+      scrollTop: number,
+    ) {
       bridgeSnapshot = createTextareaBridgeSnapshot(editor);
       textarea.value = bridgeSnapshot.value;
       textarea.setSelectionRange(bridgeSnapshot.selectionStart, bridgeSnapshot.selectionEnd);
       textarea.style.left = `${contentPadding + Math.max(0, caretRect.x)}px`;
-      textarea.style.top = `${contentPadding + Math.max(0, caretRect.y)}px`;
+      textarea.style.top = `${contentPadding + Math.max(0, caretRect.y - scrollTop)}px`;
       textarea.style.height = `${Math.max(16, caretRect.height)}px`;
     }
 
     function canvasPointFromEvent(event: MouseEvent): { x: number; y: number } {
       const rect = canvas.getBoundingClientRect();
+      const viewport = controller.renderSnapshot().viewport;
       return {
         x: event.clientX - rect.left - contentPadding,
-        y: event.clientY - rect.top - contentPadding,
+        y: event.clientY - rect.top - contentPadding + viewport.scrollTop,
       };
     }
 
@@ -320,6 +435,25 @@ export const InteractiveCanvasNativeEditor = () => {
     window.addEventListener("pointerup", () => {
       pointerSession = null;
     });
+
+    canvas.addEventListener(
+      "wheel",
+      (event) => {
+        event.preventDefault();
+        const snapshot = controller.renderSnapshot();
+        const maxScrollTop = Math.max(0, snapshot.layout.totalHeight - editorViewportHeight);
+        controller.setViewport({
+          scrollTop: Math.min(
+            maxScrollTop,
+            Math.max(0, snapshot.viewport.scrollTop + event.deltaY),
+          ),
+          height: editorViewportHeight,
+          overscanY: editorViewportHeight,
+        });
+        render();
+      },
+      { passive: false },
+    );
 
     textarea.addEventListener("keydown", (event) => {
       const intent = normalizeInputTrace([
@@ -423,6 +557,40 @@ export const InteractiveCanvasNativeEditor = () => {
       render();
     });
 
+    if (searchParams.get("autostream") === "1") {
+      let chunkIndex = 0;
+      autoStreamTimer = window.setInterval(() => {
+        if (!root.isConnected && autoStreamTimer !== null) {
+          window.clearInterval(autoStreamTimer);
+          autoStreamTimer = null;
+          return;
+        }
+        chunkIndex += 1;
+        streamAIChunk(` token-${chunkIndex}`);
+        if (chunkIndex >= 12 && autoStreamTimer !== null) {
+          window.clearInterval(autoStreamTimer);
+          autoStreamTimer = null;
+        }
+      }, 280);
+    }
+
+    function streamAIChunk(chunk: string) {
+      const markdown = controller.markdown();
+      const needle = "AI stream target paragraph:";
+      const target = markdown.indexOf(needle);
+      if (target < 0) {
+        return;
+      }
+      const lineEnd = markdown.indexOf("\n", target);
+      const offset = lineEnd < 0 ? markdown.length : lineEnd;
+      controller.applyRemotePatch({
+        origin: "ai",
+        actorId: "assistant",
+        changes: [{ from: offset, to: offset, insert: chunk }],
+      });
+      render();
+    }
+
     (
       window as typeof window & {
         __premarkCanvasNativeEditor?: {
@@ -438,6 +606,9 @@ export const InteractiveCanvasNativeEditor = () => {
           };
           setCaret(offset: number): void;
           setSelection(anchor: number, head: number): void;
+          insertAt(offset: number, text: string): void;
+          streamAIChunk(chunk: string): void;
+          scrollTo(y: number): void;
         };
       }
     ).__premarkCanvasNativeEditor = {
@@ -457,9 +628,10 @@ export const InteractiveCanvasNativeEditor = () => {
         }
         const target = edge === "start" ? offset : offset + text.length;
         const caret = activeEditableIndex.sourceOffsetToCaretRect(target);
+        const scrollTop = controller.renderSnapshot().viewport.scrollTop;
         return {
           x: contentPadding + caret.rect.x,
-          y: contentPadding + caret.rect.y + caret.rect.height / 2,
+          y: contentPadding + caret.rect.y - scrollTop + caret.rect.height / 2,
         };
       },
       fragmentForText(text) {
@@ -483,6 +655,26 @@ export const InteractiveCanvasNativeEditor = () => {
       },
       setSelection(anchor, head) {
         controller.setSelection(anchor, head);
+        render();
+      },
+      insertAt(offset, text) {
+        controller.applyRemotePatch({
+          actorId: "peer",
+          changes: [{ from: offset, to: offset, insert: text }],
+        });
+        render();
+      },
+      streamAIChunk,
+      scrollTo(y) {
+        const snapshot = controller.renderSnapshot();
+        controller.setViewport({
+          scrollTop: Math.min(
+            Math.max(0, snapshot.layout.totalHeight - editorViewportHeight),
+            Math.max(0, y),
+          ),
+          height: editorViewportHeight,
+          overscanY: editorViewportHeight,
+        });
         render();
       },
     };

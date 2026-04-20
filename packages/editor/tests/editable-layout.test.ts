@@ -666,6 +666,44 @@ describe("EditableLayoutIndex", () => {
     expect(newSuffix!.sourceRange.from).toBeGreaterThan(oldSuffix!.sourceRange.from);
   });
 
+  it("builds a viewport editable index from the visible block source cursor", () => {
+    const markdown = Array.from(
+      { length: 80 },
+      (_, index) => `Repeated paragraph ${index} with the same tail text.`,
+    ).join("\n\n");
+    const width = 520;
+    const state = createIncrementalParseState(markdown);
+    const layout = createLayoutEngine({ fontTheme: "github", lineBreakMode: "source" }).layout(
+      markdown,
+      width,
+    );
+    const inlineSources = createMarkdownInlineSourceMap(state);
+    const targetBlock = layout.blocks[40]!;
+    const index = createEditableLayoutIndex({
+      markdown,
+      layout,
+      blockSpans: state.blockSpans,
+      inlineSources,
+      viewport: {
+        y: targetBlock.y,
+        height: targetBlock.height,
+        overscanY: 0,
+      },
+    });
+
+    expect(index.update.viewport).toMatchObject({
+      fromBlock: 39,
+      toBlock: 42,
+    });
+    expect(index.fragments.some((fragment) => fragment.text.includes("paragraph 0"))).toBe(false);
+
+    const targetFragment = index.fragments.find((fragment) =>
+      fragment.text.includes("paragraph 40"),
+    );
+    expect(targetFragment).toBeDefined();
+    expect(targetFragment!.sourceRange.from).toBe(markdown.indexOf("Repeated paragraph 40"));
+  });
+
   it("keeps active marker source-map render views correct by rebuilding them conservatively", () => {
     const markdown = "Try **bold text** and [docs](https://example.com).";
     const state = createIncrementalParseState(markdown);
@@ -828,6 +866,7 @@ describe("EditableLayoutIndex", () => {
         blocks: [
           {
             index: 0,
+            sourceBlockIndex: 0,
             type: "paragraph",
             firstLineIndex: 0,
             lineCount: 1,
