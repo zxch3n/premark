@@ -1,17 +1,11 @@
 import { createHighlighter } from "../packages/highlight/src/index.ts";
 import { renderToHtml } from "../packages/html-renderer/src/index.ts";
-import { createLayoutEngine } from "../packages/layout/src/index.ts";
-import {
-  createIncrementalParseState,
-  createMarkdownInlineSourceMap,
-} from "../packages/parser/src/index.ts";
 import {
   applyInputIntent,
   applyTextareaBridgeChange,
   beginPointerSelection,
-  createActiveMarkerRevealMarkdown,
-  createEditableLayoutIndex,
   createInMemoryEditorDocumentState,
+  createPremarkEditorController,
   createTextareaBridgeSnapshot,
   LocalUndoManager,
   normalizeInputTrace,
@@ -49,17 +43,12 @@ export const InteractiveNativePrototype = () => {
   async function initialize() {
     await waitForPremarkStoryFonts();
     root.dataset.fontsReady = "1";
-    const previewLayoutEngine = createLayoutEngine({
-      fontTheme: "modern",
-      highlighter,
-      lineBreakMode: "source",
-    });
-
     const editor = createInMemoryEditorDocumentState(sampleMarkdown, 720, {
       fontTheme: "modern",
       highlighter,
     });
     const undoManager = new LocalUndoManager();
+    const controller = createPremarkEditorController({ state: editor, undoManager });
 
     let bridgeSnapshot: TextareaBridgeSnapshot = createTextareaBridgeSnapshot(editor);
     let pointerSession: PointerSelectionSession | null = null;
@@ -109,7 +98,7 @@ export const InteractiveNativePrototype = () => {
     const debugSource = root.querySelector<HTMLPreElement>("[data-debug-source]")!;
 
     function render() {
-      const view = createRenderView();
+      const view = controller.renderSnapshot();
       const layout = view.layout;
       currentEditableIndex = view.editableIndex;
       const rendered = renderToHtml(layout, {
@@ -120,13 +109,13 @@ export const InteractiveNativePrototype = () => {
       overlay.style.width = `${layout.containerWidth}px`;
       overlay.style.height = `${layout.totalHeight}px`;
       renderSurfaceHtml(rendered);
-      overlay.innerHTML = renderSelectionOverlay(layout, currentEditableIndex);
+      overlay.innerHTML = renderSelectionOverlay(currentEditableIndex, view.compositionRects);
       debugSelection.textContent = JSON.stringify(
         createStorySelectionGeometry(currentEditableIndex),
         null,
         2,
       );
-      debugSource.textContent = editor.markdown;
+      debugSource.textContent = controller.markdown();
       syncTextareaBridge();
     }
 
@@ -192,51 +181,6 @@ export const InteractiveNativePrototype = () => {
       }
     }
 
-    function createRenderView(): {
-      layout: ReturnType<typeof previewLayoutEngine.layout>;
-      editableIndex: EditableLayoutIndex;
-    } {
-      const compositionView = editor.compositionView;
-      if (compositionView !== null) {
-        const layout = previewLayoutEngine.layout(compositionView.virtualText, 720);
-        const parseState = createIncrementalParseState(compositionView.virtualText);
-        return {
-          layout,
-          editableIndex: createEditableLayoutIndex({
-            markdown: compositionView.virtualText,
-            layout,
-            blockSpans: parseState.blockSpans,
-            inlineSources: createMarkdownInlineSourceMap(parseState),
-          }),
-        };
-      }
-
-      const reveal = createActiveMarkerRevealMarkdown({
-        markdown: editor.markdown,
-        inlineSources: editor.inlineSources,
-        blockSpans: editor.parseState.blockSpans,
-        selectionRange: editor.selectionSourceRange,
-      });
-      if (reveal.markerState === "hidden") {
-        return {
-          layout: editor.layout,
-          editableIndex: editor.editableIndex,
-        };
-      }
-
-      const layout = previewLayoutEngine.layout(reveal.markdown, 720);
-      return {
-        layout,
-        editableIndex: createEditableLayoutIndex({
-          markdown: editor.markdown,
-          layout,
-          blockSpans: editor.parseState.blockSpans,
-          inlineSources: editor.inlineSources,
-          sourceMap: reveal.sourceMap,
-        }),
-      };
-    }
-
     function createStorySelectionGeometry(index: EditableLayoutIndex) {
       const resolved = editor.adapter.resolveRange(editor.selection.range);
       const range = {
@@ -272,12 +216,12 @@ export const InteractiveNativePrototype = () => {
     }
 
     function renderSelectionOverlay(
-      layout: ReturnType<typeof previewLayoutEngine.layout>,
       editableIndex: EditableLayoutIndex,
+      compositionRects: readonly { x: number; y: number; width: number; height: number }[],
     ): string {
-      const composition = renderCompositionOverlay(layout);
+      const composition = renderCompositionOverlay(compositionRects);
       if (editor.compositionView !== null) {
-        const caret = compositionCaretRect(layout);
+        const caret = compositionCaretRect();
         const caretHtml =
           caret === null
             ? ""
@@ -300,46 +244,25 @@ export const InteractiveNativePrototype = () => {
       return `${selection}${composition}${caretHtml}`;
     }
 
-    function compositionCaretRect(
-      layout: ReturnType<typeof previewLayoutEngine.layout> | null = null,
-    ) {
+    function compositionCaretRect() {
       const view = editor.compositionView;
       if (view === null) {
         return null;
       }
-      const activeLayout = layout ?? previewLayoutEngine.layout(view.virtualText, 720);
-      const parseState = createIncrementalParseState(view.virtualText);
-      const editableIndex = createEditableLayoutIndex({
-        markdown: view.virtualText,
-        layout: activeLayout,
-        blockSpans: parseState.blockSpans,
-        inlineSources: createMarkdownInlineSourceMap(parseState),
-      });
-      return editableIndex.sourceOffsetToCaretRect(
+      return currentEditableIndex.sourceOffsetToCaretRect(
         view.replacementRange.from + view.preeditText.length,
       ).rect;
     }
 
     function renderCompositionOverlay(
-      layout: ReturnType<typeof previewLayoutEngine.layout>,
+      compositionRects: readonly { x: number; y: number; width: number; height: number }[],
     ): string {
       const view = editor.compositionView;
       if (view === null || view.preeditText.length === 0) {
         return "";
       }
 
-      const parseState = createIncrementalParseState(view.virtualText);
-      const editableIndex = createEditableLayoutIndex({
-        markdown: view.virtualText,
-        layout,
-        blockSpans: parseState.blockSpans,
-        inlineSources: createMarkdownInlineSourceMap(parseState),
-      });
-      return editableIndex
-        .sourceRangeToSelectionRects({
-          from: view.replacementRange.from,
-          to: view.replacementRange.from + view.preeditText.length,
-        })
+      return compositionRects
         .map(
           (rect) =>
             `<div class="pne-composition" style="left:${rect.x}px;top:${rect.y + rect.height - 3}px;width:${rect.width}px"></div>`,
@@ -538,23 +461,21 @@ export const InteractiveNativePrototype = () => {
         };
       }
     ).__premarkNativeEditor = {
-      markdown: () => editor.markdown,
+      markdown: () => controller.markdown(),
       insertRemote(offset, text) {
-        editor.adapter.transact((tx) => {
-          tx.insert(offset, text);
-        });
+        controller.applyEdit({ type: "insert", offset, text }, { recordUndo: false });
         render();
       },
       resize(width) {
-        editor.resize(width);
+        controller.resize(width);
         render();
       },
       setSelection(anchor, head) {
-        editor.setSelection(anchor, head);
+        controller.setSelection(anchor, head);
         render();
       },
       setCaret(offset) {
-        editor.setSelection(offset, offset);
+        controller.setCaret(offset);
         render();
       },
     };

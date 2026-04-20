@@ -14,6 +14,27 @@ export {
   replaceRangeOperation,
 } from "./edit-ops.ts";
 export {
+  createInMemoryPremarkEditorController,
+  createPremarkEditorController,
+  PremarkEditorController,
+} from "./editor-controller.ts";
+export type {
+  CreatePremarkEditorControllerOptions,
+  PremarkEditorApplyEditOptions,
+  PremarkEditorChangeEvent,
+  PremarkEditorCompositionChangeEvent,
+  PremarkEditorControllerFromStateOptions,
+  PremarkEditorControllerOptions,
+  PremarkEditorEvent,
+  PremarkEditorEventMap,
+  PremarkEditorRenderSnapshot,
+  PremarkEditorRenderSnapshotOptions,
+  PremarkEditorSelectionChangeEvent,
+  PremarkEditorSelectionSnapshot,
+  PremarkEditorSetMarkdownOptions,
+  PremarkEditorViewportChangeEvent,
+} from "./editor-controller.ts";
+export {
   createEditorDocumentState,
   createInMemoryEditorDocumentState,
   EditorDocumentState,
