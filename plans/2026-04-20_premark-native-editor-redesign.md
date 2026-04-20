@@ -76,7 +76,7 @@ Goal: make rendered Premark output addressable enough to edit directly.
 - [x] Implement `sourceOffsetToCaretRect(offset, affinity)`.
 - [ ] Implement line/word/block granularity hit-test helpers.
 - [ ] Add tests for Latin, CJK, emoji, inline code, links, list markers, blockquotes, and code blocks.
-- [ ] Add grapheme fixtures for combining marks, emoji ZWJ sequences, flags, skin tones, and CJK punctuation.
+- [x] Add grapheme fixtures for combining marks, emoji ZWJ sequences, flags, skin tones, and CJK punctuation.
 - [ ] Add bidi fixtures for mixed English/Hebrew/Arabic/numbers/Markdown markers, even if first support is limited to documented behavior.
 - [ ] Add coordinate transform tests for scroll, zoom, device scale factor, and nested canvas/world transforms.
 
@@ -199,3 +199,4 @@ Acceptance:
 - Verified initial implementation with `vp check --fix`, `vp test`, and `vp run build`. Existing unrelated warnings remain in `packages/wiki-canvas/src/layout.ts` and `tools/wiki-canvas/src/cli.ts`.
 - Added input event trace normalization for composition event-order variants, soft-keyboard-style input without keydown, clipboard events, selectionchange events, and Shift/Command arrow keyboard selection intents.
 - Added `EditorDocumentState` to tie the in-memory adapter, parser state, inline source map, layout, editable index, selection, and composition session into one reusable core object for later DOM/Canvas editor views.
+- Added grapheme sidecar helpers for segmentation, caret snapping, and delete backward/forward ranges over combining marks, emoji ZWJ sequences, flags, skin tones, and CJK text.

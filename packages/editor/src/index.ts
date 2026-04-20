@@ -15,6 +15,12 @@ export {
   createInMemoryTextDocumentAdapter,
   InMemoryTextDocumentAdapter,
 } from "./memory-adapter.ts";
+export {
+  createGraphemeSegments,
+  graphemeDeleteBackwardRange,
+  graphemeDeleteForwardRange,
+  snapOffsetToGraphemeBoundary,
+} from "./grapheme.ts";
 export { InputEventTraceRecorder, normalizeInputTrace } from "./input-trace.ts";
 export {
   createResolvedRange,
