@@ -63,6 +63,25 @@ describe("EditableLayoutIndex", () => {
     );
   });
 
+  it("keeps plaintext-visible parser nodes visible and source-addressable", () => {
+    const markdown = "A &amp; B &#x1F600; C <!-- note --> D";
+    const { index, inlineSources } = createTestIndex(markdown);
+    const visible = index.fragments.map((fragment) => fragment.text).join("");
+    const amp = index.sourceOffsetToCaretRect(markdown.indexOf("&amp;") + 1);
+    const comment = index.sourceOffsetToCaretRect(markdown.indexOf("note"));
+
+    expect(visible).toContain("A & B 😀 C <!-- note --> D");
+    expect(inlineSources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ sourceText: "&amp;", renderedText: "&" }),
+        expect.objectContaining({ sourceText: "&#x1F600;", renderedText: "😀" }),
+        expect.objectContaining({ sourceText: "<!-- note -->", renderedText: "<!-- note -->" }),
+      ]),
+    );
+    expect(amp.fragment?.text).toContain("&");
+    expect(comment.fragment?.text).toContain("<!-- note -->");
+  });
+
   it("hit-tests visible text into UTF-16 source offsets", () => {
     const markdown = "Hello **bold** and `code`";
     const state = createIncrementalParseState(markdown);
@@ -239,6 +258,39 @@ describe("EditableLayoutIndex", () => {
     const nextCaret = index.sourceOffsetToCaretRect(wOffset + 1);
     const hit = index.hitTest((caret.rect.x + nextCaret.rect.x) / 2, caret.rect.y + 1);
     expect(hit.offset).toBe(wOffset);
+  });
+
+  it("uses grapheme boundaries for emoji caret and hit-test placement", () => {
+    const emoji = "👨‍👩‍👧‍👦";
+    const markdown = `A ${emoji} B`;
+    const { index } = createTestIndex(markdown);
+    const fragment = index.fragments.find((candidate) => candidate.text.includes(emoji));
+    expect(fragment).toBeDefined();
+
+    const emojiFrom = markdown.indexOf(emoji);
+    const emojiTo = emojiFrom + emoji.length;
+    const localEmojiTo = emojiTo - fragment!.sourceRange.from;
+    const measuredFullWidth = measuredTextWidth(fragment!.text, fragment!.font);
+    const measuredEmojiEndWidth = measuredTextWidth(
+      fragment!.text.slice(0, localEmojiTo),
+      fragment!.font,
+    );
+    const expectedEmojiEndX =
+      fragment!.rect.x + (measuredEmojiEndWidth / measuredFullWidth) * fragment!.rect.width;
+
+    const before = index.sourceOffsetToCaretRect(emojiFrom, "before");
+    const insideBefore = index.sourceOffsetToCaretRect(emojiFrom + 2, "before");
+    const insideAfter = index.sourceOffsetToCaretRect(emojiFrom + 2, "after");
+    const after = index.sourceOffsetToCaretRect(emojiTo, "after");
+
+    expect(insideBefore.rect.x).toBeCloseTo(before.rect.x, 0);
+    expect(insideAfter.rect.x).toBeCloseTo(after.rect.x, 0);
+    expect(after.rect.x).toBeCloseTo(expectedEmojiEndX, 0);
+
+    const leftHit = index.hitTest(before.rect.x + 1, before.rect.y + 1);
+    const rightHit = index.hitTest(after.rect.x - 1, after.rect.y + 1);
+    expect(leftHit.offset).toBe(emojiFrom);
+    expect(rightHit.offset).toBe(emojiTo);
   });
 
   it("keeps inline-code caret positions inside the code pill padding", () => {

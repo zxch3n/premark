@@ -1,7 +1,9 @@
 import { type SyntaxNode, type Tree } from "@lezer/common";
 import { GFM, parser as baseParser } from "@lezer/markdown";
 
+import { decodeMarkdownEntity } from "./entities.ts";
 import { freezeBlockSpans, freezeMarkdownBlocks } from "./immutable.ts";
+import { findPlainUrlMatchAt, findPlainUrlMatches } from "./plain-url.ts";
 import type {
   BlockSpan,
   CodeBlockNode,
@@ -21,6 +23,15 @@ interface TopLevelBlockEntry {
   span: BlockSpan;
 }
 
+interface InlineConversionOptions {
+  readonly plainUrls: boolean;
+}
+
+interface ConvertedInlineNode {
+  readonly nodes: readonly MarkdownInline[];
+  readonly to: number;
+}
+
 export interface ParsedMarkdownDocument {
   tree: Tree;
   blocks: readonly MarkdownBlock[];
@@ -28,6 +39,12 @@ export interface ParsedMarkdownDocument {
 }
 
 const markdownParser = baseParser.configure(GFM);
+const defaultInlineConversionOptions: InlineConversionOptions = {
+  plainUrls: true,
+};
+const linkLabelInlineConversionOptions: InlineConversionOptions = {
+  plainUrls: false,
+};
 
 export function parseMarkdown(markdown: string): readonly MarkdownBlock[] {
   return parseMarkdownDocument(markdown).blocks;
@@ -358,6 +375,7 @@ function convertInlineRange(
   definitions: Map<string, ReferenceDefinition>,
   from = node.from,
   to = node.to,
+  options: InlineConversionOptions = defaultInlineConversionOptions,
 ): MarkdownInline[] {
   const output: MarkdownInline[] = [];
   let cursor = from;
@@ -368,7 +386,8 @@ function convertInlineRange(
     }
 
     if (child.from > cursor) {
-      pushText(output, markdown.slice(cursor, Math.min(child.from, to)));
+      const textTo = Math.min(child.from, to);
+      pushText(output, markdown.slice(cursor, textTo), options, markdown[textTo] === "\\");
     }
 
     if (child.from < cursor) {
@@ -376,12 +395,13 @@ function convertInlineRange(
       continue;
     }
 
-    output.push(...convertInlineNode(child, markdown, definitions));
-    cursor = child.to;
+    const converted = convertInlineNode(child, markdown, definitions, options);
+    output.push(...converted.nodes);
+    cursor = Math.min(Math.max(converted.to, child.to), to);
   }
 
   if (cursor < to) {
-    pushText(output, markdown.slice(cursor, to));
+    pushText(output, markdown.slice(cursor, to), options);
   }
 
   return output;
@@ -391,46 +411,111 @@ function convertInlineNode(
   node: SyntaxNode,
   markdown: string,
   definitions: Map<string, ReferenceDefinition>,
-): MarkdownInline[] {
+  options: InlineConversionOptions,
+): ConvertedInlineNode {
   switch (node.type.name) {
     case "StrongEmphasis":
-      return [convertWrappedInline(node, markdown, definitions, "strong")];
+      return convertedInlineNode(node, [
+        convertWrappedInline(node, markdown, definitions, "strong", options),
+      ]);
     case "Emphasis":
-      return [convertWrappedInline(node, markdown, definitions, "emphasis")];
+      return convertedInlineNode(node, [
+        convertWrappedInline(node, markdown, definitions, "emphasis", options),
+      ]);
     case "Strikethrough":
-      return [convertWrappedInline(node, markdown, definitions, "strikethrough")];
+      return convertedInlineNode(node, [
+        convertWrappedInline(node, markdown, definitions, "strikethrough", options),
+      ]);
     case "InlineCode":
-      return [
+      return convertedInlineNode(node, [
         {
           type: "code-span",
           text: stripCodeMarks(markdown.slice(node.from, node.to)),
         },
-      ];
+      ]);
     case "Link":
-      return [convertLink(node, markdown, definitions)];
+      return convertedInlineNode(node, [convertLink(node, markdown, definitions)]);
     case "Image":
-      return [convertImage(node, markdown, definitions)];
+      return convertedInlineNode(node, [convertImage(node, markdown, definitions)]);
     case "Autolink":
-      return [convertAutolink(node, markdown)];
+      return convertedInlineNode(node, [convertAutolink(node, markdown)]);
+    case "URL":
+      return convertBareUrl(node, markdown, options);
+    case "Entity":
+      return convertedInlineNode(node, [
+        {
+          type: "text",
+          text: decodeMarkdownEntity(markdown.slice(node.from, node.to)),
+        },
+      ]);
     case "HTMLTag":
-      return [
+    case "Comment":
+      return convertedInlineNode(node, [
         {
           type: "html",
           content: markdown.slice(node.from, node.to),
         },
-      ];
+      ]);
     case "HardBreak":
-      return [{ type: "hardbreak" }];
+      return convertedInlineNode(node, [{ type: "hardbreak" }]);
     case "Escape":
-      return [
+      return convertedInlineNode(node, [
         {
           type: "text",
           text: markdown.slice(node.from + 1, node.to),
         },
-      ];
+      ]);
     default:
-      return [];
+      return convertedInlineNode(node, [
+        {
+          type: "text",
+          text: markdown.slice(node.from, node.to),
+        },
+      ]);
   }
+}
+
+function convertedInlineNode(
+  node: SyntaxNode,
+  nodes: readonly MarkdownInline[],
+): ConvertedInlineNode {
+  return {
+    nodes,
+    to: node.to,
+  };
+}
+
+function convertBareUrl(
+  node: SyntaxNode,
+  markdown: string,
+  options: InlineConversionOptions,
+): ConvertedInlineNode {
+  const plainUrl = findPlainUrlMatchAt(markdown, node.from);
+  const href = plainUrl?.text ?? markdown.slice(node.from, node.to);
+  if (plainUrl === null || !options.plainUrls || !isConvertibleBareUrlNode(node, markdown)) {
+    return convertedInlineNode(node, [
+      {
+        type: "text",
+        text: href,
+      },
+    ]);
+  }
+
+  return {
+    nodes: [
+      {
+        type: "link",
+        href,
+        children: [
+          {
+            type: "text",
+            text: href,
+          },
+        ],
+      },
+    ],
+    to: plainUrl.to,
+  };
 }
 
 function convertWrappedInline(
@@ -438,6 +523,7 @@ function convertWrappedInline(
   markdown: string,
   definitions: Map<string, ReferenceDefinition>,
   type: "strong" | "emphasis" | "strikethrough",
+  options: InlineConversionOptions,
 ): MarkdownInline {
   const children = getChildren(node);
   const innerFrom = children[0]?.to ?? node.from;
@@ -445,7 +531,7 @@ function convertWrappedInline(
 
   return {
     type,
-    children: convertInlineRange(node, markdown, definitions, innerFrom, innerTo),
+    children: convertInlineRange(node, markdown, definitions, innerFrom, innerTo, options),
   };
 }
 
@@ -513,8 +599,16 @@ function readLinkDescriptor(
   );
   const labelFrom = openingMark?.to ?? node.from;
   const labelTo = closingBracket?.from ?? node.to;
-  const inlineChildren = convertInlineRange(node, markdown, definitions, labelFrom, labelTo);
-  const urlNode = children.find((child) => child.type.name === "URL") ?? null;
+  const inlineChildren = convertInlineRange(
+    node,
+    markdown,
+    definitions,
+    labelFrom,
+    labelTo,
+    linkLabelInlineConversionOptions,
+  );
+  const urlNode =
+    children.find((child) => child.type.name === "URL" && child.from >= labelTo) ?? null;
   const titleNode = children.find((child) => child.type.name === "LinkTitle") ?? null;
   const referenceNode = children.find((child) => child.type.name === "LinkLabel") ?? null;
   const resolvedReference =
@@ -578,6 +672,18 @@ function stripCodeMarks(value: string): string {
   return value.replace(/^`+/u, "").replace(/`+$/u, "");
 }
 
+function isHttpUrl(value: string): boolean {
+  return /^https?:\/\//iu.test(value);
+}
+
+function isConvertibleBareUrlNode(node: SyntaxNode, markdown: string): boolean {
+  return (
+    isHttpUrl(markdown.slice(node.from, node.to)) &&
+    markdown[node.from - 1] !== "\\" &&
+    markdown[node.to] !== "\\"
+  );
+}
+
 function parseOrderedStart(markdown: string, mark: SyntaxNode | null): number {
   if (mark === null) {
     return 1;
@@ -628,7 +734,39 @@ function skipWhitespace(markdown: string, from: number, to: number): number {
   return cursor;
 }
 
-function pushText(target: MarkdownInline[], text: string): void {
+function pushText(
+  target: MarkdownInline[],
+  text: string,
+  options: InlineConversionOptions = defaultInlineConversionOptions,
+  endsBeforeEscape = false,
+): void {
+  if (!options.plainUrls) {
+    pushPlainText(target, text);
+    return;
+  }
+
+  let cursor = 0;
+  for (const match of findPlainUrlMatches(text)) {
+    if (endsBeforeEscape && match.to === text.length) {
+      continue;
+    }
+    pushPlainText(target, text.slice(cursor, match.from));
+    target.push({
+      type: "link",
+      href: match.text,
+      children: [
+        {
+          type: "text",
+          text: match.text,
+        },
+      ],
+    });
+    cursor = match.to;
+  }
+  pushPlainText(target, text.slice(cursor));
+}
+
+function pushPlainText(target: MarkdownInline[], text: string): void {
   if (text.length === 0) {
     return;
   }

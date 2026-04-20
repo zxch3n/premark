@@ -18,6 +18,17 @@ describe("renderToHtml", () => {
     expect(rendered.css).toContain(".pmd-code");
   });
 
+  it("renders bare HTTP URLs as anchor tags", () => {
+    const engine = createLayoutEngine({
+      fontTheme: "github",
+    });
+    const layout = engine.layout("Visit https://example.com.", 420);
+    const rendered = renderToHtml(layout);
+
+    expect(rendered.html).toContain('href="https://example.com"');
+    expect(rendered.html).toContain(">https://example.com</a>");
+  });
+
   it("escapes quoted font families in style attributes", () => {
     const engine = createLayoutEngine({
       fontTheme: "modern",

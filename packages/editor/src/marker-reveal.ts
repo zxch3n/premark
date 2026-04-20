@@ -156,11 +156,22 @@ function findActiveMarkerTokens(
   return inlineSources
     .filter(
       (record) =>
-        REVEALABLE_TYPES.has(record.type) && shouldRevealControlRange(record.source, { from, to }),
+        hasRevealableMarkdownControls(record) &&
+        shouldRevealControlRange(record.source, { from, to }),
     )
     .sort(
       (left, right) => left.source.to - left.source.from - (right.source.to - right.source.from),
     );
+}
+
+function hasRevealableMarkdownControls(record: MarkdownInlineSourceRecord): boolean {
+  if (!REVEALABLE_TYPES.has(record.type)) {
+    return false;
+  }
+  if (record.type !== "link") {
+    return true;
+  }
+  return record.sourceText.startsWith("[") || record.sourceText.startsWith("<");
 }
 
 interface ActiveBlockControl {

@@ -118,6 +118,15 @@ describe("Markdown control reveal", () => {
     }
   });
 
+  it("does not reveal Markdown controls for bare URL links", () => {
+    const markdown = "Visit https://example.com now";
+    const revealed = reveal(markdown, markdown.indexOf("example"));
+
+    expect(revealed.markerState).toBe("hidden");
+    expect(revealed.markdown).toBe(markdown);
+    expect(revealed.activeControls).toEqual([]);
+  });
+
   it("emits explicit editable runs for revealed control characters", () => {
     const strong = reveal("**abc**", 1);
     const strongControls = strong.sourceMap.runs.filter(

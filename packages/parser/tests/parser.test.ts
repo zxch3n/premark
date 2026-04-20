@@ -207,6 +207,103 @@ describe("parseMarkdown", () => {
     expect(JSON.stringify(blocks)).toContain("中文");
     expect(JSON.stringify(blocks)).toContain("😀");
   });
+
+  it("promotes bare HTTP URLs to links without swallowing trailing punctuation", () => {
+    const url = "https://example.com/path_(ok)?q=1";
+    const blocks = parseMarkdown(`Visit ${url}.`);
+
+    expect(blocks[0]).toMatchObject({
+      type: "paragraph",
+      children: [
+        { type: "text", text: "Visit " },
+        {
+          type: "link",
+          href: url,
+          children: [{ type: "text", text: url }],
+        },
+        { type: "text", text: "." },
+      ],
+    });
+    expect(findLinkHref(blocks, url)).toBe(true);
+  });
+
+  it("does not promote bare URLs inside code spans or Markdown link labels", () => {
+    const blocks = parseMarkdown("`https://code.example` [https://label.example](./target)");
+
+    expect(findLinkHref(blocks, "https://code.example")).toBe(false);
+    expect(findLinkHref(blocks, "https://label.example")).toBe(false);
+    expect(findLinkHref(blocks, "./target")).toBe(true);
+  });
+
+  it("does not promote escaped URL-shaped control text", () => {
+    const blocks = parseMarkdown("\\(https://example\\.com\\)");
+
+    expect(findLinkHref(blocks, "https://example")).toBe(false);
+    expect(JSON.stringify(blocks)).toContain("https://example");
+  });
+
+  it("emits block records and inline source records for bare URL links", () => {
+    const url = "https://example.com?a=1&b=2";
+    const markdown = `Visit ${url}.`;
+    const state = createIncrementalParseState(markdown);
+    const blockRecords = createMarkdownBlockRecords(state);
+    const inlineSources = createMarkdownInlineSourceMap(state);
+    const linkSource = inlineSources.find((record) => record.type === "link");
+
+    expect(blockRecords[0]).toMatchObject({
+      type: "paragraph",
+      renderedText: `Visit ${url}.`,
+      links: [{ href: url, text: url, kind: "link" }],
+    });
+    expect(linkSource).toMatchObject({
+      type: "link",
+      source: { from: "Visit ".length, to: "Visit ".length + url.length },
+      sourceText: url,
+      renderedText: url,
+    });
+    expect(findInlineSourceRecordsAtOffset(inlineSources, markdown.indexOf("example"))).toEqual(
+      expect.arrayContaining([expect.objectContaining({ type: "link", sourceText: url })]),
+    );
+  });
+
+  it("preserves plaintext-visible inline source instead of dropping parser nodes", () => {
+    const markdown = "A &amp; B &#x1F600; C <!-- note --> D";
+    const blocks = parseMarkdown(markdown);
+    const state = createIncrementalParseState(markdown);
+    const inlineSources = createMarkdownInlineSourceMap(state);
+
+    expect(blocks[0]).toMatchObject({
+      type: "paragraph",
+      children: [
+        { type: "text", text: "A " },
+        { type: "text", text: "&" },
+        { type: "text", text: " B " },
+        { type: "text", text: "😀" },
+        { type: "text", text: " C " },
+        { type: "html", content: "<!-- note -->" },
+        { type: "text", text: " D" },
+      ],
+    });
+    expect(inlineSources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "text",
+          sourceText: "&amp;",
+          renderedText: "&",
+        }),
+        expect.objectContaining({
+          type: "text",
+          sourceText: "&#x1F600;",
+          renderedText: "😀",
+        }),
+        expect.objectContaining({
+          type: "html",
+          sourceText: "<!-- note -->",
+          renderedText: "<!-- note -->",
+        }),
+      ]),
+    );
+  });
 });
 
 describe("StreamParser", () => {
