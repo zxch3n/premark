@@ -12,6 +12,8 @@ const osInputScript = join(root, "tests/macos-ime/os-input.swift");
 const scenarioSetName = process.env.PREMARK_MACOS_IME_SCENARIO_SET ?? "pinyin";
 const strictRealIme = process.env.PREMARK_MACOS_IME_STRICT === "1";
 const dryRun = process.env.PREMARK_MACOS_IME_DRY_RUN === "1" || process.argv.includes("--dry-run");
+const preflight =
+  process.env.PREMARK_MACOS_IME_PREFLIGHT === "1" || process.argv.includes("--preflight");
 
 const PINYIN_NIHAO_KEY_CODES = [45, 34, 4, 0, 31, 49, 36];
 const PINYIN_SCENARIOS = [
@@ -192,36 +194,117 @@ function parseInputSources(sources) {
     .filter((source) => source.id.length > 0);
 }
 
+function dedupeInputSources(sources) {
+  const byId = new Map();
+  for (const source of sources) {
+    const existing = byId.get(source.id);
+    if (existing === undefined) {
+      byId.set(source.id, source);
+      continue;
+    }
+    byId.set(source.id, {
+      ...existing,
+      enabled: existing.enabled || source.enabled,
+      name: existing.name || source.name,
+    });
+  }
+  return [...byId.values()];
+}
+
 function findImeCandidates(sources, patterns) {
   return sources.filter((source) =>
     patterns.some((pattern) => pattern.test(`${source.id} ${source.name}`)),
   );
 }
 
-function writeDryRunReport(report) {
+function writeReport(report, name) {
   mkdirSync(join(root, "test-results/macos-ime"), { recursive: true });
-  writeFileSync(
-    join(root, "test-results/macos-ime/dry-run.json"),
-    `${JSON.stringify(report, null, 2)}\n`,
-  );
-  writeFileSync(
-    join(root, "test-results/macos-ime/dry-run.txt"),
+  const json = `${JSON.stringify(report, null, 2)}\n`;
+  const text =
     [
+      `mode=${report.mode}`,
       `scenarioSet=${report.selectedScenarioSetName}`,
       `requestedScenarioSet=${report.requestedScenarioSetName}`,
       `current=${report.currentInputSourceID}`,
       `target=${report.targetInputSourceID}`,
       `targetFound=${String(report.targetFound)}`,
+      `targetInstalled=${String(report.targetInstalled)}`,
       `usFound=${String(report.usFound)}`,
+      `usInstalled=${String(report.usInstalled)}`,
       `targetCandidates=${report.targetCandidates.length}`,
+      `targetInstalledCandidates=${report.targetInstalledCandidates.length}`,
       `selectedScenarios=${report.selectedScenarios.length}`,
       `pinyinCandidates=${report.pinyinCandidates.length}`,
+      `pinyinInstalledCandidates=${report.pinyinInstalledCandidates.length}`,
       `japaneseCandidates=${report.japaneseCandidates.length}`,
+      `japaneseInstalledCandidates=${report.japaneseInstalledCandidates.length}`,
       `koreanCandidates=${report.koreanCandidates.length}`,
+      `koreanInstalledCandidates=${report.koreanInstalledCandidates.length}`,
       `osInputHelper=${report.osInputHelper}`,
+      report.foreground === undefined
+        ? undefined
+        : `systemEventsFrontmost=${report.foreground.systemEventsFrontmost}`,
+      report.foreground === undefined
+        ? undefined
+        : `nsWorkspaceFrontmost=${report.foreground.nsWorkspaceFrontmost.name}`,
       "",
-    ].join("\n"),
+    ]
+      .filter((line) => line !== undefined)
+      .join("\n") + "\n";
+  for (const stem of [name, `${name}-${report.selectedScenarioSetName}`]) {
+    writeFileSync(join(root, `test-results/macos-ime/${stem}.json`), json);
+    writeFileSync(join(root, `test-results/macos-ime/${stem}.txt`), text);
+  }
+}
+
+function buildReadinessReport({ mode, parsedSources, parsedAllSources, includeForeground }) {
+  const allScenarioSets = Object.fromEntries(
+    Object.entries(SCENARIO_SETS).map(([name, set]) => [
+      name,
+      set.scenarios.map((scenario) => ({
+        name: scenario.name,
+        description: scenario.description,
+      })),
+    ]),
   );
+  const targetCandidates = findImeCandidates(parsedSources, scenarioSet.candidatePatterns);
+  const targetInstalledCandidates = findImeCandidates(
+    parsedAllSources,
+    scenarioSet.candidatePatterns,
+  );
+  const pinyinPatterns = [/pinyin/iu, /SCIM/iu, /ITABC/iu];
+  const japanesePatterns = [/japanese/iu, /kotoeri/iu, /romaji/iu];
+  const koreanPatterns = [/korean/iu, /hangul/iu, /2Set/iu];
+
+  return {
+    mode,
+    requestedScenarioSetName: scenarioSetName,
+    selectedScenarioSetName,
+    currentInputSourceID: swiftInputSource("current"),
+    targetInputSourceID,
+    targetFound: parsedSources.some((source) => source.id === targetInputSourceID),
+    targetInstalled: parsedAllSources.some((source) => source.id === targetInputSourceID),
+    usFound: parsedSources.some((source) => source.id === "com.apple.keylayout.US"),
+    usInstalled: parsedAllSources.some((source) => source.id === "com.apple.keylayout.US"),
+    targetCandidates,
+    targetInstalledCandidates,
+    pinyinCandidates: findImeCandidates(parsedSources, pinyinPatterns),
+    pinyinInstalledCandidates: findImeCandidates(parsedAllSources, pinyinPatterns),
+    japaneseCandidates: findImeCandidates(parsedSources, japanesePatterns),
+    japaneseInstalledCandidates: findImeCandidates(parsedAllSources, japanesePatterns),
+    koreanCandidates: findImeCandidates(parsedSources, koreanPatterns),
+    koreanInstalledCandidates: findImeCandidates(parsedAllSources, koreanPatterns),
+    selectedScenarios: scenarioSet.scenarios.map((scenario) => ({
+      name: scenario.name,
+      description: scenario.description,
+    })),
+    scenarioSets: allScenarioSets,
+    osInputHelper: swiftOsInput("check"),
+    enabledSourceCount: parsedSources.filter((source) => source.enabled).length,
+    sourceCount: parsedSources.length,
+    installedSourceCount: parsedAllSources.length,
+    foreground: includeForeground ? foregroundSnapshot() : undefined,
+  };
 }
 
 function osascript(script) {
@@ -314,11 +397,19 @@ print([(app?.localizedName ?? ""), (app?.bundleIdentifier ?? ""), String(app?.pr
   };
 }
 
+function foregroundSnapshot() {
+  return {
+    systemEventsFrontmost: osascript(
+      'tell application "System Events" to get name of first application process whose frontmost is true',
+    ),
+    nsWorkspaceFrontmost: nsWorkspaceFrontmostApplication(),
+  };
+}
+
 async function foregroundDiagnostics(browserProcessName) {
   return {
     browserProcessName,
-    systemEventsFrontmost: await frontmostProcessName(),
-    nsWorkspaceFrontmost: nsWorkspaceFrontmostApplication(),
+    ...foregroundSnapshot(),
   };
 }
 
@@ -597,47 +688,34 @@ async function launchMacBrowser() {
 
 async function main() {
   const sources = swiftInputSource("list");
-  const parsedSources = parseInputSources(sources);
+  const allSources = swiftInputSource("list-all");
+  const parsedListedSources = parseInputSources(sources);
+  const parsedAllSources = dedupeInputSources(parseInputSources(allSources));
+  const parsedSources = dedupeInputSources([
+    ...parsedListedSources,
+    ...parsedAllSources.filter((source) => source.enabled),
+  ]);
   const usSourceID = "com.apple.keylayout.US";
 
-  if (dryRun) {
-    const allScenarioSets = Object.fromEntries(
-      Object.entries(SCENARIO_SETS).map(([name, set]) => [
-        name,
-        set.scenarios.map((scenario) => ({
-          name: scenario.name,
-          description: scenario.description,
-        })),
-      ]),
-    );
-    const report = {
-      mode: "dry-run",
-      requestedScenarioSetName: scenarioSetName,
-      selectedScenarioSetName,
-      currentInputSourceID: swiftInputSource("current"),
-      targetInputSourceID,
-      targetFound: parsedSources.some((source) => source.id === targetInputSourceID),
-      usFound: parsedSources.some((source) => source.id === usSourceID),
-      targetCandidates: findImeCandidates(parsedSources, scenarioSet.candidatePatterns),
-      pinyinCandidates: findImeCandidates(parsedSources, [/pinyin/iu, /SCIM/iu, /ITABC/iu]),
-      japaneseCandidates: findImeCandidates(parsedSources, [/japanese/iu, /kotoeri/iu, /romaji/iu]),
-      koreanCandidates: findImeCandidates(parsedSources, [/korean/iu, /hangul/iu, /2Set/iu]),
-      selectedScenarios: scenarioSet.scenarios.map((scenario) => ({
-        name: scenario.name,
-        description: scenario.description,
-      })),
-      scenarioSets: allScenarioSets,
-      osInputHelper: swiftOsInput("check"),
-      enabledSourceCount: parsedSources.filter((source) => source.enabled).length,
-      sourceCount: parsedSources.length,
-    };
-    writeDryRunReport(report);
-    console.log(`[macos-ime] dry-run report written: ${JSON.stringify(report, null, 2)}`);
+  if (dryRun || preflight) {
+    const mode = preflight ? "preflight" : "dry-run";
+    const report = buildReadinessReport({
+      mode,
+      parsedSources,
+      parsedAllSources,
+      includeForeground: preflight,
+    });
+    writeReport(report, preflight ? "preflight" : "dry-run");
+    console.log(`[macos-ime] ${mode} report written: ${JSON.stringify(report, null, 2)}`);
     return;
   }
 
   if (!parsedSources.some((source) => source.id === targetInputSourceID)) {
-    console.log(`[macos-ime] skipped: input source not found: ${targetInputSourceID}`);
+    const installed = parsedAllSources.some((source) => source.id === targetInputSourceID);
+    console.log(
+      `[macos-ime] skipped: input source not enabled: ${targetInputSourceID}` +
+        (installed ? " (installed but disabled)" : " (not installed)"),
+    );
     console.log(sources);
     return;
   }

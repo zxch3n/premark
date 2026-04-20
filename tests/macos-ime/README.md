@@ -12,10 +12,23 @@ Non-interactive readiness check:
 vp run test:macos-ime:dry-run
 ```
 
+Foreground/input-source preflight:
+
+```sh
+vp run test:macos-ime:preflight
+```
+
 The dry run does not build Storybook, launch a browser, foreground an app, or post keyboard/HID
 events. It only verifies the Swift helpers, records the current input source, checks whether the
-selected target IME and US sources are available, lists likely Pinyin/Japanese/Korean input-source
-candidates, and records the selected scenario set.
+selected target IME and US sources are enabled, lists likely Pinyin/Japanese/Korean input-source
+candidates from both enabled and all installed input sources, and records the selected scenario set.
+The preflight has the same no-HID/no-browser boundary, but also records current macOS foreground
+diagnostics from both System Events and `NSWorkspace`. It is the quick check to run before the
+exclusive real IME path.
+
+Input-source readiness uses `list-all` plus each source's enabled flag because macOS can omit enabled
+input modes from `TISCreateInputSourceList(..., includeAllInstalled: false)`. The helper also has an
+explicit `enable` command for manual setup, but the runner does not enable input sources automatically.
 
 The runner builds Storybook, serves the native Premark editor story, then runs two macOS-specific probes:
 
@@ -52,11 +65,16 @@ Useful environment variables:
 - `PREMARK_MACOS_IME_BROWSER_CHANNEL`: Playwright browser channel. Defaults to `chrome`; set `bundled` to use Playwright's bundled Chromium.
 - `PREMARK_MACOS_IME_STRICT=1`: fail instead of skip when real foreground IME cannot run.
 - `PREMARK_MACOS_IME_DRY_RUN=1`: run the non-interactive readiness check only.
+- `PREMARK_MACOS_IME_PREFLIGHT=1`: run input-source plus foreground diagnostics only.
 
 Artifacts:
 
 - `test-results/macos-ime/dry-run.json`: input-source and helper readiness report.
 - `test-results/macos-ime/dry-run.txt`: short dry-run summary.
+- `test-results/macos-ime/dry-run-<scenario-set>.json`: scenario-set-specific dry-run report.
+- `test-results/macos-ime/preflight.json`: input-source plus foreground readiness report.
+- `test-results/macos-ime/preflight.txt`: short preflight summary.
+- `test-results/macos-ime/preflight-<scenario-set>.json`: scenario-set-specific preflight report.
 - `test-results/macos-ime/*-screen.png`: whole-screen OS screenshots, used for candidate-window anchoring when available.
 - `test-results/macos-ime/<scenario-name>.png`: real IME scenario screenshots.
 - `test-results/macos-ime/ime-skipped-no-foreground.png`: browser could not become foreground.
