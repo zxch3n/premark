@@ -129,6 +129,8 @@ async function measuredCanvasPointForText(page: Page, text: string) {
         x: contentPadding + expectedContentX,
         y: contentPadding + fragment.rect.y + fragment.rect.height / 2,
         expectedContentX,
+        layoutWidthDelta: Math.abs(visibleTextWidth - fullWidth),
+        fontReady: "fonts" in document ? document.fonts.check(fragment.font, fragment.text) : true,
         proportionalDelta: Math.abs(expectedContentX - proportionalContentX),
       };
     },
@@ -503,10 +505,12 @@ test.describe("Premark native editor story", () => {
     await page.goto(canvasNativeStoryUrl);
 
     const canvas = page.locator("[data-canvas-native-editor]");
+    const root = page.locator(".pcne-root");
     const bridge = page.locator("[data-canvas-input-bridge]");
     const source = page.locator("[data-canvas-debug-source]");
     await expect(canvas).toBeVisible();
     await expect(source).toContainText("Canvas native editor");
+    await expect(root).toHaveAttribute("data-fonts-ready", "1");
 
     const headingTextStart = await canvasSourceOffset(page, "Canvas native editor");
     await setCanvasCaret(page, 0);
@@ -516,6 +520,8 @@ test.describe("Premark native editor story", () => {
     await setCanvasCaret(page, headingTextStart);
     const headingTextGeometry = await readCanvasGeometry(page);
     const measuredHeadingTextStart = await measuredCanvasPointForText(page, "Canvas native editor");
+    expect(measuredHeadingTextStart.fontReady).toBe(true);
+    expect(measuredHeadingTextStart.layoutWidthDelta).toBeLessThan(1);
     expect(headingOffsetOne.headCaret.rect.x).toBeGreaterThan(headingOffsetZero.headCaret.rect.x);
     expect(headingTextGeometry.headCaret.rect.x).toBeCloseTo(
       measuredHeadingTextStart.expectedContentX,
@@ -523,6 +529,8 @@ test.describe("Premark native editor story", () => {
     );
 
     const variableStart = await measuredCanvasPointForText(page, "WWWW");
+    expect(variableStart.fontReady).toBe(true);
+    expect(variableStart.layoutWidthDelta).toBeLessThan(1);
     expect(variableStart.proportionalDelta).toBeGreaterThan(8);
     await canvas.click({ position: variableStart });
     await expect(bridge).toBeFocused();

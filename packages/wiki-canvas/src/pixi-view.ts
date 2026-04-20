@@ -3,10 +3,10 @@ import { Application, Container, Graphics, Sprite, Text, Texture } from "pixi.js
 import { createHighlighter } from "@pretext-md/highlight";
 import {
   createLayoutEngine,
+  preloadLayoutFonts,
   resolveFonts,
   type DocumentLayout,
   type LayoutEngine,
-  type ResolvedFonts,
 } from "@pretext-md/layout";
 
 import { darkTilePalette, drawTile, type TilePalette } from "./canvas-draw.ts";
@@ -133,8 +133,7 @@ export async function mountWikiCanvas(
   // layout, with visible overflow or clipping. `document.fonts.ready` alone
   // can resolve before Inter has even been requested, so we kick off loads
   // for each canvas-font string the engine will use.
-  const resolvedFonts: ResolvedFonts = resolveFonts("modern");
-  await preloadCanvasFonts(resolvedFonts);
+  await preloadLayoutFonts(resolveFonts("modern"));
 
   // 1. Build node + link metadata.
   const prepared: PreparedNode[] = options.nodes.map((node) => {
@@ -465,30 +464,6 @@ function drawEdge(
 
 function dedupe(values: string[]): string[] {
   return [...new Set(values)];
-}
-
-async function preloadCanvasFonts(fonts: ResolvedFonts): Promise<void> {
-  if (typeof document === "undefined" || !("fonts" in document)) return;
-  const canvasFonts = [
-    fonts.body,
-    fonts.bodyBold,
-    fonts.bodyItalic,
-    fonts.bodyBoldItalic,
-    fonts.inlineCode,
-    fonts.code,
-    fonts.heading1,
-    fonts.heading2,
-    fonts.heading3,
-    fonts.heading4,
-    fonts.heading5,
-    fonts.heading6,
-  ];
-  try {
-    await Promise.all(canvasFonts.map((spec) => document.fonts.load(spec)));
-    await document.fonts.ready;
-  } catch {
-    // Ignore — fall back to whatever the browser resolves.
-  }
 }
 
 function createPlaceholderTexture(palette: TilePalette): Texture {

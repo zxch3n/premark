@@ -9,6 +9,15 @@ const link = document.createElement("link");
 link.rel = "stylesheet";
 link.href =
   "https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap";
+const fontStylesReady = new Promise<void>((resolve) => {
+  link.addEventListener("load", () => resolve(), { once: true });
+  link.addEventListener("error", () => resolve(), { once: true });
+});
+(
+  window as typeof window & {
+    __premarkStoryFontStylesReady?: Promise<void>;
+  }
+).__premarkStoryFontStylesReady = fontStylesReady;
 document.head.append(link);
 
 // Global smooth font rendering
