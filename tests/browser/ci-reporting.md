@@ -11,11 +11,13 @@ The browser config keeps `screenshot: "only-on-failure"` and
 at least one failure screenshot plus a `trace.zip`. Deterministic review crops
 created through `testInfo.outputPath(...)` are also stored beside the test output.
 
-For future baseline visual assertions, use Playwright's
-`expect(locator).toHaveScreenshot("name.png")`. On mismatch, Playwright writes
-the actual image, expected baseline, and diff image into the same output folder.
-Those actual/expected/diff images, the HTML report, and any event trace fixture
-that produced the screenshot must be uploaded together by CI.
+Baseline visual assertions are enabled for the stable native editor crops in
+`tests/browser/native-editor-visual.spec.ts`. The committed baselines live under
+`tests/browser/native-editor-visual.spec.ts-snapshots` and currently target the
+local macOS Chromium/font stack. On mismatch, Playwright writes the actual image,
+expected baseline, and diff image into the same output folder. Those
+actual/expected/diff images, the HTML report, and any event trace fixture that
+produced the screenshot must be uploaded together by CI.
 
 Current CI artifact guidance:
 
@@ -31,6 +33,11 @@ Current CI artifact guidance:
       artifacts/playwright-browser-html
 ```
 
-This project still treats generated screenshot crops as review artifacts rather
-than committed baselines. Before enabling hard visual diffs, approve a stable
-baseline OS/browser/font set and commit the Playwright snapshot baselines.
+To intentionally refresh baselines after a reviewed visual change:
+
+```bash
+NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost vp exec playwright test tests/browser/native-editor-visual.spec.ts --update-snapshots
+```
+
+Do not refresh baselines as part of routine failure triage; inspect the
+actual/expected/diff images first.
