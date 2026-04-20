@@ -13,6 +13,21 @@ async function readSelection(page: import("@playwright/test").Page) {
   };
 }
 
+async function pasteMarkdown(page: import("@playwright/test").Page, markdown: string) {
+  await page.locator("[data-input-bridge]").evaluate((element, value) => {
+    const data = new DataTransfer();
+    data.setData("text/markdown", value);
+    data.setData("text/plain", value);
+    element.dispatchEvent(
+      new ClipboardEvent("paste", {
+        bubbles: true,
+        cancelable: true,
+        clipboardData: data,
+      }),
+    );
+  }, markdown);
+}
+
 test.describe("Premark native editor story", () => {
   test("supports rendered-surface click, typing, drag selection, replacement and screenshots", async ({
     page,
@@ -155,5 +170,56 @@ test.describe("Premark native editor story", () => {
     });
 
     await expect(source).not.toContainText("**Pasted**");
+  });
+
+  test("keeps hidden textarea focused and anchored after scroll, blur and resize", async ({
+    page,
+  }) => {
+    await page.goto(storyUrl);
+
+    const surface = page.locator("[data-editor-surface]");
+    const viewport = page.locator(".pne-viewport");
+    const bridge = page.locator("[data-input-bridge]");
+    const source = page.locator("[data-debug-source]");
+    await expect(surface).toContainText("Native rendered Markdown");
+
+    await surface.click({ position: { x: 118, y: 86 } });
+    await expect(bridge).toBeFocused();
+
+    const longMarkdown = Array.from(
+      { length: 36 },
+      (_, index) => `Scroll probe line ${index + 1} with enough words to wrap inside the editor.`,
+    ).join("\n\n");
+    await pasteMarkdown(page, longMarkdown);
+    await expect(source).toContainText("Scroll probe line 36");
+
+    await viewport.evaluate((element) => {
+      element.scrollTop = Math.floor(element.scrollHeight / 2);
+    });
+
+    const viewportBox = await viewport.boundingBox();
+    expect(viewportBox).not.toBeNull();
+    if (viewportBox === null) return;
+
+    await page.mouse.click(viewportBox.x + 120, viewportBox.y + 180);
+    await expect(bridge).toBeFocused();
+
+    const [bridgeRect, viewportRect] = await Promise.all([
+      bridge.evaluate((element) => element.getBoundingClientRect().toJSON()),
+      viewport.evaluate((element) => element.getBoundingClientRect().toJSON()),
+    ]);
+    expect(bridgeRect.top).toBeGreaterThanOrEqual(viewportRect.top);
+    expect(bridgeRect.top).toBeLessThanOrEqual(viewportRect.bottom);
+    expect(bridgeRect.left).toBeGreaterThanOrEqual(viewportRect.left);
+    expect(bridgeRect.left).toBeLessThanOrEqual(viewportRect.right);
+
+    await bridge.evaluate((element) => element.blur());
+    await expect(bridge).not.toBeFocused();
+    await page.mouse.click(viewportBox.x + 160, viewportBox.y + 220);
+    await expect(bridge).toBeFocused();
+
+    await page.setViewportSize({ width: 920, height: 640 });
+    await surface.click({ position: { x: 180, y: 120 } });
+    await expect(bridge).toBeFocused();
   });
 });

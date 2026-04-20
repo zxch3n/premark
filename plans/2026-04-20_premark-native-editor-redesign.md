@@ -35,6 +35,7 @@ Last Updated: 2026-04-20
 - Screenshot review caught a real bug: pointer hit-test could land inside an emoji ZWJ sequence and leave a stale suffix after replacement. Pointer selection now snaps hit-test offsets to grapheme boundaries before updating source selection.
 - Synthetic browser composition events are useful as a fast guard for DOM event wiring, but they are not a substitute for real macOS IME automation because they do not exercise OS candidate windows or native event ordering.
 - The DOM prototype now renders composition preedit with a lightweight Premark overlay underline. It is acceptable for the debug renderer but still needs real OS IME screenshots before claiming platform parity.
+- Hidden textarea anchoring needs browser-level checks because pure geometry tests cannot catch focus loss or wrong absolute positioning after scrolling.
 
 ## Removed From This Branch
 
@@ -134,7 +135,8 @@ Goal: receive real OS text input while keeping Premark as the visible editor.
 - [x] Add an input event trace recorder for `keydown`, `beforeinput`, `input`, `keyup`, `selectionchange`, `composition*`, `paste`, `copy`, and `cut`.
 - [x] Add tests proving text insertion does not rely on keydown, so mobile autocorrect/autosuggest/swipe-like input can be modeled as input operations.
 - [x] Add clipboard tests for Markdown, plain text, HTML, cross-block cut, cross-block paste, and paste while a selection is active.
-- [ ] Add focus/textarea-anchoring tests for scroll, zoom, visual viewport resize, and editor blur/refocus.
+- [x] Add focus/textarea-anchoring tests for scroll, viewport resize, and editor blur/refocus.
+- [ ] Add focus/textarea-anchoring tests for zoom and mobile visual viewport resize.
 
 Acceptance:
 
@@ -231,3 +233,4 @@ Acceptance:
 - Wired Storybook hidden textarea `compositionstart/update/end` events into `applyInputIntent` and added a Playwright synthetic composition test. Real macOS IME testing remains open.
 - Added `tests/browser/screenshot-review.md` with the first Codex visual review entry and pending screenshot categories.
 - Added Storybook paste/cut event wiring and Playwright coverage for Shift+Arrow, Shift+Command+Arrow, paste, and cut. Added a DOM debug composition underline overlay and reviewed the generated composition preedit screenshot.
+- Added Playwright focus/textarea anchoring coverage for scroll, blur/refocus, and viewport resize. Zoom and mobile visual viewport remain open.
