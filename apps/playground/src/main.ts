@@ -3,11 +3,8 @@ import { renderToHtml } from "@pretext-md/html-renderer";
 import { createLayoutEngine } from "@pretext-md/layout";
 
 import "./style.css";
-import { mountCanvasEditorApp } from "./canvas-editor/index.ts";
-import { mountVisualParityApp } from "./visual-parity/index.ts";
 
 const appRoot = document.querySelector<HTMLDivElement>("#app")!;
-const mode = new URLSearchParams(window.location.search).get("mode");
 
 const sampleMarkdown = `# @pretext-md
 
@@ -124,10 +121,4 @@ function mountPlayground(root: HTMLDivElement) {
   render();
 }
 
-if (mode === "visual-parity") {
-  mountVisualParityApp(appRoot);
-} else if (mode === "canvas-editor") {
-  mountCanvasEditorApp(appRoot);
-} else {
-  mountPlayground(appRoot);
-}
+mountPlayground(appRoot);
