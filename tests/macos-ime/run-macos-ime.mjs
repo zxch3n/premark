@@ -61,6 +61,12 @@ async function installEventProbe(page) {
               ? "input-bridge"
               : event.target.tagName.toLowerCase()
             : undefined,
+        active:
+          document.activeElement instanceof HTMLElement
+            ? document.activeElement.getAttribute("data-input-bridge") === ""
+              ? "input-bridge"
+              : document.activeElement.tagName.toLowerCase()
+            : undefined,
       });
     };
     for (const type of [
@@ -107,12 +113,17 @@ async function foregroundBrowser(browserProcessName) {
 async function focusBridge(page, browserProcessName) {
   await page.bringToFront();
   activateBrowser(browserProcessName);
-  await page.locator("[data-input-bridge]").focus();
-  await page.locator("[data-input-bridge]").click({ force: true });
-  const activeElement = await page.evaluate(() =>
-    document.activeElement?.getAttribute("data-input-bridge"),
+  await page.locator("[data-input-bridge]").evaluate((element) => {
+    const textarea = element;
+    textarea.focus({ preventScroll: true });
+    textarea.setSelectionRange(textarea.selectionStart, textarea.selectionEnd);
+  });
+  const activeElement = await page.waitForFunction(
+    () => document.activeElement?.getAttribute("data-input-bridge") === "",
+    undefined,
+    { timeout: 2_000 },
   );
-  if (activeElement === null) {
+  if ((await activeElement.jsonValue()) !== true) {
     throw new Error("Hidden textarea bridge did not become the active element");
   }
   console.log(`[macos-ime] frontmost after bridge focus: ${await frontmostProcessName()}`);
@@ -137,6 +148,26 @@ function sendTargetedKeyCodes(browserProcessName, browserPid, keyCodes) {
   }
 
   sendSystemKeyCodes(browserProcessName, keyCodes);
+}
+
+function sendHidKeyCodes(browserProcessName, keyCodes) {
+  activateBrowser(browserProcessName);
+  console.log(`[macos-ime] posting HID key codes: ${keyCodes.join(",")}`);
+  swiftOsInput("hid-keycodes", ...keyCodes.map(String));
+}
+
+async function writeImeFailureArtifact(page, name, message) {
+  mkdirSync(join(root, "test-results/macos-ime"), { recursive: true });
+  const sourceText = await page.locator("[data-debug-source]").textContent();
+  const events = await readEventProbe(page);
+  await page
+    .locator(".pne-editor-wrap")
+    .screenshot({ path: join(root, `test-results/macos-ime/${name}.png`) });
+  writeFileSync(
+    join(root, `test-results/macos-ime/${name}.json`),
+    `${JSON.stringify({ message, events, source: sourceText }, null, 2)}\n`,
+  );
+  return { events, sourceText };
 }
 
 function findPlaywrightBrowserPid() {
@@ -277,6 +308,39 @@ async function main() {
     await page.locator("[data-editor-surface]").click({ position: { x: 118, y: 86 } });
     await page.locator("[data-input-bridge]").waitFor({ state: "attached" });
 
+    if (sources.includes(usSourceID)) {
+      const selectedUS = swiftInputSource("select", usSourceID);
+      console.log(`[macos-ime] selected input source for HID probe: ${selectedUS}`);
+      await focusBridge(page, browserProcessName);
+      sendHidKeyCodes(browserProcessName, [0, 11, 8]);
+      try {
+        await page.waitForFunction(
+          () => document.querySelector("[data-debug-source]")?.textContent?.includes("abc"),
+          undefined,
+          { timeout: 5_000 },
+        );
+      } catch (error) {
+        const message =
+          "skipped real Pinyin commit: global HID key events did not reach the foreground browser. " +
+          "Real IME automation requires global key events; targeted CGEventPostToPid bypasses input-method composition.";
+        await writeImeFailureArtifact(page, "hid-probe-failed", message);
+        writeFileSync(join(root, "test-results/macos-ime/pinyin-skip.txt"), `${message}\n`);
+        if (strictRealIme) {
+          throw new Error(`[macos-ime] ${message}`, { cause: error });
+        }
+        console.log(`[macos-ime] ${message}`);
+        return;
+      }
+      console.log("[macos-ime] global HID key-event probe passed");
+    } else {
+      console.log("[macos-ime] skipped HID US probe: com.apple.keylayout.US not found");
+    }
+
+    await page.reload();
+    await installEventProbe(page);
+    await page.locator("[data-editor-surface]").click({ position: { x: 118, y: 86 } });
+    await page.locator("[data-input-bridge]").waitFor({ state: "attached" });
+
     const selected = swiftInputSource("select", targetInputSourceID);
     console.log(`[macos-ime] selected input source: ${selected}`);
     await focusBridge(page, browserProcessName);
@@ -298,7 +362,7 @@ async function main() {
       return;
     }
 
-    sendSystemKeyCodes(browserProcessName, [45, 34, 4, 0, 31, 49, 36]);
+    sendHidKeyCodes(browserProcessName, [45, 34, 4, 0, 31, 49, 36]);
 
     await page.locator("[data-debug-source]").waitFor({
       state: "attached",
@@ -310,12 +374,11 @@ async function main() {
         { timeout: 10_000 },
       );
     } catch (error) {
-      mkdirSync(join(root, "test-results/macos-ime"), { recursive: true });
-      const sourceText = await page.locator("[data-debug-source]").textContent();
-      const events = await readEventProbe(page);
-      await page
-        .locator(".pne-editor-wrap")
-        .screenshot({ path: join(root, "test-results/macos-ime/pinyin-failed.png") });
+      const { events, sourceText } = await writeImeFailureArtifact(
+        page,
+        "pinyin-failed",
+        "Pinyin commit did not produce 你好.",
+      );
       throw new Error(
         `Pinyin commit did not produce 你好. Browser events were:\n${JSON.stringify(events, null, 2)}\nSource was:\n${sourceText}`,
         { cause: error },

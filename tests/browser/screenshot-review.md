@@ -43,13 +43,27 @@ Current generated folder pattern:
 
 - Reviewer: Codex
 - Scenario: macOS real IME runner foreground check
-- Result: documented automation gap in the current Codex host
+- Result: superseded by the HID routing gap below
 - Recorded artifacts:
   - `pinyin-skipped-no-foreground.png`: the editor is loaded and focused through Playwright before the real Pinyin path is skipped.
   - `pinyin-skip.txt`: records that Chrome cannot become the foreground app and that targeted `CGEventPostToPid` bypasses input-method composition.
 - Notes:
   - The runner still verifies real macOS key events reach the hidden textarea by posting US key codes to the browser process.
-  - Real Pinyin candidate-window screenshots remain pending until the browser can safely become the foreground app; `PREMARK_MACOS_IME_STRICT=1` makes that requirement fail hard.
+  - This entry is retained for history. The newer HID routing entry is the current blocker for real Pinyin candidate-window screenshots.
+
+### 2026-04-20 macOS IME HID Routing Gap
+
+- Reviewer: Codex
+- Scenario: macOS real IME runner with Chrome foreground and global HID event probe
+- Result: documented automation gap in the current Codex host
+- Recorded artifacts:
+  - `hid-probe-failed.png`: editor is foreground and focused before global HID key events are posted.
+  - `hid-probe-failed.json`: event trace shows `a/b/c` keydown and keyup events targeting `body`, with `body` active, so the hidden textarea does not receive global OS key input.
+  - `pinyin-skip.txt`: records that real Pinyin is skipped because global HID key events do not reach the focused hidden textarea.
+- Notes:
+  - Chrome can now become the foreground app in this host.
+  - Targeted `CGEventPostToPid` still proves browser-process key delivery, but it is not a valid IME path because it bypasses macOS input-method composition.
+  - Candidate-window screenshots remain pending until global foreground key events can be routed to the hidden textarea or the runner switches to a trusted device-level automation path.
 
 ### 2026-04-20 Screenshot Mode Matrix
 
