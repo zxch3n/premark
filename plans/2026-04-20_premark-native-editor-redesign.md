@@ -173,7 +173,7 @@ Goal: support real composition without hiding behind CodeMirror.
 Acceptance:
 
 - [ ] macOS Pinyin commit, cancel, selected replacement, undo/redo, and cross-block selection pass.
-- [ ] Composition does not replace or remount the rendered surface.
+- [x] Composition does not replace or remount the rendered surface.
 - [x] Codex has reviewed saved IME screenshots or documented why a specific OS-level candidate window cannot be captured automatically.
 
 ## Phase 5: Prototype Story
@@ -284,3 +284,5 @@ Acceptance:
 - Re-ran macOS IME automation once before pausing HID work. It still skipped real Pinyin because global HID key events did not reach the focused hidden textarea. Per Zixuan's instruction, do not run macOS HID/IME tests again while the machine is in active use.
 - Added committed Playwright visual baselines for idle, cross-block selection, active marker reveal, composition near link text, and high-DPI Canvas selection. Codex reviewed the five baseline images before marking the visual-diff gate closed.
 - Verification for visual baselines: `NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost vp exec playwright test tests/browser/native-editor-visual.spec.ts --update-snapshots` generated the initial baselines, and `vp run test:browser` passes 14 Playwright tests in normal comparison mode.
+- Changed the Storybook DOM debug renderer to keep the rendered `.pmd-doc` and `.pmd-surface` nodes stable across render updates, including composition updates. The renderer now detects external DOM mutation that detaches those cached nodes and rebuilds the rendered tree before applying the next source-authoritative render.
+- Strengthened the browser composition test to assert the editor surface, rendered document node, and rendered surface node remain stable during composition while browser DOM selection stays out of the surface. `vp run test:browser` passes 14 Playwright tests after this change.

@@ -457,9 +457,26 @@ test.describe("Premark native editor story", () => {
     await expect(bridge).toBeFocused();
 
     const surfaceStableBefore = await surface.evaluate((element) => {
-      (window as typeof window & { __premarkSurfaceForTest?: Element }).__premarkSurfaceForTest =
-        element;
-      return true;
+      const renderedDocument = element.querySelector(".pmd-doc");
+      const renderedSurface = element.querySelector(".pmd-surface");
+      (
+        window as typeof window & {
+          __premarkSurfaceForTest?: Element;
+          __premarkRenderedDocumentForTest?: Element | null;
+          __premarkRenderedSurfaceForTest?: Element | null;
+        }
+      ).__premarkSurfaceForTest = element;
+      (
+        window as typeof window & {
+          __premarkRenderedDocumentForTest?: Element | null;
+        }
+      ).__premarkRenderedDocumentForTest = renderedDocument;
+      (
+        window as typeof window & {
+          __premarkRenderedSurfaceForTest?: Element | null;
+        }
+      ).__premarkRenderedSurfaceForTest = renderedSurface;
+      return renderedDocument !== null && renderedSurface !== null;
     });
     expect(surfaceStableBefore).toBe(true);
 
@@ -486,6 +503,12 @@ test.describe("Premark native editor story", () => {
         surfaceElementStable:
           (window as typeof window & { __premarkSurfaceForTest?: Element })
             .__premarkSurfaceForTest === surface,
+        renderedDocumentStable:
+          (window as typeof window & { __premarkRenderedDocumentForTest?: Element | null })
+            .__premarkRenderedDocumentForTest === surface?.querySelector(".pmd-doc"),
+        renderedSurfaceStable:
+          (window as typeof window & { __premarkRenderedSurfaceForTest?: Element | null })
+            .__premarkRenderedSurfaceForTest === surface?.querySelector(".pmd-surface"),
       };
     });
 
@@ -494,6 +517,8 @@ test.describe("Premark native editor story", () => {
     expect(domSelection.selectedText).toBe("");
     expect(domSelection.rangeCount).toBeLessThanOrEqual(1);
     expect(domSelection.surfaceElementStable).toBe(true);
+    expect(domSelection.renderedDocumentStable).toBe(true);
+    expect(domSelection.renderedSurfaceStable).toBe(true);
   });
 
   test("supports desktop keyboard selection intents in the browser story", async ({ page }) => {
