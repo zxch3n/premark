@@ -42,7 +42,8 @@ const previewLayoutEngine = createLayoutEngine({
 
 export const InteractiveNativePrototype = () => {
   const root = document.createElement("div");
-  root.className = "pne-root";
+  const screenshotMode = new URL(window.location.href).searchParams.get("screenshot") === "1";
+  root.className = screenshotMode ? "pne-root pne-screenshot-mode" : "pne-root";
 
   const editor = createInMemoryEditorDocumentState(sampleMarkdown, 720, {
     fontTheme: "modern",
@@ -107,17 +108,29 @@ export const InteractiveNativePrototype = () => {
   }
 
   function syncTextareaBridge() {
+    const compositionCaret = compositionCaretRect();
     const geometry = createSelectionGeometry(editor);
-    const caret = geometry.caret ?? geometry.headCaret;
+    const fallbackCaret = geometry.caret ?? geometry.headCaret;
+    const caretRect = compositionCaret ?? fallbackCaret.rect;
     bridgeSnapshot = createTextareaBridgeSnapshot(editor);
     textarea.value = bridgeSnapshot.value;
     textarea.setSelectionRange(bridgeSnapshot.selectionStart, bridgeSnapshot.selectionEnd);
-    textarea.style.left = `${28 + Math.max(0, caret.rect.x)}px`;
-    textarea.style.top = `${28 + Math.max(0, caret.rect.y)}px`;
-    textarea.style.height = `${Math.max(16, caret.rect.height)}px`;
+    textarea.style.left = `${28 + Math.max(0, caretRect.x)}px`;
+    textarea.style.top = `${28 + Math.max(0, caretRect.y)}px`;
+    textarea.style.height = `${Math.max(16, caretRect.height)}px`;
   }
 
   function renderSelectionOverlay(layout: ReturnType<typeof previewLayoutEngine.layout>): string {
+    const composition = renderCompositionOverlay(layout);
+    if (editor.compositionView !== null) {
+      const caret = compositionCaretRect(layout);
+      const caretHtml =
+        caret === null
+          ? ""
+          : `<div class="pne-caret" style="left:${caret.x}px;top:${caret.y}px;height:${caret.height}px"></div>`;
+      return `${composition}${caretHtml}`;
+    }
+
     const geometry = createSelectionGeometry(editor);
     const selection = geometry.selectionRects
       .map(
@@ -130,7 +143,27 @@ export const InteractiveNativePrototype = () => {
       caret === null
         ? ""
         : `<div class="pne-caret" style="left:${caret.rect.x}px;top:${caret.rect.y}px;height:${caret.rect.height}px"></div>`;
-    return `${selection}${renderCompositionOverlay(layout)}${caretHtml}`;
+    return `${selection}${composition}${caretHtml}`;
+  }
+
+  function compositionCaretRect(
+    layout: ReturnType<typeof previewLayoutEngine.layout> | null = null,
+  ) {
+    const view = editor.compositionView;
+    if (view === null) {
+      return null;
+    }
+    const activeLayout = layout ?? previewLayoutEngine.layout(view.virtualText, 720);
+    const parseState = createIncrementalParseState(view.virtualText);
+    const editableIndex = createEditableLayoutIndex({
+      markdown: view.virtualText,
+      layout: activeLayout,
+      blockSpans: parseState.blockSpans,
+      inlineSources: createMarkdownInlineSourceMap(parseState),
+    });
+    return editableIndex.sourceOffsetToCaretRect(
+      view.replacementRange.from + view.preeditText.length,
+    ).rect;
   }
 
   function renderCompositionOverlay(layout: ReturnType<typeof previewLayoutEngine.layout>): string {
@@ -288,6 +321,38 @@ export const InteractiveNativePrototype = () => {
     render();
   });
 
+  (
+    window as typeof window & {
+      __premarkNativeEditor?: {
+        markdown(): string;
+        insertRemote(offset: number, text: string): void;
+        resize(width: number): void;
+        setSelection(anchor: number, head: number): void;
+        setCaret(offset: number): void;
+      };
+    }
+  ).__premarkNativeEditor = {
+    markdown: () => editor.markdown,
+    insertRemote(offset, text) {
+      editor.adapter.transact((tx) => {
+        tx.insert(offset, text);
+      });
+      render();
+    },
+    resize(width) {
+      editor.resize(width);
+      render();
+    },
+    setSelection(anchor, head) {
+      editor.setSelection(anchor, head);
+      render();
+    },
+    setCaret(offset) {
+      editor.setSelection(offset, offset);
+      render();
+    },
+  };
+
   render();
   return root;
 };
@@ -423,5 +488,34 @@ const storyCss = `
     .pne-shell {
       grid-template-columns: 1fr;
     }
+  }
+
+  .pne-screenshot-mode {
+    min-height: auto;
+    background: #fbfcf8;
+  }
+
+  .pne-screenshot-mode .pne-shell {
+    width: 780px;
+    grid-template-columns: 1fr;
+    gap: 0;
+    padding: 0;
+  }
+
+  .pne-screenshot-mode .pne-editor-wrap {
+    border-radius: 0;
+  }
+
+  .pne-screenshot-mode .pne-toolbar {
+    display: none;
+  }
+
+  .pne-screenshot-mode .pne-viewport {
+    min-height: 420px;
+    max-height: 420px;
+  }
+
+  .pne-screenshot-mode .pne-debug {
+    display: none;
   }
 `;

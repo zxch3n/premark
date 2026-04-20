@@ -1,9 +1,10 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 
 const storyUrl =
   "/iframe.html?id=editing-premark-native-editor--interactive-native-prototype&viewMode=story";
+const screenshotStoryUrl = `${storyUrl}&screenshot=1`;
 
-async function readSelection(page: import("@playwright/test").Page) {
+async function readSelection(page: Page) {
   return JSON.parse((await page.locator("[data-debug-selection]").textContent()) ?? "{}") as {
     anchorOffset: number;
     headOffset: number;
@@ -13,7 +14,73 @@ async function readSelection(page: import("@playwright/test").Page) {
   };
 }
 
-async function pasteMarkdown(page: import("@playwright/test").Page, markdown: string) {
+async function editorMarkdown(page: Page) {
+  return page.evaluate(
+    () =>
+      (
+        window as typeof window & {
+          __premarkNativeEditor?: { markdown(): string };
+        }
+      ).__premarkNativeEditor?.markdown() ?? "",
+  );
+}
+
+async function sourceOffset(page: Page, text: string, edge: "start" | "end" = "start") {
+  const markdown = await editorMarkdown(page);
+  const offset = markdown.indexOf(text);
+  expect(offset, `source offset for ${text}`).toBeGreaterThanOrEqual(0);
+  return edge === "start" ? offset : offset + text.length;
+}
+
+async function setSourceSelection(page: Page, anchor: number, head: number) {
+  await page.evaluate(
+    ({ anchor, head }) =>
+      (
+        window as typeof window & {
+          __premarkNativeEditor?: { setSelection(anchor: number, head: number): void };
+        }
+      ).__premarkNativeEditor?.setSelection(anchor, head),
+    { anchor, head },
+  );
+}
+
+async function setSourceCaret(page: Page, offset: number) {
+  await page.evaluate(
+    (caretOffset) =>
+      (
+        window as typeof window & {
+          __premarkNativeEditor?: { setCaret(offset: number): void };
+        }
+      ).__premarkNativeEditor?.setCaret(caretOffset),
+    offset,
+  );
+}
+
+async function resizeEditor(page: Page, width: number) {
+  await page.evaluate(
+    (nextWidth) =>
+      (
+        window as typeof window & {
+          __premarkNativeEditor?: { resize(width: number): void };
+        }
+      ).__premarkNativeEditor?.resize(nextWidth),
+    width,
+  );
+}
+
+async function insertRemoteText(page: Page, offset: number, text: string) {
+  await page.evaluate(
+    ({ offset, text }) =>
+      (
+        window as typeof window & {
+          __premarkNativeEditor?: { insertRemote(offset: number, text: string): void };
+        }
+      ).__premarkNativeEditor?.insertRemote(offset, text),
+    { offset, text },
+  );
+}
+
+async function pasteMarkdown(page: Page, markdown: string) {
   await page.locator("[data-input-bridge]").evaluate((element, value) => {
     const data = new DataTransfer();
     data.setData("text/markdown", value);
@@ -29,6 +96,110 @@ async function pasteMarkdown(page: import("@playwright/test").Page, markdown: st
 }
 
 test.describe("Premark native editor story", () => {
+  test("captures deterministic screenshot-mode editor states", async ({ page }, testInfo) => {
+    await page.goto(screenshotStoryUrl);
+
+    const editor = page.locator(".pne-editor-wrap");
+    const surface = page.locator("[data-editor-surface]");
+    const bridge = page.locator("[data-input-bridge]");
+    await expect(surface).toContainText("Native rendered Markdown");
+
+    await editor.screenshot({ path: testInfo.outputPath("native-editor-shot-idle.png") });
+
+    await setSourceCaret(page, await sourceOffset(page, "Native rendered Markdown", "end"));
+    await editor.screenshot({ path: testInfo.outputPath("native-editor-shot-caret.png") });
+
+    const paragraphStart = await sourceOffset(page, "Click text");
+    const paragraphEnd = await sourceOffset(page, "rendered surface.", "end");
+    await setSourceSelection(page, paragraphStart, paragraphEnd);
+    await editor.screenshot({ path: testInfo.outputPath("native-editor-shot-forward.png") });
+
+    await setSourceSelection(page, paragraphEnd, paragraphStart);
+    await editor.screenshot({ path: testInfo.outputPath("native-editor-shot-backward.png") });
+
+    await resizeEditor(page, 360);
+    await setSourceSelection(page, paragraphStart, paragraphEnd);
+    await editor.screenshot({ path: testInfo.outputPath("native-editor-shot-wrapped.png") });
+
+    const listEnd = await sourceOffset(page, "hidden textarea", "end");
+    await setSourceSelection(page, paragraphStart, listEnd);
+    await editor.screenshot({ path: testInfo.outputPath("native-editor-shot-cross-block.png") });
+
+    await resizeEditor(page, 720);
+    const boldStart = await sourceOffset(page, "bold text");
+    const boldEnd = await sourceOffset(page, "bold text", "end");
+    await setSourceSelection(page, boldStart, boldEnd);
+    await editor.screenshot({ path: testInfo.outputPath("native-editor-shot-inline-token.png") });
+
+    await setSourceCaret(page, boldStart);
+    await bridge.evaluate((element) => {
+      element.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+      element.dispatchEvent(new CompositionEvent("compositionupdate", { data: "ni" }));
+    });
+    await expect(surface).toContainText("ni");
+    await editor.screenshot({ path: testInfo.outputPath("native-editor-shot-composition.png") });
+    await bridge.evaluate((element) => {
+      element.dispatchEvent(new CompositionEvent("compositionend", { data: "" }));
+    });
+
+    await page.goto(screenshotStoryUrl);
+    await expect(surface).toContainText("Native rendered Markdown");
+    await setSourceCaret(page, await sourceOffset(page, "Try ", "end"));
+    await pasteMarkdown(page, "**Paste Preview** ");
+    await expect(surface).toContainText("Paste Preview");
+    await editor.screenshot({ path: testInfo.outputPath("native-editor-shot-paste.png") });
+
+    await page.goto(screenshotStoryUrl);
+    await expect(surface).toContainText("Native rendered Markdown");
+    await insertRemoteText(page, 0, "> Remote edit\n\n");
+    await expect(surface).toContainText("Remote edit");
+    await editor.screenshot({ path: testInfo.outputPath("native-editor-shot-remote.png") });
+  });
+
+  test("captures high-dpi DOM selection crop", async ({ browser }, testInfo) => {
+    const context = await browser.newContext({
+      baseURL: "http://127.0.0.1:6106",
+      deviceScaleFactor: 2,
+      viewport: { width: 900, height: 640 },
+    });
+    const page = await context.newPage();
+    try {
+      await page.goto(screenshotStoryUrl);
+
+      const editor = page.locator(".pne-editor-wrap");
+      const surface = page.locator("[data-editor-surface]");
+      await expect(surface).toContainText("Native rendered Markdown");
+      await page.addStyleTag({
+        content: `
+          .pne-screenshot-mode .pne-shell { width: 560px; }
+          .pne-screenshot-mode .pne-viewport { min-height: 280px; max-height: 280px; }
+        `,
+      });
+      await resizeEditor(page, 500);
+
+      await setSourceSelection(
+        page,
+        await sourceOffset(page, "Selection is stored"),
+        await sourceOffset(page, "source offsets.", "end"),
+      );
+      const box = await editor.boundingBox();
+      expect(box).not.toBeNull();
+      if (box !== null) {
+        await page.screenshot({
+          clip: {
+            x: box.x,
+            y: box.y,
+            width: 560,
+            height: 282,
+          },
+          path: testInfo.outputPath("native-editor-shot-hidpi.png"),
+        });
+      }
+    } finally {
+      await context.close();
+    }
+  });
+
   test("supports rendered-surface click, typing, drag selection, replacement and screenshots", async ({
     page,
   }, testInfo) => {

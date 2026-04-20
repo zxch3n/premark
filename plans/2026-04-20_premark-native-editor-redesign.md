@@ -38,6 +38,7 @@ Last Updated: 2026-04-20
 - Hidden textarea anchoring needs browser-level checks because pure geometry tests cannot catch focus loss or wrong absolute positioning after scrolling.
 - macOS automation has two separate layers: targeted `CGEventPostToPid` can prove real OS key events reach the browser process and hidden textarea, but it bypasses macOS input-method composition. Real Pinyin/candidate-window coverage must use System Events or HID events with the browser as the foreground app.
 - The current Codex host cannot make Chrome the foreground app; the macOS runner records this as a skip artifact by default and can be made strict with `PREMARK_MACOS_IME_STRICT=1`.
+- Screenshot mode exposed a real source-map bug: layout `blockIndex` is the normalized layout-block index, not the parser source-block index. Editable source mapping now scans rendered fragments in source order and then resolves the containing parser block span.
 
 ## Removed From This Branch
 
@@ -112,7 +113,8 @@ Goal: paint native selection and caret on the rendered surface.
 - [x] Wire mouse and keyboard selection commands to browser events in the prototype.
 - [ ] Define mobile selection behavior for touch long press, drag handles, soft keyboard focus, scroll, and zoom.
 - [x] Add tests for select-all, Home/End, PageUp/PageDown, line boundary, word boundary, document boundary, and direction-preserving selection extension.
-- [ ] Add screenshot tests for forward selection, backward selection, wrapped-line selection, cross-block selection, active inline marker selection, and high-DPI canvas selection.
+- [x] Add screenshot tests for forward selection, backward selection, wrapped-line selection, cross-block selection, and active inline-token selection in the DOM debug renderer.
+- [ ] Add active-marker reveal and high-DPI Canvas selection screenshots.
 - [x] Add visual tests for selection overlays independent of CodeMirror.
 
 Acceptance:
@@ -178,7 +180,7 @@ Goal: replace the removed CodeMirror Storybook examples with a native Premark ed
 - [x] Drag across blocks to select.
 - [x] Type, delete, paste, and undo in supported blocks.
 - [x] Show debug overlay for source offsets, hit-test rects, and selection ranges.
-- [ ] Add a screenshot mode that renders small fixed-size crops for key states: idle, caret, selected range, active marker, composition, paste preview, and remote edit.
+- [x] Add a screenshot mode that renders small fixed-size crops for key states: idle, caret, selected range, inline token, composition, paste preview, and remote edit.
 - [x] Add first Playwright screenshot artifacts for idle, typing, selection, and replacement states.
 - [x] Add first Playwright screenshot artifact for composition preedit.
 - [x] Add a screenshot review log template beside the generated artifacts.
@@ -196,11 +198,13 @@ Goal: convert the research checklist into automated coverage and visual review g
 - [x] Create `tests/editor/pitfalls/README.md` with every known pitfall, source, automation status, and owner.
 - [x] Create first Playwright suite for the native editor Storybook desktop pointer/input flow and screenshot crops.
 - [x] Add Playwright coverage for desktop keyboard selection and browser clipboard paste/cut in the native editor story.
-- [ ] Expand Playwright suites for visual viewport, DOM debug renderer, Canvas renderer, and more screenshot crops.
+- [x] Expand Playwright suites for visual viewport, DOM debug renderer, and screenshot-mode crops.
+- [ ] Add Canvas renderer screenshot suite.
 - [x] Add first browser composition suite using synthetic `composition*` events against the Storybook hidden textarea.
 - [x] Create macOS-only IME suite using real OS input where possible and clear skips where CI cannot provide the OS permission, foreground app, or input source.
 - [ ] Create mobile-emulation suite for touch, visual viewport, soft keyboard modeling, and selection geometry; record gaps requiring real-device validation.
-- [ ] Create screenshot review artifacts with one small crop per scenario and a Codex-reviewed `review.md` that records pass/fail and visual notes.
+- [x] Create DOM screenshot review artifacts with one small crop per scenario and a Codex-reviewed `review.md` that records pass/fail and visual notes.
+- [ ] Create Canvas and mobile screenshot review artifacts with Codex-reviewed visual notes.
 - [ ] Add CI/reporting guidance so screenshot failures include the actual/expected/diff images and event traces.
 
 Acceptance:
@@ -248,3 +252,7 @@ Acceptance:
 - Added composition cancel coverage: virtual preedit updates leave source and undo history unchanged, cancel clears the composition view, and the original selected source range is preserved.
 - Added select-all as an explicit normalized input intent and expanded keyboard selection coverage for Home/End, PageUp/PageDown, word, line boundary, document boundary, and anchor-preserving extension. Browser coverage now includes Control+A through the Storybook input bridge.
 - Added a browser mutation-injection test for the DOM debug renderer. If rendered Markdown DOM is changed externally, the next Premark input render restores the surface from editor source and the injected text never enters Markdown.
+- Added Storybook screenshot mode for deterministic small crops covering idle, caret, forward/backward selection, wrapped selection, cross-block selection, inline-token selection, composition preedit, paste preview, remote edit, and high-DPI DOM selection.
+- Screenshot review found and fixed a source mapping bug caused by treating normalized layout `blockIndex` as parser source block index. `EditableLayoutIndex` now maps visible fragments by source-order scanning and resolves each fragment back to the containing parser block span; a regression test covers list items followed by inline-token paragraphs.
+- Reviewed the screenshot-mode artifacts after the fix. DOM debug renderer screenshots are accepted for this phase; active-marker reveal styling, Canvas screenshots, and real mobile selection-handle screenshots remain pending.
+- Verification for this iteration: `vp check --fix` passes with the two existing wiki-canvas warnings, `vp test` passes 111 tests, `vp run build` passes, and `vp run test:browser` passes 9 Playwright tests.

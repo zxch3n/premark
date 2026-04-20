@@ -105,6 +105,43 @@ describe("EditableLayoutIndex", () => {
     }
   });
 
+  it("keeps source ranges aligned after normalized list item blocks", () => {
+    const markdown = [
+      "- Selection is stored as source offsets.",
+      "- The hidden textarea mirrors only the active source slice.",
+      "- Cross-block replacement uses one source operation.",
+      "",
+      "Try **bold text**, `inline code`, 中文输入.",
+    ].join("\n");
+    const state = createIncrementalParseState(markdown);
+    const inlineSources = createMarkdownInlineSourceMap(state);
+    const layout = createLayoutEngine({ fontTheme: "github" }).layout(markdown, 720);
+    const index = createEditableLayoutIndex({
+      markdown,
+      layout,
+      blockSpans: state.blockSpans,
+      inlineSources,
+    });
+
+    const hidden = index.fragments.find((fragment) => fragment.text.includes("hidden textarea"));
+    const bold = index.fragments.find((fragment) => fragment.text === "bold text");
+    const code = index.fragments.find((fragment) => fragment.text === "inline code");
+
+    expect(markdown.slice(hidden?.sourceRange.from, hidden?.sourceRange.to)).toContain(
+      "hidden textarea",
+    );
+    expect(markdown.slice(bold?.sourceRange.from, bold?.sourceRange.to)).toBe("bold text");
+    expect(markdown.slice(bold?.tokenRange?.from, bold?.tokenRange?.to)).toBe("**bold text**");
+    expect(markdown.slice(code?.sourceRange.from, code?.sourceRange.to)).toBe("inline code");
+    expect(markdown.slice(code?.tokenRange?.from, code?.tokenRange?.to)).toBe("`inline code`");
+
+    const hiddenCaret = index.sourceOffsetToCaretRect(markdown.indexOf("hidden") + 2);
+    const boldCaret = index.sourceOffsetToCaretRect(markdown.indexOf("bold text") + 2);
+    expect(hiddenCaret.fragment?.text).toContain("hidden textarea");
+    expect(boldCaret.fragment?.text).toBe("bold text");
+    expect(boldCaret.rect.y).toBeGreaterThan(hiddenCaret.rect.y);
+  });
+
   it("records limited bidi hit-test behavior with logical source offsets", () => {
     const markdown = "English עברית 123 **bold** عربي [קישור](https://example.com)";
     const state = createIncrementalParseState(markdown);
