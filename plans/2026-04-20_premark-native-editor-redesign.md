@@ -31,6 +31,8 @@ Last Updated: 2026-04-20
 - Input should follow the same split: normalized intents can be fully tested against the source model before wiring real browser `beforeinput` / `input` events.
 - Browser `historyUndo` / `historyRedo` should normalize into explicit history intents and share the same local undo manager used by source operations.
 - The first Storybook prototype can reuse the HTML renderer for visible Markdown while Premark editor core owns selection, caret, hit-test, hidden textarea sync, and source operations. This is still a DOM debug renderer, not the final Canvas renderer.
+- Browser automation must set `NO_PROXY=127.0.0.1,localhost` in this environment; otherwise Playwright's local web-server readiness probe can be routed through the proxy and time out.
+- Screenshot review caught a real bug: pointer hit-test could land inside an emoji ZWJ sequence and leave a stale suffix after replacement. Pointer selection now snaps hit-test offsets to grapheme boundaries before updating source selection.
 
 ## Removed From This Branch
 
@@ -169,6 +171,7 @@ Goal: replace the removed CodeMirror Storybook examples with a native Premark ed
 - [x] Type, delete, paste, and undo in supported blocks.
 - [x] Show debug overlay for source offsets, hit-test rects, and selection ranges.
 - [ ] Add a screenshot mode that renders small fixed-size crops for key states: idle, caret, selected range, active marker, composition, paste preview, and remote edit.
+- [x] Add first Playwright screenshot artifacts for idle, typing, selection, and replacement states.
 - [ ] Add a screenshot review log template beside the generated artifacts.
 
 Acceptance:
@@ -182,7 +185,8 @@ Acceptance:
 Goal: convert the research checklist into automated coverage and visual review gates.
 
 - [ ] Create `tests/editor/pitfalls/README.md` with every known pitfall, source, automation status, and owner.
-- [ ] Create Playwright suites for desktop pointer selection, desktop keyboard selection, input bridge, clipboard, visual viewport, DOM debug renderer, Canvas renderer, and screenshot crops.
+- [x] Create first Playwright suite for the native editor Storybook desktop pointer/input flow and screenshot crops.
+- [ ] Expand Playwright suites for desktop keyboard selection, clipboard, visual viewport, DOM debug renderer, Canvas renderer, and more screenshot crops.
 - [ ] Create macOS-only IME suite using real OS input where possible and clear skips where CI cannot provide the OS permission or input source.
 - [ ] Create mobile-emulation suite for touch, visual viewport, soft keyboard modeling, and selection geometry; record gaps requiring real-device validation.
 - [ ] Create screenshot review artifacts with one small crop per scenario and a Codex-reviewed `review.md` that records pass/fail and visual notes.
@@ -217,3 +221,4 @@ Acceptance:
 - Connected normalized `historyUndo` / `historyRedo` intents to `LocalUndoManager`. Text edits and composition commits can now record undo entries through `applyInputIntent`; tests cover undo/redo round trips.
 - Added core clipboard intent handling. Paste chooses Markdown before plain text before a simple HTML-to-text fallback; cut uses the same source edit path. Tests cover selection paste, HTML fallback, cross-block paste, and cross-block cut.
 - Added Storybook `Editing/Premark Native Editor`. It renders Markdown through Premark HTML layout, paints Premark selection/caret overlays, anchors a hidden textarea near the caret, wires pointer drag and keyboard/input/beforeinput events into editor core, and records textarea edits in `LocalUndoManager`. `vp run storybook:build` passes; screenshot tests are still open.
+- Added Playwright browser coverage for the native editor Storybook. The test builds Storybook, serves the static output, clicks the rendered surface, types through the hidden textarea, drags a rendered selection, replaces the selected range, and saves small screenshots for manual review. Codex reviewed the generated screenshots on 2026-04-20 and accepted idle, typing, selection, and replacement crops after fixing grapheme snapping.

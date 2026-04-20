@@ -13,6 +13,7 @@
     "render:examples": "jiti scripts/render-markdown.ts examples/markdown --output examples/rendered --width 920 --scale 2",
     "wiki-canvas": "jiti tools/wiki-canvas/src/cli.ts",
     "test": "vp test",
+    "test:browser": "vp run storybook:build && NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost playwright test",
     "typecheck": "vp exec tsc --noEmit -p tsconfig.json",
     "storybook": "vp exec storybook dev -p 6006",
     "storybook:build": "vp exec storybook build",
@@ -20,6 +21,7 @@
   },
   "devDependencies": {
     "@napi-rs/canvas": "catalog:",
+    "@playwright/test": "catalog:",
     "@storybook/html": "^10.3.4",
     "@storybook/html-vite": "^10.3.4",
     "@types/node": "catalog:",

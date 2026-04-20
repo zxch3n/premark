@@ -1,5 +1,5 @@
 import type { EditorDocumentState } from "./editor-state.ts";
-import { createGraphemeSegments } from "./grapheme.ts";
+import { createGraphemeSegments, snapOffsetToGraphemeBoundary } from "./grapheme.ts";
 import type { NormalizedInputIntent } from "./input-trace.ts";
 
 export interface PointerSelectionSession {
@@ -11,10 +11,10 @@ export function beginPointerSelection(
   x: number,
   y: number,
 ): PointerSelectionSession {
-  const hit = editor.editableIndex.hitTest(x, y);
-  editor.setSelection(hit.offset, hit.offset);
+  const offset = hitTestGraphemeOffset(editor, x, y);
+  editor.setSelection(offset, offset);
   return {
-    anchorOffset: hit.offset,
+    anchorOffset: offset,
   };
 }
 
@@ -24,8 +24,8 @@ export function updatePointerSelection(
   x: number,
   y: number,
 ): void {
-  const hit = editor.editableIndex.hitTest(x, y);
-  editor.setSelection(session.anchorOffset, hit.offset);
+  const offset = hitTestGraphemeOffset(editor, x, y);
+  editor.setSelection(session.anchorOffset, offset);
 }
 
 export function applyKeyboardSelectionIntent(
@@ -102,6 +102,15 @@ function moveToDocumentBoundary(text: string, key: string): number | null {
     return text.length;
   }
   return null;
+}
+
+function hitTestGraphemeOffset(editor: EditorDocumentState, x: number, y: number): number {
+  const hit = editor.editableIndex.hitTest(x, y);
+  return snapOffsetToGraphemeBoundary(
+    editor.markdown,
+    hit.offset,
+    hit.affinity === "before" ? "backward" : "forward",
+  );
 }
 
 function previousGraphemeBoundary(text: string, offset: number): number {
