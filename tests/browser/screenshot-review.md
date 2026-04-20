@@ -2,6 +2,10 @@
 
 Current artifact sources: `vp run test:browser`, `vp run test:macos-ime`
 
+Committed visual baseline sources:
+
+- `tests/browser/native-editor-visual.spec.ts-snapshots/native-editor-visual-*-darwin.png`
+
 Current generated folder pattern:
 
 - `artifacts/playwright-browser/native-editor-Premark-nati-*/native-editor-idle.png`
@@ -118,3 +122,18 @@ Current generated folder pattern:
 - Notes:
   - This validates that the Canvas renderer can receive Premark selection geometry and produce a deterministic high-DPI crop.
   - It does not yet prove active-marker reveal styling, final Canvas visual parity, or interactive Canvas input behavior.
+
+### 2026-04-20 Visual Baselines
+
+- Reviewer: Codex
+- Scenario: committed Playwright visual baselines for stable native editor crops
+- Result: pass on the local macOS Chromium baseline
+- Reviewed baseline screenshots:
+  - `native-editor-visual-idle-darwin.png`: deterministic idle crop renders the note, link, inline code, and caret without debug UI noise.
+  - `native-editor-visual-cross-block-selection-darwin.png`: cross-block selection spans paragraph/list text with stable geometry and visible list marker gaps.
+  - `native-editor-visual-active-marker-darwin.png`: active strong token reveals raw `**` markers without overlapping neighboring inline code.
+  - `native-editor-visual-composition-link-darwin.png`: link-label preedit is underlined and remains positioned before the rendered link text.
+  - `native-editor-visual-canvas-selection-darwin.png`: Canvas crop renders at high DPI and keeps the selection overlay aligned with paragraph/list text.
+- Notes:
+  - These are hard visual diffs through Playwright `toHaveScreenshot`, not only generated review artifacts.
+  - The current baseline is macOS/Chromium-specific. Refreshing baselines must be a reviewed visual change.
