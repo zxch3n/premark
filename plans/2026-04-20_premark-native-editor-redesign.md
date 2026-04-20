@@ -2,7 +2,7 @@
 
 Status: non-OS phases complete; OS IME deferred
 Owner: Codex / Zixuan
-Last Updated: 2026-04-20
+Last Updated: 2026-04-21
 Compaction Rule: after memory reload or compaction, reread this whole file before continuing.
 
 ## Current Objective
@@ -25,6 +25,7 @@ Compaction Rule: after memory reload or compaction, reread this whole file befor
 - Control-adjacent editing should stay source-exact. If the caret is inside a revealed Markdown marker or link suffix, insert/delete/paste/Enter edits that source position only; replacing rendered inline content should leave its surrounding controls intact.
 - Enter in the native editor now means one source newline. Browser `insertParagraph` and textarea `insertLineBreak` both normalize to the same source operation because editor layout preserves every `\n`.
 - Phase 9 benchmarks show the core layout engine is already incremental for local edit, remote edit, and AI append, but editable sidecar rebuild is still full-document and dominates large editor updates. The next architecture step is dirty-block/viewport editable indexing, not more CodeMirror fallback.
+- macOS IME automation can be prepared without posting OS events: dry-run now validates helpers/input sources and scenario selection for Pinyin, Japanese, and Korean. Real IME correctness still requires foreground HID.
 
 ## Architecture Direction
 
@@ -88,9 +89,11 @@ Goal: support real composition without hiding behind CodeMirror.
 - [x] Render composition preedit in Premark.
 - [x] Cover synthetic event-order variants and remote edits around composition.
 - [x] Create macOS-only runner with strict/skip mode.
+- [x] Prepare selectable Pinyin/Japanese/Korean scenario sets without running HID.
+- [x] Add candidate-window screen-capture artifact path for future OS runs.
 - [ ] Run real macOS Pinyin tests when the machine is available.
 - [ ] Add Japanese and Korean scenarios after Pinyin stabilizes.
-- [ ] Add candidate-window anchoring screenshots if the OS screenshot path can capture them.
+- [ ] Review candidate-window anchoring screenshots after an allowed OS run.
 
 Acceptance:
 
@@ -224,3 +227,4 @@ Acceptance:
 - Non-OS phases are complete. Remaining unchecked items are real macOS IME/candidate-window validation and Japanese/Korean OS scenarios, intentionally deferred until Zixuan allows OS-level input automation again. Cleaned the two unrelated persistent check warnings in wiki-canvas files so routine validation should be warning-free.
 - Added a non-interactive macOS IME dry-run path. `vp run test:macos-ime:dry-run` checks Swift helpers and input-source availability, records likely Pinyin/Japanese/Korean candidates, and writes `test-results/macos-ime/dry-run.*` without launching a browser or posting keyboard/HID events. Local dry run on 2026-04-21 found Pinyin and US sources available, current input source was WeType Pinyin, and no Japanese/Korean source candidates were enabled.
 - Expanded the real macOS Pinyin runner into explicit scenarios for commit, cancel, rendered-text replacement, cross-block replacement, and undo. These scenarios remain gated behind the existing foreground/HID checks and were not run because they would post global HID events.
+- Generalized the macOS IME runner into `pinyin`, `japanese`, and `korean` scenario sets, added a Pinyin candidate-window screen artifact path, and documented `PREMARK_MACOS_IME_SCENARIO_SET`. Dry-run verification passed for all three sets without launching a browser or posting HID; current system still has no Japanese/Korean input-source candidates enabled.

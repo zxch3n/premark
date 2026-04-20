@@ -9,13 +9,21 @@ const storyUrl =
   "http://127.0.0.1:6108/iframe.html?id=editing-premark-native-editor--interactive-native-prototype&viewMode=story";
 const inputSourceScript = join(root, "tests/macos-ime/input-source.swift");
 const osInputScript = join(root, "tests/macos-ime/os-input.swift");
-const targetInputSourceID =
-  process.env.PREMARK_MACOS_IME_SOURCE_ID ?? "com.apple.inputmethod.SCIM.ITABC";
+const scenarioSetName = process.env.PREMARK_MACOS_IME_SCENARIO_SET ?? "pinyin";
 const strictRealIme = process.env.PREMARK_MACOS_IME_STRICT === "1";
 const dryRun = process.env.PREMARK_MACOS_IME_DRY_RUN === "1" || process.argv.includes("--dry-run");
 
 const PINYIN_NIHAO_KEY_CODES = [45, 34, 4, 0, 31, 49, 36];
 const PINYIN_SCENARIOS = [
+  {
+    name: "pinyin-candidate-anchor",
+    description:
+      "Open a Pinyin candidate window near the caret, capture a screen crop, then cancel.",
+    keyCodes: [45, 34],
+    captureScreen: true,
+    after: [{ type: "keycodes", keyCodes: [53] }],
+    expectUnchanged: true,
+  },
   {
     name: "pinyin-commit",
     description: "Commit 你好 at the current caret.",
@@ -60,6 +68,87 @@ const PINYIN_SCENARIOS = [
     expectNotIncludes: "你好",
   },
 ];
+
+const JAPANESE_KONNICHIWA_KEY_CODES = [40, 31, 45, 45, 34, 8, 4, 34, 4, 0, 36];
+const JAPANESE_SCENARIOS = [
+  {
+    name: "japanese-commit",
+    description: "Commit こんにちは at the current caret through a Japanese Romaji input source.",
+    keyCodes: JAPANESE_KONNICHIWA_KEY_CODES,
+    expectIncludes: "こんにちは",
+  },
+  {
+    name: "japanese-cancel",
+    description: "Start a Japanese preedit and cancel it with Escape.",
+    keyCodes: [40, 31, 45, 53],
+    expectUnchanged: true,
+  },
+  {
+    name: "japanese-replacement",
+    description: "Replace rendered inline text with committed Japanese text.",
+    selection: {
+      anchorText: "Click text",
+      anchorEdge: "start",
+      headText: "Click text",
+      headEdge: "end",
+    },
+    keyCodes: JAPANESE_KONNICHIWA_KEY_CODES,
+    expectIncludes: "こんにちは, drag across blocks",
+  },
+];
+
+const KOREAN_ANNYEONG_KEY_CODES = [2, 40, 1, 1, 32, 2, 36];
+const KOREAN_SCENARIOS = [
+  {
+    name: "korean-commit",
+    description: "Commit 안녕 at the current caret through a Korean 2-set input source.",
+    keyCodes: KOREAN_ANNYEONG_KEY_CODES,
+    expectIncludes: "안녕",
+  },
+  {
+    name: "korean-cancel",
+    description: "Start a Korean preedit and cancel it with Escape.",
+    keyCodes: [2, 40, 53],
+    expectUnchanged: true,
+  },
+  {
+    name: "korean-replacement",
+    description: "Replace rendered inline text with committed Korean text.",
+    selection: {
+      anchorText: "Click text",
+      anchorEdge: "start",
+      headText: "Click text",
+      headEdge: "end",
+    },
+    keyCodes: KOREAN_ANNYEONG_KEY_CODES,
+    expectIncludes: "안녕, drag across blocks",
+  },
+];
+
+const SCENARIO_SETS = {
+  pinyin: {
+    defaultInputSourceID: "com.apple.inputmethod.SCIM.ITABC",
+    candidatePatterns: [/pinyin/iu, /SCIM/iu, /ITABC/iu],
+    scenarios: PINYIN_SCENARIOS,
+  },
+  japanese: {
+    defaultInputSourceID: "com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese",
+    candidatePatterns: [/japanese/iu, /kotoeri/iu, /romaji/iu],
+    scenarios: JAPANESE_SCENARIOS,
+  },
+  korean: {
+    defaultInputSourceID: "com.apple.inputmethod.Korean.2SetKorean",
+    candidatePatterns: [/korean/iu, /hangul/iu, /2Set/iu],
+    scenarios: KOREAN_SCENARIOS,
+  },
+};
+
+const selectedScenarioSetName = Object.prototype.hasOwnProperty.call(SCENARIO_SETS, scenarioSetName)
+  ? scenarioSetName
+  : "pinyin";
+const scenarioSet = SCENARIO_SETS[selectedScenarioSetName];
+const targetInputSourceID =
+  process.env.PREMARK_MACOS_IME_SOURCE_ID ?? scenarioSet.defaultInputSourceID;
 
 if (process.platform !== "darwin") {
   console.log("[macos-ime] skipped: not running on macOS");
@@ -118,13 +207,17 @@ function writeDryRunReport(report) {
   writeFileSync(
     join(root, "test-results/macos-ime/dry-run.txt"),
     [
+      `scenarioSet=${report.selectedScenarioSetName}`,
+      `requestedScenarioSet=${report.requestedScenarioSetName}`,
       `current=${report.currentInputSourceID}`,
       `target=${report.targetInputSourceID}`,
       `targetFound=${String(report.targetFound)}`,
       `usFound=${String(report.usFound)}`,
+      `targetCandidates=${report.targetCandidates.length}`,
+      `selectedScenarios=${report.selectedScenarios.length}`,
+      `pinyinCandidates=${report.pinyinCandidates.length}`,
       `japaneseCandidates=${report.japaneseCandidates.length}`,
       `koreanCandidates=${report.koreanCandidates.length}`,
-      `pinyinScenarios=${report.pinyinScenarios.length}`,
       `osInputHelper=${report.osInputHelper}`,
       "",
     ].join("\n"),
@@ -252,6 +345,23 @@ function sendHidShortcut(browserProcessName, modifiers, keyCode) {
   swiftOsInput("hid-shortcut", modifiers, String(keyCode));
 }
 
+function captureScreenArtifact(name) {
+  mkdirSync(join(root, "test-results/macos-ime"), { recursive: true });
+  const path = join(root, `test-results/macos-ime/${name}.png`);
+  const result = spawnSync("screencapture", ["-x", path], {
+    cwd: root,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (result.status !== 0) {
+    const message = `screencapture failed with status ${result.status}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`;
+    writeFileSync(join(root, `test-results/macos-ime/${name}.txt`), `${message}\n`);
+    console.log(`[macos-ime] ${message}`);
+    return;
+  }
+  console.log(`[macos-ime] screen capture written: ${path}`);
+}
+
 async function writeImeFailureArtifact(page, name, message) {
   mkdirSync(join(root, "test-results/macos-ime"), { recursive: true });
   const sourceText = await page.locator("[data-debug-source]").textContent();
@@ -342,15 +452,21 @@ async function assertScenarioResult(page, scenario, beforeMarkdown) {
   }
 }
 
-async function runPinyinScenario(page, browserProcessName, scenario) {
+async function runImeScenario(page, browserProcessName, scenario) {
   console.log(`[macos-ime] running scenario: ${scenario.name}`);
   await resetScenarioPage(page, browserProcessName);
   await applyScenarioSelection(page, scenario.selection);
   const beforeMarkdown = await readEditorMarkdown(page);
   sendHidKeyCodes(browserProcessName, scenario.keyCodes);
+  if (scenario.captureScreen === true) {
+    await page.waitForTimeout(scenario.captureDelayMs ?? 800);
+    captureScreenArtifact(`${scenario.name}-screen`);
+  }
   for (const action of scenario.after ?? []) {
     if (action.type === "shortcut") {
       sendHidShortcut(browserProcessName, action.modifiers, action.keyCode);
+    } else if (action.type === "keycodes") {
+      sendHidKeyCodes(browserProcessName, action.keyCodes);
     }
   }
   try {
@@ -449,19 +565,32 @@ async function main() {
   const usSourceID = "com.apple.keylayout.US";
 
   if (dryRun) {
+    const allScenarioSets = Object.fromEntries(
+      Object.entries(SCENARIO_SETS).map(([name, set]) => [
+        name,
+        set.scenarios.map((scenario) => ({
+          name: scenario.name,
+          description: scenario.description,
+        })),
+      ]),
+    );
     const report = {
       mode: "dry-run",
+      requestedScenarioSetName: scenarioSetName,
+      selectedScenarioSetName,
       currentInputSourceID: swiftInputSource("current"),
       targetInputSourceID,
       targetFound: parsedSources.some((source) => source.id === targetInputSourceID),
       usFound: parsedSources.some((source) => source.id === usSourceID),
+      targetCandidates: findImeCandidates(parsedSources, scenarioSet.candidatePatterns),
       pinyinCandidates: findImeCandidates(parsedSources, [/pinyin/iu, /SCIM/iu, /ITABC/iu]),
       japaneseCandidates: findImeCandidates(parsedSources, [/japanese/iu, /kotoeri/iu, /romaji/iu]),
-      koreanCandidates: findImeCandidates(parsedSources, [/korean/iu, /hangul/iu]),
-      pinyinScenarios: PINYIN_SCENARIOS.map((scenario) => ({
+      koreanCandidates: findImeCandidates(parsedSources, [/korean/iu, /hangul/iu, /2Set/iu]),
+      selectedScenarios: scenarioSet.scenarios.map((scenario) => ({
         name: scenario.name,
         description: scenario.description,
       })),
+      scenarioSets: allScenarioSets,
       osInputHelper: swiftOsInput("check"),
       enabledSourceCount: parsedSources.filter((source) => source.enabled).length,
       sourceCount: parsedSources.length,
@@ -471,7 +600,7 @@ async function main() {
     return;
   }
 
-  if (!sources.includes(targetInputSourceID)) {
+  if (!parsedSources.some((source) => source.id === targetInputSourceID)) {
     console.log(`[macos-ime] skipped: input source not found: ${targetInputSourceID}`);
     console.log(sources);
     return;
@@ -548,10 +677,10 @@ async function main() {
         );
       } catch (error) {
         const message =
-          "skipped real Pinyin commit: global HID key events did not reach the foreground browser. " +
+          `skipped real ${selectedScenarioSetName} IME scenarios: global HID key events did not reach the foreground browser. ` +
           "Real IME automation requires global key events; targeted CGEventPostToPid bypasses input-method composition.";
         await writeImeFailureArtifact(page, "hid-probe-failed", message);
-        writeFileSync(join(root, "test-results/macos-ime/pinyin-skip.txt"), `${message}\n`);
+        writeFileSync(join(root, "test-results/macos-ime/ime-skip.txt"), `${message}\n`);
         if (strictRealIme) {
           throw new Error(`[macos-ime] ${message}`, { cause: error });
         }
@@ -570,13 +699,13 @@ async function main() {
     if (!(await foregroundBrowser(browserProcessName))) {
       mkdirSync(join(root, "test-results/macos-ime"), { recursive: true });
       await page.locator(".pne-editor-wrap").screenshot({
-        path: join(root, "test-results/macos-ime/pinyin-skipped-no-foreground.png"),
+        path: join(root, "test-results/macos-ime/ime-skipped-no-foreground.png"),
       });
       const frontmost = await frontmostProcessName();
       const message =
-        `skipped real Pinyin commit: cannot make ${browserProcessName || "browser"} the foreground app ` +
+        `skipped real ${selectedScenarioSetName} IME scenarios: cannot make ${browserProcessName || "browser"} the foreground app ` +
         `(frontmost is ${frontmost}). Targeted CGEventPostToPid is not enough for IME because it bypasses macOS input-method composition.`;
-      writeFileSync(join(root, "test-results/macos-ime/pinyin-skip.txt"), `${message}\n`);
+      writeFileSync(join(root, "test-results/macos-ime/ime-skip.txt"), `${message}\n`);
       if (strictRealIme) {
         throw new Error(`[macos-ime] ${message}`);
       }
@@ -585,10 +714,10 @@ async function main() {
     }
 
     mkdirSync(join(root, "test-results/macos-ime"), { recursive: true });
-    for (const scenario of PINYIN_SCENARIOS) {
-      await runPinyinScenario(page, browserProcessName, scenario);
+    for (const scenario of scenarioSet.scenarios) {
+      await runImeScenario(page, browserProcessName, scenario);
     }
-    console.log("[macos-ime] pinyin scenarios passed");
+    console.log(`[macos-ime] ${selectedScenarioSetName} scenarios passed`);
   } finally {
     if (previousInputSourceID) {
       try {
