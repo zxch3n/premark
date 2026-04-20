@@ -8,6 +8,7 @@ const canvasSelectionStoryUrl =
   "/iframe.html?id=editing-premark-canvas-selection--canvas-selection&viewMode=story";
 const canvasNativeStoryUrl =
   "/iframe.html?id=editing-premark-canvas-native-editor--interactive-canvas-native-editor&viewMode=story";
+const canvasNativeRepeatedEmojiStoryUrl = `${canvasNativeStoryUrl}&fixture=repeated-emoji`;
 const canvasNativeContentPadding = 28;
 
 async function readSelection(page: Page) {
@@ -604,6 +605,39 @@ test.describe("Premark native editor story", () => {
       element.dispatchEvent(new CompositionEvent("compositionend", { data: "链" }));
     });
     await expect(source).toContainText("链docs");
+  });
+
+  test("keeps Canvas native repeated emoji carets on stable grapheme boundaries", async ({
+    page,
+  }) => {
+    await page.goto(canvasNativeRepeatedEmojiStoryUrl);
+
+    const canvas = page.locator("[data-canvas-native-editor]");
+    const root = page.locator(".pcne-root");
+    await expect(canvas).toBeVisible();
+    await expect(root).toHaveAttribute("data-fonts-ready", "1");
+
+    const emoji = "👨‍👩‍👧‍👦";
+    const markdown = await canvasEditorMarkdown(page);
+    const start = markdown.indexOf(emoji.repeat(7));
+    expect(start).toBeGreaterThanOrEqual(0);
+
+    const carets: Array<{ x: number; y: number }> = [];
+    for (let index = 0; index <= 7; index += 1) {
+      await setCanvasCaret(page, start + emoji.length * index);
+      const geometry = await readCanvasGeometry(page);
+      carets.push({
+        x: geometry.headCaret.rect.x,
+        y: geometry.headCaret.rect.y,
+      });
+    }
+
+    for (let index = 1; index < carets.length; index += 1) {
+      expect(carets[index]!.y).toBeCloseTo(carets[0]!.y, 0);
+      expect(carets[index]!.x).toBeGreaterThan(carets[index - 1]!.x);
+    }
+    const deltas = carets.slice(1).map((caret, index) => caret.x - carets[index]!.x);
+    expect(Math.max(...deltas) - Math.min(...deltas)).toBeLessThan(2);
   });
 
   test("reveals Markdown controls only when the active range needs them", async ({ page }) => {

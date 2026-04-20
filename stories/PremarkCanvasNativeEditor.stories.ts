@@ -27,7 +27,7 @@ export default {
   title: "Editing/Premark Canvas Native Editor",
 };
 
-const markdown = `# Canvas native editor
+const defaultMarkdown = `# Canvas native editor
 
 Click text, drag across blocks, then type directly on the rendered canvas.
 
@@ -38,6 +38,20 @@ Click text, drag across blocks, then type directly on the rendered canvas.
 Widths iiiii WWWW done.
 
 Try **bold text**, \`inline code\`, [docs](https://example.com), 中文输入, and emoji 👨‍👩‍👧‍👦.`;
+
+const repeatedEmojiMarkdown = `# Canvas native editor
+
+Emoji drift check 👨‍👩‍👧‍👦👨‍👩‍👧‍👦👨‍👩‍👧‍👦👨‍👩‍👧‍👦👨‍👩‍👧‍👦👨‍👩‍👧‍👦👨‍👩‍👧‍👦
+
+Widths iiiii WWWW done.
+
+Try **bold text**, \`inline code\`, [docs](https://example.com).`;
+
+function initialMarkdown(): string {
+  return new URLSearchParams(window.location.search).get("fixture") === "repeated-emoji"
+    ? repeatedEmojiMarkdown
+    : defaultMarkdown;
+}
 
 const width = 780;
 const height = 430;
@@ -169,7 +183,7 @@ export const InteractiveCanvasNativeEditor = () => {
       lineBreakMode: "source",
     });
 
-    const editor = createInMemoryEditorDocumentState(markdown, editorWidth, {
+    const editor = createInMemoryEditorDocumentState(initialMarkdown(), editorWidth, {
       fontTheme: "modern",
       highlighter,
     });
