@@ -10,6 +10,7 @@ import {
 } from "../packages/parser/src/index.ts";
 import {
   createEditableLayoutIndex,
+  createIncrementalEditableLayoutIndex,
   createInMemoryTextDocumentAdapter,
 } from "../packages/editor/src/index.ts";
 import {
@@ -37,12 +38,15 @@ interface Timed<T> {
 interface IncrementalScenarioResult {
   readonly scenario: string;
   readonly incrementalLayoutMs: number;
-  readonly editableIndexMs: number;
+  readonly incrementalEditableIndexMs: number;
+  readonly fullEditableIndexMs: number;
   readonly fullLayoutMs: number;
   readonly speedup: number;
+  readonly editableIndexSpeedup: number;
   readonly mode: string;
   readonly dirtyBlocks: number;
   readonly reusedBlocks: number;
+  readonly reusedFragments: number;
   readonly lineCount: number;
   readonly fragmentCount: number;
 }
@@ -208,13 +212,35 @@ function benchmarkIncrementalScenario(
       highlighter,
       lineBreakMode: "source",
     });
-    incrementalEngine.layout(markdown, options.width);
     const previousState = createIncrementalParseState(markdown);
+    const previousLayout = incrementalEngine.layout(markdown, options.width);
+    const previousInlineSources = createMarkdownInlineSourceMap(previousState);
+    const previousIndex = createEditableLayoutIndex({
+      markdown,
+      layout: previousLayout,
+      blockSpans: previousState.blockSpans,
+      inlineSources: previousInlineSources,
+    });
     const nextText = update(markdown);
     const parseResult = incrementalParse(previousState, nextText);
     const layoutResult = time(() => incrementalEngine.layout(nextText, options.width));
     const inlineSources = createMarkdownInlineSourceMap(parseResult.state);
-    const editableIndexResult = time(() =>
+    const incrementalEditableIndexResult = time(() =>
+      createIncrementalEditableLayoutIndex(
+        {
+          markdown: nextText,
+          layout: layoutResult.value,
+          blockSpans: parseResult.state.blockSpans,
+          inlineSources,
+        },
+        previousIndex,
+      ),
+    );
+    const previousFragments = new Set(previousIndex.fragments);
+    const reusedFragments = incrementalEditableIndexResult.value.fragments.filter((fragment) =>
+      previousFragments.has(fragment),
+    ).length;
+    const fullEditableIndexResult = time(() =>
       createEditableLayoutIndex({
         markdown: nextText,
         layout: layoutResult.value,
@@ -232,14 +258,19 @@ function benchmarkIncrementalScenario(
     return {
       scenario,
       incrementalLayoutMs: Number(layoutResult.ms.toFixed(2)),
-      editableIndexMs: Number(editableIndexResult.ms.toFixed(2)),
+      incrementalEditableIndexMs: Number(incrementalEditableIndexResult.ms.toFixed(2)),
+      fullEditableIndexMs: Number(fullEditableIndexResult.ms.toFixed(2)),
       fullLayoutMs: Number(fullLayoutResult.ms.toFixed(2)),
       speedup: Number((fullLayoutResult.ms / Math.max(0.01, layoutResult.ms)).toFixed(2)),
+      editableIndexSpeedup: Number(
+        (fullEditableIndexResult.ms / Math.max(0.01, incrementalEditableIndexResult.ms)).toFixed(2),
+      ),
       mode: parseResult.mode,
       dirtyBlocks: parseResult.dirtyToBlock - parseResult.dirtyFromBlock,
       reusedBlocks: parseResult.reusedPrefixCount + parseResult.reusedSuffixCount,
+      reusedFragments,
       lineCount: layoutResult.value.lines.length,
-      fragmentCount: editableIndexResult.value.fragments.length,
+      fragmentCount: incrementalEditableIndexResult.value.fragments.length,
     };
   });
   return medianByKey(runs);

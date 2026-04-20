@@ -1,9 +1,18 @@
 import { createLayoutEngine, measureGraphemeBoundaryXs } from "@pretext-md/layout";
 import { installNodeCanvas } from "../../layout/src/node-canvas.ts";
-import { createIncrementalParseState, createMarkdownInlineSourceMap } from "@pretext-md/parser";
+import {
+  createIncrementalParseState,
+  createMarkdownInlineSourceMap,
+  incrementalParse,
+} from "@pretext-md/parser";
 import { describe, expect, it } from "vite-plus/test";
 
-import { createActiveMarkerRevealMarkdown, createEditableLayoutIndex } from "../src/index.ts";
+import {
+  createActiveMarkerRevealMarkdown,
+  createEditableLayoutIndex,
+  createIncrementalEditableLayoutIndex,
+  type EditableFragment,
+} from "../src/index.ts";
 
 installNodeCanvas();
 
@@ -34,6 +43,22 @@ function createTestIndex(markdown: string, width = 800) {
       inlineSources,
     }),
   };
+}
+
+function comparableFragments(fragments: readonly EditableFragment[]) {
+  return fragments.map((fragment) => ({
+    blockId: fragment.blockId,
+    blockIndex: fragment.blockIndex,
+    lineIndex: fragment.lineIndex,
+    fragmentIndex: fragment.fragmentIndex,
+    text: fragment.text,
+    type: fragment.type,
+    sourceRange: fragment.sourceRange,
+    sourceOffsets: fragment.sourceOffsets,
+    tokenRange: fragment.tokenRange,
+    rect: fragment.rect,
+    textInsetX: fragment.textInsetX,
+  }));
 }
 
 describe("EditableLayoutIndex", () => {
@@ -571,6 +596,125 @@ describe("EditableLayoutIndex", () => {
       const titleHit = index.hitTest(titleStart.rect.x + 0.5, titleStart.rect.y + 1);
       expect(titleHit.offset, `H${level}`).toBe(titleStartOffset);
     }
+  });
+
+  it("rebuilds only dirty editable fragments while reusing stable prefix and suffix blocks", () => {
+    const oldMarkdown = [
+      "# Title",
+      "",
+      "Alpha before the changed block.",
+      "",
+      "Target paragraph with **bold** text and emoji 👨‍👩‍👧‍👦.",
+      "",
+      "Suffix line with [link](https://example.com).",
+      "",
+      "```ts",
+      "const value = 1;",
+      "```",
+    ].join("\n");
+    const newMarkdown = oldMarkdown.replace("Target paragraph", "Target changed paragraph");
+    const width = 520;
+    const engine = createLayoutEngine({ fontTheme: "github", lineBreakMode: "source" });
+    const oldState = createIncrementalParseState(oldMarkdown);
+    const oldInlineSources = createMarkdownInlineSourceMap(oldState);
+    const oldLayout = engine.layout(oldMarkdown, width);
+    const previous = createEditableLayoutIndex({
+      markdown: oldMarkdown,
+      layout: oldLayout,
+      blockSpans: oldState.blockSpans,
+      inlineSources: oldInlineSources,
+    });
+    const parseResult = incrementalParse(oldState, newMarkdown);
+    const newLayout = engine.applyParseResult(parseResult, width);
+    const newInlineSources = createMarkdownInlineSourceMap(parseResult.state);
+    const incremental = createIncrementalEditableLayoutIndex(
+      {
+        markdown: newMarkdown,
+        layout: newLayout,
+        blockSpans: parseResult.state.blockSpans,
+        inlineSources: newInlineSources,
+      },
+      previous,
+    );
+    const fullLayout = createLayoutEngine({ fontTheme: "github", lineBreakMode: "source" }).layout(
+      newMarkdown,
+      width,
+    );
+    const full = createEditableLayoutIndex({
+      markdown: newMarkdown,
+      layout: fullLayout,
+      blockSpans: parseResult.state.blockSpans,
+      inlineSources: newInlineSources,
+    });
+
+    expect(newLayout.update?.mode).toBe("incremental");
+    expect(comparableFragments(incremental.fragments)).toEqual(comparableFragments(full.fragments));
+
+    const prefixFragment = previous.fragments.find((fragment) =>
+      fragment.text.includes("Alpha before"),
+    );
+    expect(prefixFragment).toBeDefined();
+    expect(incremental.fragments).toContain(prefixFragment);
+
+    const oldSuffix = previous.fragments.find((fragment) => fragment.text.includes("Suffix line"));
+    const newSuffix = incremental.fragments.find((fragment) =>
+      fragment.text.includes("Suffix line"),
+    );
+    expect(oldSuffix).toBeDefined();
+    expect(newSuffix).toBeDefined();
+    expect(newSuffix).not.toBe(oldSuffix);
+    expect(newSuffix!.sourceRange.from).toBeGreaterThan(oldSuffix!.sourceRange.from);
+  });
+
+  it("keeps active marker source-map render views correct by rebuilding them conservatively", () => {
+    const markdown = "Try **bold text** and [docs](https://example.com).";
+    const state = createIncrementalParseState(markdown);
+    const inlineSources = createMarkdownInlineSourceMap(state);
+    const hiddenLayout = createLayoutEngine({
+      fontTheme: "github",
+      lineBreakMode: "source",
+    }).layout(markdown, 520);
+    const previous = createEditableLayoutIndex({
+      markdown,
+      layout: hiddenLayout,
+      blockSpans: state.blockSpans,
+      inlineSources,
+    });
+    const reveal = createActiveMarkerRevealMarkdown({
+      markdown,
+      inlineSources,
+      blockSpans: state.blockSpans,
+      selectionRange: {
+        from: markdown.indexOf("bold") + 1,
+        to: markdown.indexOf("bold") + 1,
+      },
+    });
+    const activeLayout = createLayoutEngine({
+      fontTheme: "github",
+      lineBreakMode: "source",
+    }).layout(reveal.markdown, 520);
+    const incremental = createIncrementalEditableLayoutIndex(
+      {
+        markdown,
+        layout: activeLayout,
+        blockSpans: state.blockSpans,
+        inlineSources,
+        sourceMap: reveal.sourceMap,
+      },
+      previous,
+    );
+    const full = createEditableLayoutIndex({
+      markdown,
+      layout: activeLayout,
+      blockSpans: state.blockSpans,
+      inlineSources,
+      sourceMap: reveal.sourceMap,
+    });
+
+    expect(comparableFragments(incremental.fragments)).toEqual(comparableFragments(full.fragments));
+    expect(
+      incremental.sourceOffsetToCaretRect(markdown.indexOf("**") + 1).fragment?.text,
+    ).toContain("**");
   });
 
   it("records limited bidi hit-test behavior with logical source offsets", () => {

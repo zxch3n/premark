@@ -2,8 +2,14 @@ import {
   measureGraphemeBoundaryXs,
   type DocumentLayout,
   type InlineFragment,
+  type LayoutUpdateMetadata,
 } from "@pretext-md/layout";
-import type { BlockSpan, MarkdownInlineSourceRecord, SourceRange } from "@pretext-md/parser";
+import type {
+  BlockSpan,
+  MarkdownInlineSourceRecord,
+  SourceRange,
+  TextChange as ParserTextChange,
+} from "@pretext-md/parser";
 import { createGraphemeSegments, snapOffsetToGraphemeBoundary } from "./grapheme.ts";
 import { createWordSegments } from "./text-segments.ts";
 
@@ -78,13 +84,15 @@ export interface EditableLayoutSourceMapRun {
 
 export class EditableLayoutIndex {
   readonly markdown: string;
+  readonly layout: DocumentLayout;
   readonly blockSpans: readonly BlockSpan[];
   readonly fragments: readonly EditableFragment[];
 
-  constructor(input: EditableLayoutIndexInput) {
+  constructor(input: EditableLayoutIndexInput, fragments?: readonly EditableFragment[]) {
     this.markdown = input.markdown;
+    this.layout = input.layout;
     this.blockSpans = input.blockSpans;
-    this.fragments = buildEditableFragments(input);
+    this.fragments = fragments ?? buildEditableFragments(input);
   }
 
   hitTest(x: number, y: number): HitTestResult {
@@ -331,15 +339,167 @@ export function createEditableLayoutIndex(input: EditableLayoutIndexInput): Edit
   return new EditableLayoutIndex(input);
 }
 
+export function createIncrementalEditableLayoutIndex(
+  input: EditableLayoutIndexInput,
+  previous: EditableLayoutIndex,
+): EditableLayoutIndex {
+  const fragments = buildIncrementalEditableFragments(input, previous);
+  return new EditableLayoutIndex(input, fragments ?? undefined);
+}
+
 function buildEditableFragments(input: EditableLayoutIndexInput): EditableFragment[] {
+  const fragments = buildEditableTextFragments(input, {
+    fromBlock: 0,
+    toBlock: Number.POSITIVE_INFINITY,
+    sourceCursor: 0,
+  });
+  return addVirtualSourceLineBreakFragments(fragments, input.markdown, input.blockSpans);
+}
+
+function buildIncrementalEditableFragments(
+  input: EditableLayoutIndexInput,
+  previous: EditableLayoutIndex,
+): readonly EditableFragment[] | null {
+  const update = input.layout.update;
+  if (
+    update === undefined ||
+    update.mode !== "incremental" ||
+    update.sourceChange === null ||
+    input.sourceMap !== undefined
+  ) {
+    return null;
+  }
+
+  const prefix: EditableFragment[] = [];
+  const suffix: EditableFragment[] = [];
+  const oldSuffixStart = update.oldSuffixStartBlock;
+
+  for (const fragment of previous.fragments) {
+    if (isVirtualLineBreakFragment(fragment)) continue;
+
+    if (fragment.blockIndex < update.dirtyFromBlock) {
+      if (fragment.sourceRange.to > update.sourceChange.fromA) {
+        return null;
+      }
+      prefix.push(fragment);
+      continue;
+    }
+
+    if (fragment.blockIndex >= oldSuffixStart) {
+      const transformed = transformReusableSuffixFragment(
+        fragment,
+        input.layout,
+        previous.layout,
+        update,
+      );
+      if (transformed === null) {
+        return null;
+      }
+      suffix.push(transformed);
+    }
+  }
+
+  const sourceCursor = prefix.at(-1)?.sourceRange.to ?? 0;
+  const dirty = buildEditableTextFragments(input, {
+    fromBlock: update.dirtyFromBlock,
+    toBlock: update.dirtyToBlock,
+    sourceCursor,
+  });
+  const fragments = [...prefix, ...dirty, ...suffix].sort(compareEditableFragments);
+  return addVirtualSourceLineBreakFragments(fragments, input.markdown, input.blockSpans);
+}
+
+function isVirtualLineBreakFragment(fragment: EditableFragment): boolean {
+  return fragment.text.length === 0 && fragment.blockId.includes(":newline:");
+}
+
+function transformReusableSuffixFragment(
+  fragment: EditableFragment,
+  layout: DocumentLayout,
+  previousLayout: DocumentLayout,
+  update: LayoutUpdateMetadata,
+): EditableFragment | null {
+  const change = update.sourceChange;
+  if (change === null || sourceRangeIntersectsOldChange(fragment.sourceRange, change)) {
+    return null;
+  }
+
+  const newBlockIndex =
+    update.newSuffixStartBlock + fragment.blockIndex - update.oldSuffixStartBlock;
+  const oldBlock = previousLayout.blocks[fragment.blockIndex];
+  const newBlock = layout.blocks[newBlockIndex];
+  if (oldBlock === undefined || newBlock === undefined) {
+    return null;
+  }
+
+  const sourceRange = transformSourceRangeAfterChange(fragment.sourceRange, change);
+  const sourceOffsets = fragment.sourceOffsets.map((offset) =>
+    transformSourceOffsetAfterChange(offset, change),
+  );
+  const tokenRange =
+    fragment.tokenRange === undefined
+      ? undefined
+      : transformSourceRangeAfterChange(fragment.tokenRange, change);
+  const lineDelta = newBlock.firstLineIndex - oldBlock.firstLineIndex;
+
+  return {
+    ...fragment,
+    blockIndex: newBlockIndex,
+    lineIndex: fragment.lineIndex + lineDelta,
+    sourceRange,
+    sourceOffsets,
+    tokenRange,
+    rect: {
+      ...fragment.rect,
+      y: fragment.rect.y + update.suffixYOffset,
+    },
+  };
+}
+
+function sourceRangeIntersectsOldChange(range: SourceRange, change: ParserTextChange): boolean {
+  return range.to > change.fromA && range.from < change.toA;
+}
+
+function transformSourceRangeAfterChange(
+  range: SourceRange,
+  change: ParserTextChange,
+): SourceRange {
+  return {
+    from: transformSourceOffsetAfterChange(range.from, change),
+    to: transformSourceOffsetAfterChange(range.to, change),
+  };
+}
+
+function transformSourceOffsetAfterChange(offset: number, change: ParserTextChange): number {
+  if (offset <= change.fromA) {
+    return offset;
+  }
+  if (offset >= change.toA) {
+    return offset + (change.toB - change.fromB) - (change.toA - change.fromA);
+  }
+  return change.fromB;
+}
+
+function buildEditableTextFragments(
+  input: EditableLayoutIndexInput,
+  options: {
+    readonly fromBlock: number;
+    readonly toBlock: number;
+    readonly sourceCursor: number;
+  },
+): EditableFragment[] {
   const tokenRecords = input.inlineSources.filter(
     (record) => record.type === "strong" || record.type === "code-span" || record.type === "link",
   );
   const output: EditableFragment[] = [];
-  let sourceCursor = 0;
+  let sourceCursor = options.sourceCursor;
   let layoutCursor = 0;
 
   for (const line of input.layout.lines) {
+    if (line.blockIndex < options.fromBlock || line.blockIndex >= options.toBlock) {
+      continue;
+    }
+
     if (line.kind === "opaque" && line.content.type === "code_block") {
       const codeContent = line.content;
       if (codeContent.code.length === 0) continue;
@@ -427,7 +587,7 @@ function buildEditableFragments(input: EditableLayoutIndexInput): EditableFragme
     });
   }
 
-  return addVirtualSourceLineBreakFragments(output, input.markdown, input.blockSpans);
+  return output;
 }
 
 function addVirtualSourceLineBreakFragments(

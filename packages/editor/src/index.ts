@@ -18,7 +18,11 @@ export {
   createInMemoryEditorDocumentState,
   EditorDocumentState,
 } from "./editor-state.ts";
-export { createEditableLayoutIndex, EditableLayoutIndex } from "./editable-layout.ts";
+export {
+  createEditableLayoutIndex,
+  createIncrementalEditableLayoutIndex,
+  EditableLayoutIndex,
+} from "./editable-layout.ts";
 export type {
   CaretRect,
   EditableFragment,

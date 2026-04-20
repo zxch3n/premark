@@ -51,6 +51,27 @@ describe("EditorDocumentState", () => {
     });
   });
 
+  it("reuses stable editable fragments after local edits outside their blocks", () => {
+    const editor = createInMemoryEditorDocumentState(
+      "Alpha prefix paragraph.\n\nTarget paragraph with **bold** text.\n\nSuffix paragraph.",
+      600,
+    );
+    const prefix = editor.editableIndex.fragments.find((fragment) =>
+      fragment.text.includes("Alpha prefix"),
+    );
+    expect(prefix).toBeDefined();
+
+    const targetFrom = editor.markdown.indexOf("Target");
+    editor.setSelection(targetFrom, targetFrom + "Target".length);
+    editor.replaceSelection("Changed target");
+
+    expect(editor.layout.update?.sourceChange).toBeDefined();
+    expect(editor.editableIndex.fragments).toContain(prefix);
+    expect(
+      editor.editableIndex.sourceOffsetToCaretRect(editor.markdown.indexOf("Suffix")).rect.y,
+    ).toBeGreaterThan(prefix!.rect.y);
+  });
+
   it("resizes layout and keeps source mapping available", () => {
     const editor = createInMemoryEditorDocumentState(
       "A paragraph with **bold** text and a lot of words for wrapping.",
