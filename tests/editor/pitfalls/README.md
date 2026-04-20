@@ -22,8 +22,9 @@ Status legend:
 | macOS foreground activation               | Browser must be the foreground app before System Events can exercise real IME composition         | gap            |
 | Candidate window bounds                   | macOS IME screenshots or documented capture gap                                                   | gap            |
 | Cross-block composition replacement       | Pinyin replacement over cross-block selection                                                     | planned        |
-| Soft keyboard input without keydown       | Synthetic mobile input operation tests plus mobile browser coverage                               | logic          |
+| Soft keyboard input without keydown       | Synthetic mobile input operation tests plus mobile browser coverage                               | logic+browser  |
 | Visual viewport changes                   | VisualViewport resize/scroll anchoring tests                                                      | browser        |
+| Native mobile selection handles           | OS long-press handles, magnifier, selection affordances, and candidate bars                       | mobile-gap     |
 | Browser selection/focus coupling          | Tests keep Premark selection independent from DOM focus                                           | browser        |
 | Keyboard selection modes                  | Arrow, Shift+Arrow, Shift+Command+Arrow, Home/End, PageUp/PageDown                                | logic+browser  |
 | Grapheme boundaries                       | Combining marks, emoji ZWJ, flags, variation selectors, CJK punctuation                           | logic          |
