@@ -42,6 +42,18 @@ describe("selection commands", () => {
     });
   });
 
+  it("snaps pointer hit-test offsets to grapheme boundaries", () => {
+    const text = "A 👨‍👩‍👧‍👦 B";
+    const editor = createInMemoryEditorDocumentState(text, 600);
+    const emojiFrom = text.indexOf("👨");
+    const emojiTo = emojiFrom + "👨‍👩‍👧‍👦".length;
+    const insideEmoji = editor.editableIndex.sourceOffsetToCaretRect(emojiFrom + 2);
+
+    beginPointerSelection(editor, insideEmoji.rect.x, insideEmoji.rect.y + 1);
+
+    expect([emojiFrom, emojiTo]).toContain(editor.selectionSourceRange.from);
+  });
+
   it("moves by grapheme clusters for ArrowLeft and ArrowRight", () => {
     const text = "A👨‍👩‍👧‍👦B";
     const editor = createInMemoryEditorDocumentState(text, 600);
