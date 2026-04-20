@@ -133,6 +133,7 @@ export const RenderedCanvasOverlay = () => {
       host,
       editor: createCodeMirrorOverlay(host, markdown.slice(record.source.from, record.source.to), {
         onChange: (_doc, update) => applyOverlayChange(update),
+        previewAll: true,
       }),
       originalMarkdown: markdown,
       sourceFrom: record.source.from,
@@ -198,7 +199,7 @@ export const RenderedCanvasOverlay = () => {
     }
     active.host.style.transform = `translate(${block.contentBox.x}px, ${block.y}px)`;
     active.host.style.width = `${block.contentBox.width}px`;
-    active.host.style.minHeight = `${Math.max(block.height, 44)}px`;
+    active.host.style.minHeight = `${block.height}px`;
   }
 
   function commit(): void {
@@ -382,6 +383,29 @@ const renderedCanvasCss = `
 
   .md-editor-active-overlay .cm-editor {
     background: transparent;
+  }
+
+  .md-editor-active-overlay .cm-content {
+    min-height: inherit;
+  }
+
+  .md-editor-active-overlay .cm-line {
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+  }
+
+  .md-editor-active-overlay .pm-cm-heading {
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+  }
+
+  .md-editor-active-overlay .pm-cm-code-first-line {
+    margin-top: 0 !important;
+    padding-top: 0 !important;
+  }
+
+  .md-editor-active-overlay .pm-cm-code-last-line {
+    padding-bottom: 0 !important;
   }
 
   .md-editor-story[data-debug-overlay] .md-editor-active-overlay {
