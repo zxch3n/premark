@@ -2,7 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { createHighlighter } from "../../highlight/src/index.ts";
 
-import { createLayoutEngine } from "../src/index.ts";
+import { createLayoutEngine, measureGraphemeBoundaryXs } from "../src/index.ts";
 import type { DocumentLayout } from "../src/types.ts";
 
 describe("createLayoutEngine", () => {
@@ -45,6 +45,20 @@ describe("createLayoutEngine", () => {
       type: "link",
       meta: { type: "link", href: url },
     });
+  });
+
+  it("measures text boundaries at grapheme advances", () => {
+    const emoji = "👨‍👩‍👧‍👦";
+    const text = `A ${emoji} B`;
+    const font = 'normal 400 16px "Segoe UI", Helvetica, Arial, sans-serif';
+    const boundaries = measureGraphemeBoundaryXs(text, font);
+    const emojiFrom = text.indexOf(emoji);
+    const emojiTo = emojiFrom + emoji.length;
+    const bOffset = text.indexOf("B");
+
+    expect(boundaries[emojiFrom + 2]).toBeCloseTo(boundaries[emojiFrom]!, 3);
+    expect(boundaries[emojiTo]).toBeGreaterThan(boundaries[emojiFrom]!);
+    expect(boundaries[bOffset]).toBeGreaterThan(boundaries[emojiTo]!);
   });
 
   it("returns opaque lines for code blocks and tables", () => {

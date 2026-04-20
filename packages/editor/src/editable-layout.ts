@@ -1,4 +1,8 @@
-import type { DocumentLayout, InlineFragment } from "@pretext-md/layout";
+import {
+  measureGraphemeBoundaryXs,
+  type DocumentLayout,
+  type InlineFragment,
+} from "@pretext-md/layout";
 import type { BlockSpan, MarkdownInlineSourceRecord, SourceRange } from "@pretext-md/parser";
 import { createGraphemeSegments, snapOffsetToGraphemeBoundary } from "./grapheme.ts";
 import { createWordSegments } from "./text-segments.ts";
@@ -934,18 +938,18 @@ function textBoundaryXs(fragment: EditableFragment): readonly number[] {
   }
 
   const boundaries = Array.from({ length: fragment.text.length + 1 }, () => 0);
-  const fullMeasuredWidth = measureTextWidth(fragment.text, fragment.font);
   const renderedTextWidth = visibleTextWidth(fragment);
-  const scale = fullMeasuredWidth > 0 ? renderedTextWidth / fullMeasuredWidth : 1;
-  let previousBoundary = 0;
-  for (const segment of createGraphemeSegments(fragment.text)) {
-    const boundary = measureTextWidth(fragment.text.slice(0, segment.to), fragment.font) * scale;
-    boundaries[segment.from] = previousBoundary;
-    for (let offset = segment.from + 1; offset < segment.to; offset += 1) {
-      boundaries[offset] = previousBoundary;
-    }
-    boundaries[segment.to] = boundary;
-    previousBoundary = boundary;
+  const measuredBoundaries = measureGraphemeBoundaryXs(
+    fragment.text,
+    fragment.font,
+    fragment.type === "inline_code" || fragment.type === "code_block"
+      ? { whiteSpace: "pre-wrap" }
+      : undefined,
+  );
+  const measuredWidth = measuredBoundaries.at(-1) ?? 0;
+  const scale = measuredWidth > 0 ? renderedTextWidth / measuredWidth : 1;
+  for (let offset = 0; offset < boundaries.length; offset += 1) {
+    boundaries[offset] = (measuredBoundaries[offset] ?? 0) * scale;
   }
   fragmentBoundaryCache.set(fragment, boundaries);
   return boundaries;
