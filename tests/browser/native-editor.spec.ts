@@ -3,6 +3,8 @@ import { test, expect, type Page } from "@playwright/test";
 const storyUrl =
   "/iframe.html?id=editing-premark-native-editor--interactive-native-prototype&viewMode=story";
 const screenshotStoryUrl = `${storyUrl}&screenshot=1`;
+const canvasSelectionStoryUrl =
+  "/iframe.html?id=editing-premark-canvas-selection--canvas-selection&viewMode=story";
 
 async function readSelection(page: Page) {
   return JSON.parse((await page.locator("[data-debug-selection]").textContent()) ?? "{}") as {
@@ -265,6 +267,53 @@ test.describe("Premark native editor story", () => {
           path: testInfo.outputPath("native-editor-shot-hidpi.png"),
         });
       }
+    } finally {
+      await context.close();
+    }
+  });
+
+  test("captures high-dpi Canvas selection crop", async ({ browser }, testInfo) => {
+    const context = await browser.newContext({
+      baseURL: "http://127.0.0.1:6106",
+      deviceScaleFactor: 2,
+      viewport: { width: 760, height: 520 },
+    });
+    const page = await context.newPage();
+    try {
+      await page.goto(canvasSelectionStoryUrl);
+
+      const canvas = page.locator("[data-canvas-selection]");
+      await expect(canvas).toBeVisible();
+      const pixelCheck = await canvas.evaluate((element) => {
+        const canvasElement = element as HTMLCanvasElement;
+        const ctx = canvasElement.getContext("2d");
+        if (ctx === null) {
+          return {
+            nonBackgroundPixels: 0,
+            width: canvasElement.width,
+            height: canvasElement.height,
+          };
+        }
+        const data = ctx.getImageData(0, 0, canvasElement.width, canvasElement.height).data;
+        let nonBackgroundPixels = 0;
+        for (let index = 0; index < data.length; index += 4 * 17) {
+          const red = data[index];
+          const green = data[index + 1];
+          const blue = data[index + 2];
+          const alpha = data[index + 3];
+          if (alpha > 0 && (red < 245 || green < 245 || blue < 245)) {
+            nonBackgroundPixels += 1;
+          }
+        }
+        return { nonBackgroundPixels, width: canvasElement.width, height: canvasElement.height };
+      });
+      expect(pixelCheck.width).toBe(1120);
+      expect(pixelCheck.height).toBe(680);
+      expect(pixelCheck.nonBackgroundPixels).toBeGreaterThan(500);
+
+      await canvas.screenshot({
+        path: testInfo.outputPath("native-editor-canvas-selection-hidpi.png"),
+      });
     } finally {
       await context.close();
     }

@@ -115,7 +115,8 @@ Goal: paint native selection and caret on the rendered surface.
 - [x] Define mobile selection behavior for touch long press, drag handles, soft keyboard focus, scroll, and zoom.
 - [x] Add tests for select-all, Home/End, PageUp/PageDown, line boundary, word boundary, document boundary, and direction-preserving selection extension.
 - [x] Add screenshot tests for forward selection, backward selection, wrapped-line selection, cross-block selection, active inline-token selection, and code-block selection in the DOM debug renderer.
-- [ ] Add active-marker reveal and high-DPI Canvas selection screenshots.
+- [ ] Add active-marker reveal screenshots.
+- [x] Add high-DPI Canvas selection screenshots.
 - [x] Add visual tests for selection overlays independent of CodeMirror.
 
 Acceptance:
@@ -200,13 +201,13 @@ Goal: convert the research checklist into automated coverage and visual review g
 - [x] Create first Playwright suite for the native editor Storybook desktop pointer/input flow and screenshot crops.
 - [x] Add Playwright coverage for desktop keyboard selection and browser clipboard paste/cut in the native editor story.
 - [x] Expand Playwright suites for visual viewport, DOM debug renderer, and screenshot-mode crops.
-- [ ] Add Canvas renderer screenshot suite.
+- [x] Add Canvas renderer screenshot suite.
 - [x] Add first browser composition suite using synthetic `composition*` events against the Storybook hidden textarea.
 - [x] Create macOS-only IME suite using real OS input where possible and clear skips where CI cannot provide the OS permission, foreground app, or input source.
 - [x] Create mobile-emulation suite for touch, visual viewport, soft keyboard modeling, and selection geometry; record gaps requiring real-device validation.
 - [x] Create DOM screenshot review artifacts with one small crop per scenario and a Codex-reviewed `review.md` that records pass/fail and visual notes.
 - [x] Create mobile screenshot review artifacts with Codex-reviewed visual notes.
-- [ ] Create Canvas screenshot review artifacts with Codex-reviewed visual notes.
+- [x] Create Canvas screenshot review artifacts with Codex-reviewed visual notes.
 - [x] Add CI/reporting guidance so screenshot failures include the actual/expected/diff images and event traces.
 
 Acceptance:
@@ -268,3 +269,6 @@ Acceptance:
 - Added strict selection geometry threshold tests that compare selection rect edges to source caret positions for inline text, wrapped text, and code blocks. Added and reviewed a code-block selection screenshot crop, closing the DOM debug renderer selection acceptance items while Canvas screenshots remain separate.
 - Verification for the selection geometry iteration: `vp check --fix` passes with existing warnings, `vp test` passes 118 tests, and `vp run test:browser` passes 11 Playwright tests.
 - Re-ran macOS IME automation. Chrome foregrounding now works and targeted process key events can pass the US focus probe, but global HID key events target `body` instead of the focused hidden textarea. The runner now performs a required global HID US probe before real Pinyin, records `hid-probe-failed.png/json` plus `pinyin-skip.txt`, and exits successfully unless strict mode is enabled.
+- Added first Canvas selection screenshot coverage. `drawTile` now accepts Premark selection and caret overlay geometry, Storybook has a high-DPI `Editing/Premark Canvas Selection` crop, and Playwright checks the Canvas backing store plus nonblank pixel content before saving `native-editor-canvas-selection-hidpi.png`.
+- Codex reviewed the Canvas selection crop and recorded the visual notes in `tests/browser/screenshot-review.md`. This closes Canvas selection screenshot coverage only; active-marker reveal styling and final Canvas visual parity remain open.
+- Verification for the Canvas screenshot iteration: `vp check --fix` passes with existing warnings, `vp test` passes 118 tests, `vp run build` passes, and `vp run test:browser` passes 12 Playwright tests.

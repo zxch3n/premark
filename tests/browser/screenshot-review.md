@@ -10,6 +10,7 @@ Current generated folder pattern:
 - `artifacts/playwright-browser/native-editor-Premark-nati-*/native-editor-after-replace.png`
 - `artifacts/playwright-browser/native-editor-Premark-nati-*/native-editor-shot-*.png`
 - `artifacts/playwright-browser/native-editor-Premark-nati-*/native-editor-mobile-touch-selection.png`
+- `artifacts/playwright-browser/native-editor-Premark-nati-*/native-editor-canvas-selection-hidpi.png`
 - `test-results/macos-ime/pinyin-skipped-no-foreground.png`
 
 ## Review Entries
@@ -99,3 +100,16 @@ Current generated folder pattern:
 - Notes:
   - This covers Premark's own touch pointer hit-test/selection path, soft-keyboard-style input events, and overlay geometry in a mobile viewport.
   - It does not cover OS long-press handles, native selection affordances, magnifier behavior, or real soft-keyboard candidate bars. Those require device automation or a manual/device-farm checklist before claiming full mobile support.
+
+### 2026-04-20 Canvas Selection
+
+- Reviewer: Codex
+- Scenario: high-DPI Canvas renderer selection crop
+- Result: pass for the first Canvas selection screenshot guard
+- Artifact size check:
+  - `native-editor-canvas-selection-hidpi.png`: `1120x680`
+- Reviewed screenshots:
+  - `native-editor-canvas-selection-hidpi.png`: the Canvas tile renders nonblank Markdown text at device scale factor 2, and the selection overlay spans the paragraph plus list rows without shifting the text layout.
+- Notes:
+  - This validates that the Canvas renderer can receive Premark selection geometry and produce a deterministic high-DPI crop.
+  - It does not yet prove active-marker reveal styling, final Canvas visual parity, or interactive Canvas input behavior.

@@ -59,6 +59,17 @@ export interface TileDrawOptions {
   contentPadding?: number;
   cardRadius?: number;
   titleBarHeight?: number;
+  selectionRects?: readonly CanvasOverlayRect[];
+  selectionColor?: string;
+  caretRect?: CanvasOverlayRect;
+  caretColor?: string;
+}
+
+export interface CanvasOverlayRect {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
 }
 
 const DEFAULTS = {
@@ -138,6 +149,12 @@ export function drawTile(
     drawBlock(ctx, block, blockLines as Array<TextLine | OpaqueLine>, originX, originY, palette);
   }
 
+  drawSelectionOverlay(ctx, options.selectionRects ?? [], originX, originY, {
+    selectionColor: options.selectionColor ?? "rgba(125, 211, 174, 0.32)",
+    caretColor: options.caretColor ?? palette.accent,
+    caretRect: options.caretRect,
+  });
+
   const fadeHeight = 72;
   if (layout.totalHeight + contentPadding * 2 + bodyTop > height) {
     const fade = ctx.createLinearGradient(0, height - fadeHeight, 0, height);
@@ -153,6 +170,43 @@ export function drawTile(
   }
 
   ctx.restore();
+  ctx.restore();
+}
+
+function drawSelectionOverlay(
+  ctx: CanvasRenderingContext2D,
+  selectionRects: readonly CanvasOverlayRect[],
+  originX: number,
+  originY: number,
+  options: {
+    readonly selectionColor: string;
+    readonly caretColor: string;
+    readonly caretRect?: CanvasOverlayRect;
+  },
+): void {
+  if (selectionRects.length === 0 && options.caretRect === undefined) {
+    return;
+  }
+
+  ctx.save();
+  ctx.fillStyle = options.selectionColor;
+  for (const rect of selectionRects) {
+    roundedRect(ctx, originX + rect.x, originY + rect.y, rect.width, rect.height, 3);
+    ctx.fill();
+  }
+
+  if (options.caretRect !== undefined) {
+    ctx.fillStyle = options.caretColor;
+    roundedRect(
+      ctx,
+      originX + options.caretRect.x,
+      originY + options.caretRect.y,
+      Math.max(2, options.caretRect.width),
+      options.caretRect.height,
+      1,
+    );
+    ctx.fill();
+  }
   ctx.restore();
 }
 
