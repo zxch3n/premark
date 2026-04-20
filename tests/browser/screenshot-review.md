@@ -81,6 +81,7 @@ Current generated folder pattern:
   - `native-editor-shot-wrapped.png`: selection continues across wrapped paragraph lines.
   - `native-editor-shot-cross-block.png`: selection spans paragraph and list rows; list marker gaps remain visible but the selected text geometry is continuous enough for the DOM prototype.
   - `native-editor-shot-inline-token.png`: selecting rendered `bold text` maps to the raw strong-token source range without exposing marker text.
+  - `native-editor-shot-active-marker.png`: active strong text reveals the raw `**` markers, caret stays inside the same source token, and the line reflows without overlap.
   - `native-editor-shot-composition.png`: synthetic preedit text appears inside the rendered strong text, with underline and caret aligned to the preedit range.
   - `native-editor-shot-paste.png`: pasted Markdown renders as bold text before the existing strong token, and the caret lands after the pasted content.
   - `native-editor-shot-remote.png`: a remote blockquote insertion appears above the active document without remounting the rendered surface.
@@ -88,7 +89,7 @@ Current generated folder pattern:
   - `native-editor-shot-hidpi.png`: high-DPI DOM crop keeps the selected list text aligned; the right edge intentionally crops unrelated paragraph text.
 - Notes:
   - This review found and fixed a real source-map bug: layout `blockIndex` referred to normalized layout blocks, not parser source blocks, which broke list-item and post-list paragraph mappings.
-  - Canvas renderer screenshots, active-marker reveal styling, and real mobile selection-handle screenshots remain pending.
+  - Final Canvas visual parity and real mobile selection-handle screenshots remain pending.
 
 ### 2026-04-20 Mobile Touch Selection
 

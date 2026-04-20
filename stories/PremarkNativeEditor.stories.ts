@@ -9,13 +9,14 @@ import {
   applyInputIntent,
   applyTextareaBridgeChange,
   beginPointerSelection,
+  createActiveMarkerRevealMarkdown,
   createEditableLayoutIndex,
   createInMemoryEditorDocumentState,
-  createSelectionGeometry,
   createTextareaBridgeSnapshot,
   LocalUndoManager,
   normalizeInputTrace,
   updatePointerSelection,
+  type EditableLayoutIndex,
   type PointerSelectionSession,
   type TextareaBridgeSnapshot,
 } from "../packages/editor/src/index.ts";
@@ -42,7 +43,9 @@ const previewLayoutEngine = createLayoutEngine({
 
 export const InteractiveNativePrototype = () => {
   const root = document.createElement("div");
-  const screenshotMode = new URL(window.location.href).searchParams.get("screenshot") === "1";
+  const searchParams = new URL(window.location.href).searchParams;
+  const screenshotMode = searchParams.get("screenshot") === "1";
+  const activeMarkerMode = searchParams.get("marker") === "active";
   root.className = screenshotMode ? "pne-root pne-screenshot-mode" : "pne-root";
 
   const editor = createInMemoryEditorDocumentState(sampleMarkdown, 720, {
@@ -54,6 +57,7 @@ export const InteractiveNativePrototype = () => {
   let bridgeSnapshot: TextareaBridgeSnapshot = createTextareaBridgeSnapshot(editor);
   let pointerSession: PointerSelectionSession | null = null;
   let composing = false;
+  let currentEditableIndex: EditableLayoutIndex = editor.editableIndex;
 
   root.innerHTML = `
     <style>${storyCss}</style>
@@ -89,10 +93,9 @@ export const InteractiveNativePrototype = () => {
   const debugSource = root.querySelector<HTMLPreElement>("[data-debug-source]")!;
 
   function render() {
-    const layout =
-      editor.compositionView === null
-        ? editor.layout
-        : previewLayoutEngine.layout(editor.compositionView.virtualText, 720);
+    const view = createRenderView();
+    const layout = view.layout;
+    currentEditableIndex = view.editableIndex;
     const rendered = renderToHtml(layout, {
       codeThemeCss: highlighter.getThemeCss("dark"),
     });
@@ -101,15 +104,90 @@ export const InteractiveNativePrototype = () => {
     overlay.style.width = `${layout.containerWidth}px`;
     overlay.style.height = `${layout.totalHeight}px`;
     surface.innerHTML = `<style>${rendered.css}</style>${rendered.html}`;
-    overlay.innerHTML = renderSelectionOverlay(layout);
-    debugSelection.textContent = JSON.stringify(createSelectionGeometry(editor), null, 2);
+    overlay.innerHTML = renderSelectionOverlay(layout, currentEditableIndex);
+    debugSelection.textContent = JSON.stringify(
+      createStorySelectionGeometry(currentEditableIndex),
+      null,
+      2,
+    );
     debugSource.textContent = editor.markdown;
     syncTextareaBridge();
   }
 
+  function createRenderView(): {
+    layout: ReturnType<typeof previewLayoutEngine.layout>;
+    editableIndex: EditableLayoutIndex;
+  } {
+    const compositionView = editor.compositionView;
+    if (compositionView !== null) {
+      const layout = previewLayoutEngine.layout(compositionView.virtualText, 720);
+      const parseState = createIncrementalParseState(compositionView.virtualText);
+      return {
+        layout,
+        editableIndex: createEditableLayoutIndex({
+          markdown: compositionView.virtualText,
+          layout,
+          blockSpans: parseState.blockSpans,
+          inlineSources: createMarkdownInlineSourceMap(parseState),
+        }),
+      };
+    }
+
+    if (!activeMarkerMode) {
+      return {
+        layout: editor.layout,
+        editableIndex: editor.editableIndex,
+      };
+    }
+
+    const reveal = createActiveMarkerRevealMarkdown({
+      markdown: editor.markdown,
+      inlineSources: editor.inlineSources,
+      selectionRange: editor.selectionSourceRange,
+    });
+    if (reveal.markerState === "hidden") {
+      return {
+        layout: editor.layout,
+        editableIndex: editor.editableIndex,
+      };
+    }
+
+    const layout = previewLayoutEngine.layout(reveal.markdown, 720);
+    return {
+      layout,
+      editableIndex: createEditableLayoutIndex({
+        markdown: editor.markdown,
+        layout,
+        blockSpans: editor.parseState.blockSpans,
+        inlineSources: editor.inlineSources,
+      }),
+    };
+  }
+
+  function createStorySelectionGeometry(index: EditableLayoutIndex) {
+    const resolved = editor.adapter.resolveRange(editor.selection.range);
+    const range = {
+      from: resolved.from,
+      to: resolved.to,
+    };
+    const anchorCaret = index.sourceOffsetToCaretRect(resolved.anchor, "before");
+    const headCaret = index.sourceOffsetToCaretRect(resolved.head, "after");
+    return {
+      range,
+      anchorOffset: resolved.anchor,
+      headOffset: resolved.head,
+      direction: resolved.direction,
+      isCollapsed: resolved.isCollapsed,
+      selectionRects: resolved.isCollapsed ? [] : index.sourceRangeToSelectionRects(range),
+      caret: resolved.isCollapsed ? headCaret : null,
+      anchorCaret,
+      headCaret,
+    };
+  }
+
   function syncTextareaBridge() {
     const compositionCaret = compositionCaretRect();
-    const geometry = createSelectionGeometry(editor);
+    const geometry = createStorySelectionGeometry(currentEditableIndex);
     const fallbackCaret = geometry.caret ?? geometry.headCaret;
     const caretRect = compositionCaret ?? fallbackCaret.rect;
     bridgeSnapshot = createTextareaBridgeSnapshot(editor);
@@ -120,7 +198,10 @@ export const InteractiveNativePrototype = () => {
     textarea.style.height = `${Math.max(16, caretRect.height)}px`;
   }
 
-  function renderSelectionOverlay(layout: ReturnType<typeof previewLayoutEngine.layout>): string {
+  function renderSelectionOverlay(
+    layout: ReturnType<typeof previewLayoutEngine.layout>,
+    editableIndex: EditableLayoutIndex,
+  ): string {
     const composition = renderCompositionOverlay(layout);
     if (editor.compositionView !== null) {
       const caret = compositionCaretRect(layout);
@@ -131,7 +212,7 @@ export const InteractiveNativePrototype = () => {
       return `${composition}${caretHtml}`;
     }
 
-    const geometry = createSelectionGeometry(editor);
+    const geometry = createStorySelectionGeometry(editableIndex);
     const selection = geometry.selectionRects
       .map(
         (rect) =>

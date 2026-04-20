@@ -40,6 +40,7 @@ Last Updated: 2026-04-20
 - The current Codex host can foreground Chrome, but global HID key events route to `body` instead of the focused hidden textarea. The macOS runner records this as a skip artifact by default and can be made strict with `PREMARK_MACOS_IME_STRICT=1`.
 - Screenshot mode exposed a real source-map bug: layout `blockIndex` is the normalized layout-block index, not the parser source-block index. Editable source mapping now scans rendered fragments in source order and then resolves the containing parser block span.
 - Mobile selection behavior is now split into two claims: Playwright mobile emulation covers Premark touch pointer selection, soft-keyboard-style `input` events, visual viewport shrink, and overlay geometry; OS long-press handles, magnifier behavior, native selection affordances, and real soft-keyboard candidate bars remain a documented real-device gap.
+- Active inline marker reveal is now modeled as an explicit rendered view over the same source ranges. Normal hidden-marker layout still maps raw marker offsets to visible token edges; active-marker layout reveals strong/code/link source text and keeps caret/hit-test addressable in original Markdown offsets.
 
 ## Removed From This Branch
 
@@ -100,7 +101,7 @@ Acceptance:
 - [x] Clicking rendered text places caret at the expected source offset.
 - [x] Drag selection across blocks produces one continuous source range.
 - [x] Hit-test works without relying on browser DOM selection.
-- [ ] Hit-test and caret rect tests pass for hidden-marker and active-marker states.
+- [x] Hit-test and caret rect tests pass for hidden-marker and active-marker states.
 
 ## Phase 2: Premark Selection Painting
 
@@ -115,7 +116,7 @@ Goal: paint native selection and caret on the rendered surface.
 - [x] Define mobile selection behavior for touch long press, drag handles, soft keyboard focus, scroll, and zoom.
 - [x] Add tests for select-all, Home/End, PageUp/PageDown, line boundary, word boundary, document boundary, and direction-preserving selection extension.
 - [x] Add screenshot tests for forward selection, backward selection, wrapped-line selection, cross-block selection, active inline-token selection, and code-block selection in the DOM debug renderer.
-- [ ] Add active-marker reveal screenshots.
+- [x] Add active-marker reveal screenshots.
 - [x] Add high-DPI Canvas selection screenshots.
 - [x] Add visual tests for selection overlays independent of CodeMirror.
 
@@ -272,3 +273,6 @@ Acceptance:
 - Added first Canvas selection screenshot coverage. `drawTile` now accepts Premark selection and caret overlay geometry, Storybook has a high-DPI `Editing/Premark Canvas Selection` crop, and Playwright checks the Canvas backing store plus nonblank pixel content before saving `native-editor-canvas-selection-hidpi.png`.
 - Codex reviewed the Canvas selection crop and recorded the visual notes in `tests/browser/screenshot-review.md`. This closes Canvas selection screenshot coverage only; active-marker reveal styling and final Canvas visual parity remain open.
 - Verification for the Canvas screenshot iteration: `vp check --fix` passes with existing warnings, `vp test` passes 118 tests, `vp run build` passes, and `vp run test:browser` passes 12 Playwright tests.
+- Added active inline marker reveal coverage. The editor package can derive an active-marker Markdown view for strong/code/link tokens, hidden-marker caret rects now have explicit tests, and active-marker hit-test maps visible marker glyphs back to original source offsets.
+- Added `native-editor-shot-active-marker.png` to the deterministic Storybook screenshot matrix. Codex reviewed the crop: the raw `**` markers are visible, the caret remains inside the active strong token, and the line reflows without overlap.
+- Verification for the active-marker iteration: `vp check --fix` passes with existing warnings, targeted `vp test packages/editor/tests/editable-layout.test.ts` passes, full `vp test` passes 120 tests, `vp run build` passes, and `vp run test:browser` passes 12 Playwright tests.
