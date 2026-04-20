@@ -22,12 +22,12 @@ Status legend:
 | macOS foreground activation               | Browser must be the foreground app before System Events can exercise real IME composition         | gap            |
 | Candidate window bounds                   | macOS IME screenshots or documented capture gap                                                   | gap            |
 | Cross-block composition replacement       | Pinyin replacement over cross-block selection                                                     | planned        |
-| Soft keyboard input without keydown       | Synthetic mobile input operation tests plus mobile browser coverage                               | planned        |
-| Visual viewport changes                   | VisualViewport resize/scroll anchoring tests                                                      | planned        |
+| Soft keyboard input without keydown       | Synthetic mobile input operation tests plus mobile browser coverage                               | logic          |
+| Visual viewport changes                   | VisualViewport resize/scroll anchoring tests                                                      | browser        |
 | Browser selection/focus coupling          | Tests keep Premark selection independent from DOM focus                                           | browser        |
 | Keyboard selection modes                  | Arrow, Shift+Arrow, Shift+Command+Arrow, Home/End, PageUp/PageDown                                | logic+browser  |
 | Grapheme boundaries                       | Combining marks, emoji ZWJ, flags, variation selectors, CJK punctuation                           | logic          |
-| Bidi hit-test                             | Mixed English/Hebrew/Arabic/numbers/Markdown markers fixtures                                     | planned        |
+| Bidi hit-test                             | Mixed English/Hebrew/Arabic/numbers/Markdown markers fixtures                                     | logic          |
 | Multi-format clipboard                    | Markdown, plain text, HTML, cross-block cut/paste                                                 | browser        |
 | DOM mutation by extensions                | Mutation-injection tests prove source of truth remains Premark state                              | browser        |
 | Accessibility                             | Label, focus, multiline textbox semantics, hidden textarea behavior                               | planned        |

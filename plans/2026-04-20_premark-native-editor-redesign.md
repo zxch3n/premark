@@ -147,7 +147,7 @@ Acceptance:
 - [x] Typing updates Premark-rendered text without remounting the visible document.
 - [x] Paste and undo/redo operate on source ranges.
 - [x] Browser selection is not the source of truth.
-- [ ] Event trace fixtures are saved for critical input cases and compared against expected normalized editor operations.
+- [x] Event trace fixtures are saved for critical input cases and compared against expected normalized editor operations.
 
 ## Phase 4: IME
 
@@ -256,3 +256,4 @@ Acceptance:
 - Screenshot review found and fixed a source mapping bug caused by treating normalized layout `blockIndex` as parser source block index. `EditableLayoutIndex` now maps visible fragments by source-order scanning and resolves each fragment back to the containing parser block span; a regression test covers list items followed by inline-token paragraphs.
 - Reviewed the screenshot-mode artifacts after the fix. DOM debug renderer screenshots are accepted for this phase; active-marker reveal styling, Canvas screenshots, and real mobile selection-handle screenshots remain pending.
 - Verification for this iteration: `vp check --fix` passes with the two existing wiki-canvas warnings, `vp test` passes 111 tests, `vp run build` passes, and `vp run test:browser` passes 9 Playwright tests.
+- Added reusable input trace fixtures for Chromium/WebKit composition order, Firefox composition input-after-end, composition cancel, soft-keyboard text insertion without keydown, beforeinput edit commands, selection plus clipboard, and keyboard selection granularity. The fixtures compare raw trace events to expected normalized editor intents.
