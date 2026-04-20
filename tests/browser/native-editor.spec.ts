@@ -185,11 +185,55 @@ async function renderedPointForText(page: Page, text: string) {
   }, text);
 }
 
+async function renderedCenterPointForText(page: Page, text: string) {
+  return page.evaluate((needle) => {
+    const surface = document.querySelector<HTMLElement>("[data-editor-surface]");
+    if (surface === null) {
+      throw new Error("Missing editor surface");
+    }
+    const walker = document.createTreeWalker(surface, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const textNode = walker.currentNode as Text;
+      const index = textNode.data.indexOf(needle);
+      if (index < 0) continue;
+      const range = document.createRange();
+      range.setStart(textNode, index);
+      range.setEnd(textNode, index + needle.length);
+      const rect = range.getBoundingClientRect();
+      const surfaceRect = surface.getBoundingClientRect();
+      return {
+        x: rect.left - surfaceRect.left + rect.width / 2,
+        y: rect.top - surfaceRect.top + rect.height / 2,
+      };
+    }
+    throw new Error(`Missing rendered text: ${needle}`);
+  }, text);
+}
+
 async function sourceOffset(page: Page, text: string, edge: "start" | "end" = "start") {
   const markdown = await editorMarkdown(page);
   const offset = markdown.indexOf(text);
   expect(offset, `source offset for ${text}`).toBeGreaterThanOrEqual(0);
   return edge === "start" ? offset : offset + text.length;
+}
+
+async function editorPointForSourceRange(page: Page, from: number, to: number) {
+  return page.evaluate(
+    ({ from, to }) =>
+      (
+        window as typeof window & {
+          __premarkNativeEditor?: {
+            pointForSourceRange(from: number, to: number): { x: number; y: number };
+          };
+        }
+      ).__premarkNativeEditor!.pointForSourceRange(from, to),
+    { from, to },
+  );
+}
+
+async function editorPointForSourceText(page: Page, text: string) {
+  const from = await sourceOffset(page, text);
+  return editorPointForSourceRange(page, from, from + text.length);
 }
 
 async function setSourceSelection(page: Page, anchor: number, head: number) {
@@ -708,6 +752,51 @@ test.describe("Premark native editor story", () => {
     });
   });
 
+  test("supports double-click word selection for CJK, emoji, links and inline code", async ({
+    page,
+  }) => {
+    async function doubleClickRenderedText(text: string, pointSource: "dom" | "editor" = "dom") {
+      await page.goto(storyUrl);
+      const surface = page.locator("[data-editor-surface]");
+      await expect(surface).toContainText(text);
+      const point =
+        pointSource === "editor"
+          ? await editorPointForSourceText(page, text)
+          : await renderedCenterPointForText(page, text);
+      await surface.click({ position: point });
+      await surface.click({ position: point });
+      return readSelection(page);
+    }
+
+    const docsSelection = await doubleClickRenderedText("docs");
+    const docsStart = await sourceOffset(page, "docs");
+    expect(docsSelection.range).toEqual({
+      from: docsStart,
+      to: docsStart + "docs".length,
+    });
+
+    const codeSelection = await doubleClickRenderedText("inline", "editor");
+    const codeStart = await sourceOffset(page, "inline code");
+    expect(codeSelection.range).toEqual({
+      from: codeStart,
+      to: codeStart + "inline".length,
+    });
+
+    const emoji = "👨‍👩‍👧‍👦";
+    const emojiSelection = await doubleClickRenderedText(emoji);
+    const emojiStart = await sourceOffset(page, emoji);
+    expect(emojiSelection.range).toEqual({
+      from: emojiStart,
+      to: emojiStart + emoji.length,
+    });
+
+    const cjkSelection = await doubleClickRenderedText("中文输入");
+    const cjkStart = await sourceOffset(page, "中文输入");
+    expect(cjkSelection.range.from).toBeGreaterThanOrEqual(cjkStart);
+    expect(cjkSelection.range.to).toBeLessThanOrEqual(cjkStart + "中文输入".length);
+    expect(cjkSelection.range.to).toBeGreaterThan(cjkSelection.range.from);
+  });
+
   test("supports Canvas double-click word and triple-click block selection", async ({ page }) => {
     await page.goto(canvasNativeStoryUrl);
 
@@ -768,6 +857,45 @@ test.describe("Premark native editor story", () => {
     expect(selection.range.from).toBeGreaterThanOrEqual(clickStart);
     expect(selection.range.from).toBeLessThanOrEqual(clickStart + "Click".length);
     expect(selection.range.to).toBeGreaterThan(await sourceOffset(page, "hidden textarea"));
+  });
+
+  test("supports code/list selection drags and drag outside the rendered surface", async ({
+    page,
+  }) => {
+    await page.goto(storyUrl);
+
+    const surface = page.locator("[data-editor-surface]");
+    await expect(surface).toContainText("inline code");
+    const box = await surface.boundingBox();
+    expect(box).not.toBeNull();
+    if (box === null) return;
+
+    const codePoint = await editorPointForSourceText(page, "inline");
+    const listPoint = await editorPointForSourceText(page, "Selection is stored");
+    await page.mouse.move(box.x + codePoint.x, box.y + codePoint.y);
+    await page.mouse.down();
+    await page.mouse.move(box.x + listPoint.x, box.y + listPoint.y, { steps: 8 });
+    await page.mouse.up();
+
+    const codeToListSelection = await readSelection(page);
+    expect(codeToListSelection.isCollapsed).toBe(false);
+    expect(codeToListSelection.range.from).toBeLessThanOrEqual(await sourceOffset(page, "inline"));
+    expect(codeToListSelection.range.to).toBeGreaterThan(
+      await sourceOffset(page, "Selection is stored"),
+    );
+
+    const clickPoint = await editorPointForSourceText(page, "Click text");
+    await page.mouse.move(box.x + clickPoint.x, box.y + clickPoint.y);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width + 80, box.y + box.height + 80, { steps: 10 });
+    await page.mouse.up();
+
+    const outsideSelection = await readSelection(page);
+    expect(outsideSelection.isCollapsed).toBe(false);
+    const clickStart = await sourceOffset(page, "Click text");
+    expect(outsideSelection.range.from).toBeGreaterThanOrEqual(clickStart);
+    expect(outsideSelection.range.from).toBeLessThanOrEqual(clickStart + "Click text".length);
+    expect(outsideSelection.range.to).toBe(await sourceOffset(page, "rendered surface.", "end"));
   });
 
   test("reveals Markdown controls only when the active range needs them", async ({ page }) => {
@@ -1020,6 +1148,23 @@ test.describe("Premark native editor story", () => {
     expect(extended.anchorOffset).toBe(initial.headOffset);
     expect(extended.headOffset).toBeGreaterThan(initial.headOffset);
 
+    await setSourceCaret(page, await sourceOffset(page, "Click text"));
+    await page.locator("[data-input-bridge]").focus();
+    await page.keyboard.down("Shift");
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.up("Shift");
+    const shiftDownSelection = await readSelection(page);
+    expect(shiftDownSelection.isCollapsed).toBe(false);
+    expect(shiftDownSelection.anchorOffset).toBe(await sourceOffset(page, "Click text"));
+    expect(shiftDownSelection.headOffset).toBeGreaterThan(shiftDownSelection.anchorOffset);
+
+    await page.keyboard.down("Shift");
+    await page.keyboard.press("ArrowUp");
+    await page.keyboard.up("Shift");
+    const shiftUpSelection = await readSelection(page);
+    expect(shiftUpSelection.anchorOffset).toBe(shiftDownSelection.anchorOffset);
+    expect(shiftUpSelection.headOffset).toBeLessThan(shiftDownSelection.headOffset);
+
     await page.keyboard.down("Meta");
     await page.keyboard.down("Shift");
     await page.keyboard.press("ArrowDown");
@@ -1050,6 +1195,16 @@ test.describe("Premark native editor story", () => {
     expect(lineBoundarySelection.headOffset).toBeGreaterThan(wordMoved.headOffset);
 
     const bridge = page.locator("[data-input-bridge]");
+    await setSourceCaret(page, await sourceOffset(page, "surface", "end"));
+    await bridge.focus();
+    await page.keyboard.down("Shift");
+    await page.keyboard.press("ArrowLeft");
+    await page.keyboard.up("Shift");
+    const shiftLeftSelection = await readSelection(page);
+    expect(shiftLeftSelection.isCollapsed).toBe(false);
+    expect(shiftLeftSelection.anchorOffset).toBe(await sourceOffset(page, "surface", "end"));
+    expect(shiftLeftSelection.headOffset).toBeLessThan(shiftLeftSelection.anchorOffset);
+
     const paragraphStart = await sourceOffset(page, "Click text");
     const paragraphEnd = await sourceOffset(page, "rendered surface.", "end");
     await setSourceCaret(page, paragraphEnd);
@@ -1083,6 +1238,28 @@ test.describe("Premark native editor story", () => {
     expect(altLeftSelection.isCollapsed).toBe(true);
     expect(altLeftSelection.headOffset).toBe(await sourceOffset(page, "surface"));
 
+    await page.keyboard.down("Shift");
+    await page.keyboard.down("Alt");
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.up("Alt");
+    await page.keyboard.up("Shift");
+    const shiftAltRightSelection = await readSelection(page);
+    expect(shiftAltRightSelection.isCollapsed).toBe(false);
+    expect(shiftAltRightSelection.anchorOffset).toBe(await sourceOffset(page, "surface"));
+    expect(shiftAltRightSelection.headOffset).toBeGreaterThan(shiftAltRightSelection.anchorOffset);
+
+    await setSourceCaret(page, await sourceOffset(page, "hidden textarea"));
+    await bridge.focus();
+    await page.keyboard.press("PageDown");
+    const pageDownSelection = await readSelection(page);
+    expect(pageDownSelection.headOffset).toBeGreaterThan(
+      await sourceOffset(page, "hidden textarea"),
+    );
+
+    await page.keyboard.press("PageUp");
+    const pageUpSelection = await readSelection(page);
+    expect(pageUpSelection.headOffset).toBeLessThan(pageDownSelection.headOffset);
+
     await setSourceCaret(page, await sourceOffset(page, "surface"));
     await bridge.focus();
     await page.keyboard.down("Meta");
@@ -1096,6 +1273,15 @@ test.describe("Premark native editor story", () => {
     await page.keyboard.up("Meta");
     const documentEnd = await readSelection(page);
     expect(documentEnd.headOffset).toBe((await editorMarkdown(page)).length);
+
+    await page.keyboard.down("Shift");
+    await page.keyboard.down("Meta");
+    await page.keyboard.press("ArrowUp");
+    await page.keyboard.up("Meta");
+    await page.keyboard.up("Shift");
+    const shiftDocumentStart = await readSelection(page);
+    expect(shiftDocumentStart.anchorOffset).toBe((await editorMarkdown(page)).length);
+    expect(shiftDocumentStart.headOffset).toBe(0);
 
     await page.keyboard.press("Control+A");
     const allSelection = await readSelection(page);
