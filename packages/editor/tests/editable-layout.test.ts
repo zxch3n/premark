@@ -1,4 +1,4 @@
-import { createLayoutEngine } from "@pretext-md/layout";
+import { createLayoutEngine, measureGraphemeBoundaryXs } from "@pretext-md/layout";
 import { installNodeCanvas } from "../../layout/src/node-canvas.ts";
 import { createIncrementalParseState, createMarkdownInlineSourceMap } from "@pretext-md/parser";
 import { describe, expect, it } from "vite-plus/test";
@@ -270,11 +270,9 @@ describe("EditableLayoutIndex", () => {
     const emojiFrom = markdown.indexOf(emoji);
     const emojiTo = emojiFrom + emoji.length;
     const localEmojiTo = emojiTo - fragment!.sourceRange.from;
-    const measuredFullWidth = measuredTextWidth(fragment!.text, fragment!.font);
-    const measuredEmojiEndWidth = measuredTextWidth(
-      fragment!.text.slice(0, localEmojiTo),
-      fragment!.font,
-    );
+    const boundaryXs = measureGraphemeBoundaryXs(fragment!.text, fragment!.font);
+    const measuredFullWidth = boundaryXs.at(-1)!;
+    const measuredEmojiEndWidth = boundaryXs[localEmojiTo]!;
     const expectedEmojiEndX =
       fragment!.rect.x + (measuredEmojiEndWidth / measuredFullWidth) * fragment!.rect.width;
 
@@ -286,6 +284,9 @@ describe("EditableLayoutIndex", () => {
     expect(insideBefore.rect.x).toBeCloseTo(before.rect.x, 0);
     expect(insideAfter.rect.x).toBeCloseTo(after.rect.x, 0);
     expect(after.rect.x).toBeCloseTo(expectedEmojiEndX, 0);
+
+    const beforeNextText = index.sourceOffsetToCaretRect(markdown.indexOf("B"), "before");
+    expect(beforeNextText.rect.x).toBeGreaterThan(after.rect.x);
 
     const leftHit = index.hitTest(before.rect.x + 1, before.rect.y + 1);
     const rightHit = index.hitTest(after.rect.x - 1, after.rect.y + 1);
@@ -684,9 +685,10 @@ describe("EditableLayoutIndex", () => {
     expect(index.fragments[0]?.sourceRange).toEqual({ from: 0, to: 5 });
     const selectionRects = index.sourceRangeToSelectionRects({ from: 1, to: 4 });
     const fragment = index.fragments[0]!;
-    const scale = fragment.rect.width / measuredTextWidth(fragment.text, fragment.font);
-    const expectedX = measuredTextWidth("H", fragment.font) * scale;
-    const expectedWidth = measuredTextWidth("ell", fragment.font) * scale;
+    const boundaries = measureGraphemeBoundaryXs(fragment.text, fragment.font);
+    const scale = fragment.rect.width / boundaries.at(-1)!;
+    const expectedX = boundaries[1]! * scale;
+    const expectedWidth = (boundaries[4]! - boundaries[1]!) * scale;
 
     expect(selectionRects).toHaveLength(1);
     expect(selectionRects[0]?.x).toBeCloseTo(expectedX, 5);
