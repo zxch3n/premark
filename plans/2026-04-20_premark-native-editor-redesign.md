@@ -23,6 +23,8 @@ Last Updated: 2026-04-20
 - Premark should reuse the continuous rendered-surface idea, but prefer source ranges, layout fragments, and explicit operations as the source of truth instead of treating post-input DOM text as the primary model.
 - The first native editor design chooses hidden textarea input plus Premark-painted selection/caret/composition, with shared DOM-debug and Canvas renderers over one layout/source-map core.
 - Selection testing must be much broader than basic drag selection: mouse drag/reversal, Arrow navigation, Shift+Arrow, Shift+Command+Arrow, cross-block ranges, and mobile touch selection all need coverage.
+- External research confirms the main risk areas: IME event order differs across specs/browsers, composition can abort if DOM/selection around it is changed, soft keyboards may not produce reliable keydown events, Selection API focus behavior varies, and mobile visual viewports change under OS keyboards.
+- Screenshot testing must be part of acceptance, not just a debugging aid. Screenshots should be small deterministic crops, stored as artifacts/baselines, and reviewed by Codex before claiming a phase is visually correct.
 
 ## Removed From This Branch
 
@@ -56,11 +58,14 @@ Goal: define the minimum editor contract before coding input.
 - [ ] Define unsupported/deferred scopes: table cell rich editing, image resize, HTML block editing.
 - [ ] Define browser matrix: Chromium first, macOS IME required before claiming success.
 - [ ] Define manual fallback policy if real OS IME exposes a browser bug.
+- [ ] Create a pitfall-to-test matrix for IME, hidden textarea, selection, mobile, clipboard, Unicode, bidi, accessibility, visual stability, and remote edits.
+- [ ] Define screenshot artifact policy: crop size limits, deterministic fonts/theme, animation disabled, artifact folder, and review checklist.
 
 Acceptance:
 
 - [ ] A new contributor can explain how selection, hit-test, input, composition, and rendering connect.
 - [ ] No CodeMirror dependency is needed to understand or run the native editor prototype.
+- [ ] Every known pitfall has an automated test plan or an explicit documented automation gap.
 
 ## Phase 1: Hit-Test And Source Mapping
 
@@ -71,12 +76,16 @@ Goal: make rendered Premark output addressable enough to edit directly.
 - [ ] Implement `sourceOffsetToCaretRect(offset, affinity)`.
 - [ ] Implement line/word/block granularity hit-test helpers.
 - [ ] Add tests for Latin, CJK, emoji, inline code, links, list markers, blockquotes, and code blocks.
+- [ ] Add grapheme fixtures for combining marks, emoji ZWJ sequences, flags, skin tones, and CJK punctuation.
+- [ ] Add bidi fixtures for mixed English/Hebrew/Arabic/numbers/Markdown markers, even if first support is limited to documented behavior.
+- [ ] Add coordinate transform tests for scroll, zoom, device scale factor, and nested canvas/world transforms.
 
 Acceptance:
 
 - [ ] Clicking rendered text places caret at the expected source offset.
 - [ ] Drag selection across blocks produces one continuous source range.
 - [ ] Hit-test works without relying on browser DOM selection.
+- [ ] Hit-test and caret rect tests pass for hidden-marker and active-marker states.
 
 ## Phase 2: Premark Selection Painting
 
@@ -88,6 +97,8 @@ Goal: paint native selection and caret on the rendered surface.
 - [ ] Support collapsed, forward, backward, and multi-block selections.
 - [ ] Support mouse drag selection, drag reversal, keyboard arrows, Shift+arrows, and Shift+Command+arrows.
 - [ ] Define mobile selection behavior for touch long press, drag handles, soft keyboard focus, scroll, and zoom.
+- [ ] Add tests for select-all, Home/End, PageUp/PageDown, line boundary, word boundary, document boundary, and direction-preserving selection extension.
+- [ ] Add screenshot tests for forward selection, backward selection, wrapped-line selection, cross-block selection, active inline marker selection, and high-DPI canvas selection.
 - [ ] Add visual tests for selection overlays independent of CodeMirror.
 
 Acceptance:
@@ -95,6 +106,7 @@ Acceptance:
 - [ ] Selection over rendered Markdown looks continuous across paragraphs/lists/code.
 - [ ] Selection geometry matches source range mapping within strict pixel thresholds.
 - [ ] Desktop and mobile-specific selection behaviors have automated coverage or an explicit documented automation gap.
+- [ ] Codex has reviewed the saved selection screenshots and recorded whether they match expected geometry and styling.
 
 ## Phase 3: Input Bridge
 
@@ -105,12 +117,17 @@ Goal: receive real OS text input while keeping Premark as the visible editor.
 - [ ] Convert `beforeinput` / `input` / keyboard commands into source operations.
 - [ ] Handle delete/backspace, Enter, paste, undo/redo.
 - [ ] Keep bridge content minimal to avoid DOM editor behavior becoming the product.
+- [ ] Add an input event trace recorder for `keydown`, `beforeinput`, `input`, `keyup`, `selectionchange`, `composition*`, `paste`, `copy`, and `cut`.
+- [ ] Add tests proving text insertion does not rely on keydown, so mobile autocorrect/autosuggest/swipe-like input can be modeled as input operations.
+- [ ] Add clipboard tests for Markdown, plain text, HTML, cross-block cut, cross-block paste, and paste while a selection is active.
+- [ ] Add focus/textarea-anchoring tests for scroll, zoom, visual viewport resize, and editor blur/refocus.
 
 Acceptance:
 
 - [ ] Typing updates Premark-rendered text without remounting the visible document.
 - [ ] Paste and undo/redo operate on source ranges.
 - [ ] Browser selection is not the source of truth.
+- [ ] Event trace fixtures are saved for critical input cases and compared against expected normalized editor operations.
 
 ## Phase 4: IME
 
@@ -121,11 +138,16 @@ Goal: support real composition without hiding behind CodeMirror.
 - [ ] Commit and cancel composition without losing source selection.
 - [ ] Run macOS Pinyin real IME tests.
 - [ ] Add Japanese and Korean scenarios after Pinyin stabilizes.
+- [ ] Test browser/spec event-order variants: `beforeinput`/`compositionupdate`/`input`/`compositionend` can arrive in different orders and must normalize to the same editor operation.
+- [ ] Assert composition update never commits real source, never enters undo, and never requires changing browser DOM selection near the composition range.
+- [ ] Add screenshots for composition preedit text, replacement of selected text, composition near strong/code/link markers, and candidate-window anchoring when the OS screenshot path can capture it.
+- [ ] Add remote/AI patch tests during composition: before range, after range, inside selected replacement range, and overlapping composition range.
 
 Acceptance:
 
 - [ ] macOS Pinyin commit, cancel, selected replacement, undo/redo, and cross-block selection pass.
 - [ ] Composition does not replace or remount the rendered surface.
+- [ ] Codex has reviewed saved IME screenshots or documented why a specific OS-level candidate window cannot be captured automatically.
 
 ## Phase 5: Prototype Story
 
@@ -136,11 +158,31 @@ Goal: replace the removed CodeMirror Storybook examples with a native Premark ed
 - [ ] Drag across blocks to select.
 - [ ] Type, delete, paste, and undo in supported blocks.
 - [ ] Show debug overlay for source offsets, hit-test rects, and selection ranges.
+- [ ] Add a screenshot mode that renders small fixed-size crops for key states: idle, caret, selected range, active marker, composition, paste preview, and remote edit.
+- [ ] Add a screenshot review log template beside the generated artifacts.
 
 Acceptance:
 
 - [ ] The story demonstrates multi-line and cross-block selection.
 - [ ] The story has no CodeMirror dependency.
+- [ ] Story screenshots are deterministic enough for Playwright visual comparison and small enough for manual Codex review.
+
+## Phase 6: Pitfall Automation And Screenshot Audit
+
+Goal: convert the research checklist into automated coverage and visual review gates.
+
+- [ ] Create `tests/editor/pitfalls/README.md` with every known pitfall, source, automation status, and owner.
+- [ ] Create Playwright suites for desktop pointer selection, desktop keyboard selection, input bridge, clipboard, visual viewport, DOM debug renderer, Canvas renderer, and screenshot crops.
+- [ ] Create macOS-only IME suite using real OS input where possible and clear skips where CI cannot provide the OS permission or input source.
+- [ ] Create mobile-emulation suite for touch, visual viewport, soft keyboard modeling, and selection geometry; record gaps requiring real-device validation.
+- [ ] Create screenshot review artifacts with one small crop per scenario and a Codex-reviewed `review.md` that records pass/fail and visual notes.
+- [ ] Add CI/reporting guidance so screenshot failures include the actual/expected/diff images and event traces.
+
+Acceptance:
+
+- [ ] No phase can be marked complete without either passing automated pitfall tests or documenting a specific automation gap.
+- [ ] Screenshot crops have been reviewed by Codex, not only generated by CI.
+- [ ] Visual diffs are stable on the chosen baseline OS/browser/font configuration.
 
 ## Iteration Log
 
@@ -152,3 +194,4 @@ Acceptance:
 - Known risk: native input/IME is the hardest part and must be validated with real OS automation early, not deferred.
 - Cloned MarkText and studied Muya. It confirms that a non-CodeMirror WYSIWYG Markdown editor is practical, but the first prototype should isolate browser-native editing behavior behind a small bridge and keep Premark's model/layout authoritative.
 - Accepted design direction: hidden textarea bridge near caret, Premark-rendered caret/selection/composition, inline marker reveal for strong/code/link, UTF-16 offsets with grapheme sidecar, CRDT-agnostic stable ranges, local undo, and strict logic/browser/visual/IME/mobile testing.
+- Researched browser/editor pitfalls from W3C/MDN/Chrome/CodeMirror/ProseMirror/Slate/Draft/Playwright/Unicode sources and added a dedicated automation plus screenshot audit phase.
