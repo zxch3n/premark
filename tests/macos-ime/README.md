@@ -23,8 +23,9 @@ events. It only verifies the Swift helpers, records the current input source, ch
 selected target IME and US sources are enabled, lists likely Pinyin/Japanese/Korean input-source
 candidates from both enabled and all installed input sources, and records the selected scenario set.
 The preflight has the same no-HID/no-browser boundary, but also records current macOS foreground
-diagnostics from both System Events and `NSWorkspace`. It is the quick check to run before the
-exclusive real IME path.
+diagnostics from System Events, `NSWorkspace`, and `CGSessionCopyCurrentDictionary`. It is the quick
+check to run before the exclusive real IME path. If `CGSSessionScreenIsLocked` is `1`, real IME/HID
+cannot run because macOS routes foreground state through `loginwindow`.
 
 Input-source readiness uses `list-all` plus each source's enabled flag because macOS can omit enabled
 input modes from `TISCreateInputSourceList(..., includeAllInstalled: false)`. The helper also has an
@@ -77,6 +78,7 @@ Artifacts:
 - `test-results/macos-ime/preflight-<scenario-set>.json`: scenario-set-specific preflight report.
 - `test-results/macos-ime/*-screen.png`: whole-screen OS screenshots, used for candidate-window anchoring when available.
 - `test-results/macos-ime/<scenario-name>.png`: real IME scenario screenshots.
+- `test-results/macos-ime/ime-skipped-locked-session.json`: foreground diagnostics captured before browser launch when the macOS session is locked.
 - `test-results/macos-ime/ime-skipped-no-foreground.png`: browser could not become foreground.
 - `test-results/macos-ime/ime-skipped-no-foreground.json`: foreground diagnostics for the final IME foreground gate.
 - `test-results/macos-ime/ime-skip.txt`: exact skip reason.
