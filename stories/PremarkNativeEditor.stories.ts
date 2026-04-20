@@ -53,6 +53,8 @@ export const InteractiveNativePrototype = () => {
     let bridgeSnapshot: TextareaBridgeSnapshot = createTextareaBridgeSnapshot(editor);
     let pointerSession: PointerSelectionSession | null = null;
     let composing = false;
+    let compositionCommitKeyWasEnter = false;
+    let suppressLineBreakUntil = 0;
     let currentEditableIndex: EditableLayoutIndex = editor.editableIndex;
     let pointerClickCount = 0;
     let lastPointerClick: {
@@ -97,7 +99,7 @@ export const InteractiveNativePrototype = () => {
     const debugSelection = root.querySelector<HTMLPreElement>("[data-debug-selection]")!;
     const debugSource = root.querySelector<HTMLPreElement>("[data-debug-source]")!;
 
-    function render() {
+    function render(options: { readonly syncBridgeValue?: boolean } = {}) {
       const view = controller.renderSnapshot();
       const layout = view.layout;
       currentEditableIndex = view.editableIndex;
@@ -116,7 +118,7 @@ export const InteractiveNativePrototype = () => {
         2,
       );
       debugSource.textContent = controller.markdown();
-      syncTextareaBridge();
+      syncTextareaBridge({ writeValue: options.syncBridgeValue !== false });
     }
 
     function renderSurfaceHtml(rendered: { html: string; css: string }) {
@@ -202,17 +204,32 @@ export const InteractiveNativePrototype = () => {
       };
     }
 
-    function syncTextareaBridge() {
+    function syncTextareaBridge(options: { readonly writeValue?: boolean } = {}) {
       const compositionCaret = compositionCaretRect();
       const geometry = createStorySelectionGeometry(currentEditableIndex);
       const fallbackCaret = geometry.caret ?? geometry.headCaret;
       const caretRect = compositionCaret ?? fallbackCaret.rect;
       bridgeSnapshot = createTextareaBridgeSnapshot(editor);
-      textarea.value = bridgeSnapshot.value;
-      textarea.setSelectionRange(bridgeSnapshot.selectionStart, bridgeSnapshot.selectionEnd);
+      if (options.writeValue !== false) {
+        textarea.value = bridgeSnapshot.value;
+        textarea.setSelectionRange(bridgeSnapshot.selectionStart, bridgeSnapshot.selectionEnd);
+      }
       textarea.style.left = `${28 + Math.max(0, caretRect.x)}px`;
       textarea.style.top = `${28 + Math.max(0, caretRect.y)}px`;
       textarea.style.height = `${Math.max(16, caretRect.height)}px`;
+    }
+
+    function shouldPreserveNativeInputContext(event: Event): boolean {
+      if (!(event instanceof InputEvent)) {
+        return false;
+      }
+      if (event.isComposing) {
+        return true;
+      }
+      const data = event.data ?? "";
+      return (
+        event.inputType === "insertText" && /[\u1100-\u11ff\u3130-\u318f\uac00-\ud7af]/u.test(data)
+      );
     }
 
     function renderSelectionOverlay(
@@ -350,6 +367,9 @@ export const InteractiveNativePrototype = () => {
     });
 
     textarea.addEventListener("keydown", (event) => {
+      if (composing && event.key === "Enter") {
+        compositionCommitKeyWasEnter = true;
+      }
       const intent = normalizeInputTrace([
         {
           type: "keydown",
@@ -374,6 +394,14 @@ export const InteractiveNativePrototype = () => {
     });
 
     textarea.addEventListener("beforeinput", (event) => {
+      if (
+        (event.inputType === "insertParagraph" || event.inputType === "insertLineBreak") &&
+        performance.now() <= suppressLineBreakUntil
+      ) {
+        suppressLineBreakUntil = 0;
+        event.preventDefault();
+        return;
+      }
       const intent = normalizeInputTrace([
         {
           type: "beforeinput",
@@ -399,8 +427,9 @@ export const InteractiveNativePrototype = () => {
 
     textarea.addEventListener("compositionstart", (event) => {
       composing = true;
+      compositionCommitKeyWasEnter = false;
       applyInputIntent(editor, { type: "composition-start" }, { undoManager });
-      render();
+      render({ syncBridgeValue: false });
       event.preventDefault();
     });
 
@@ -409,11 +438,15 @@ export const InteractiveNativePrototype = () => {
         return;
       }
       applyInputIntent(editor, { type: "composition-update", text: event.data }, { undoManager });
-      render();
+      render({ syncBridgeValue: false });
     });
 
     textarea.addEventListener("compositionend", (event) => {
       composing = false;
+      if (compositionCommitKeyWasEnter && event.data.length > 0) {
+        suppressLineBreakUntil = performance.now() + 500;
+      }
+      compositionCommitKeyWasEnter = false;
       applyInputIntent(editor, { type: "composition-commit", text: event.data }, { undoManager });
       render();
     });
@@ -440,7 +473,7 @@ export const InteractiveNativePrototype = () => {
       render();
     });
 
-    textarea.addEventListener("input", () => {
+    textarea.addEventListener("input", (event) => {
       if (composing) {
         return;
       }
@@ -451,7 +484,7 @@ export const InteractiveNativePrototype = () => {
       if (applied !== null) {
         undoManager.recordApplied(editor.adapter, applied);
       }
-      render();
+      render({ syncBridgeValue: !shouldPreserveNativeInputContext(event) });
     });
 
     (

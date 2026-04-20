@@ -229,6 +229,8 @@ export const InteractiveCanvasNativeEditor = () => {
     let bridgeSnapshot: TextareaBridgeSnapshot = createTextareaBridgeSnapshot(editor);
     let pointerSession: PointerSelectionSession | null = null;
     let composing = false;
+    let compositionCommitKeyWasEnter = false;
+    let suppressLineBreakUntil = 0;
     let activeEditableIndex: EditableLayoutIndex = editor.editableIndex;
     let pointerClickCount = 0;
     let lastPointerClick: {
@@ -247,7 +249,7 @@ export const InteractiveCanvasNativeEditor = () => {
     const searchParams = new URLSearchParams(window.location.search);
     let autoStreamTimer: number | null = null;
 
-    function render() {
+    function render(options: { readonly syncBridgeValue?: boolean } = {}) {
       const view = controller.renderSnapshot();
       activeEditableIndex = view.editableIndex;
       const geometry =
@@ -288,7 +290,9 @@ export const InteractiveCanvasNativeEditor = () => {
         2,
       );
       debugSource.textContent = controller.markdown();
-      syncTextareaBridge(geometry.caret?.rect ?? geometry.headCaret.rect, view.viewport.scrollTop);
+      syncTextareaBridge(geometry.caret?.rect ?? geometry.headCaret.rect, view.viewport.scrollTop, {
+        writeValue: options.syncBridgeValue !== false,
+      });
     }
 
     function canvasClipFromDirtyRect(
@@ -347,13 +351,29 @@ export const InteractiveCanvasNativeEditor = () => {
     function syncTextareaBridge(
       caretRect: { x: number; y: number; height: number },
       scrollTop: number,
+      options: { readonly writeValue?: boolean } = {},
     ) {
       bridgeSnapshot = createTextareaBridgeSnapshot(editor);
-      textarea.value = bridgeSnapshot.value;
-      textarea.setSelectionRange(bridgeSnapshot.selectionStart, bridgeSnapshot.selectionEnd);
+      if (options.writeValue !== false) {
+        textarea.value = bridgeSnapshot.value;
+        textarea.setSelectionRange(bridgeSnapshot.selectionStart, bridgeSnapshot.selectionEnd);
+      }
       textarea.style.left = `${contentPadding + Math.max(0, caretRect.x)}px`;
       textarea.style.top = `${contentPadding + Math.max(0, caretRect.y - scrollTop)}px`;
       textarea.style.height = `${Math.max(16, caretRect.height)}px`;
+    }
+
+    function shouldPreserveNativeInputContext(event: Event): boolean {
+      if (!(event instanceof InputEvent)) {
+        return false;
+      }
+      if (event.isComposing) {
+        return true;
+      }
+      const data = event.data ?? "";
+      return (
+        event.inputType === "insertText" && /[\u1100-\u11ff\u3130-\u318f\uac00-\ud7af]/u.test(data)
+      );
     }
 
     function canvasPointFromEvent(event: MouseEvent): { x: number; y: number } {
@@ -456,6 +476,9 @@ export const InteractiveCanvasNativeEditor = () => {
     );
 
     textarea.addEventListener("keydown", (event) => {
+      if (composing && event.key === "Enter") {
+        compositionCommitKeyWasEnter = true;
+      }
       const intent = normalizeInputTrace([
         {
           type: "keydown",
@@ -479,6 +502,14 @@ export const InteractiveCanvasNativeEditor = () => {
     });
 
     textarea.addEventListener("beforeinput", (event) => {
+      if (
+        (event.inputType === "insertParagraph" || event.inputType === "insertLineBreak") &&
+        performance.now() <= suppressLineBreakUntil
+      ) {
+        suppressLineBreakUntil = 0;
+        event.preventDefault();
+        return;
+      }
       const intent = normalizeInputTrace([
         {
           type: "beforeinput",
@@ -502,8 +533,9 @@ export const InteractiveCanvasNativeEditor = () => {
 
     textarea.addEventListener("compositionstart", (event) => {
       composing = true;
+      compositionCommitKeyWasEnter = false;
       applyInputIntent(editor, { type: "composition-start" }, { undoManager });
-      render();
+      render({ syncBridgeValue: false });
       event.preventDefault();
     });
 
@@ -512,11 +544,15 @@ export const InteractiveCanvasNativeEditor = () => {
         return;
       }
       applyInputIntent(editor, { type: "composition-update", text: event.data }, { undoManager });
-      render();
+      render({ syncBridgeValue: false });
     });
 
     textarea.addEventListener("compositionend", (event) => {
       composing = false;
+      if (compositionCommitKeyWasEnter && event.data.length > 0) {
+        suppressLineBreakUntil = performance.now() + 500;
+      }
+      compositionCommitKeyWasEnter = false;
       applyInputIntent(editor, { type: "composition-commit", text: event.data }, { undoManager });
       render();
     });
@@ -543,7 +579,7 @@ export const InteractiveCanvasNativeEditor = () => {
       render();
     });
 
-    textarea.addEventListener("input", () => {
+    textarea.addEventListener("input", (event) => {
       if (composing) {
         return;
       }
@@ -554,7 +590,7 @@ export const InteractiveCanvasNativeEditor = () => {
       if (applied !== null) {
         undoManager.recordApplied(editor.adapter, applied);
       }
-      render();
+      render({ syncBridgeValue: !shouldPreserveNativeInputContext(event) });
     });
 
     if (searchParams.get("autostream") === "1") {

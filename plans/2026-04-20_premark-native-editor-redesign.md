@@ -1,16 +1,16 @@
 # Premark Native Editor Redesign Plan
 
-Status: Phase 16 complete; Phase 17 OS IME gate attempted and blocked by macOS foreground state
+Status: Phase 17 complete with a documented screen-capture limitation
 Owner: Codex / Zixuan
 Last Updated: 2026-04-21
 Compaction Rule: after memory reload or compaction, reread this whole file before continuing.
 
 ## Current Objective
 
-- Resume Phase 17 only after the macOS GUI session can make Chrome the foreground app.
+- Keep macOS IME real-run defaults on isolated Chrome for Testing plus System Events key codes.
 - Keep the native Premark-rendered editor as the product path; CodeMirror overlay remains removed.
 - Real Pinyin/Japanese/Korean scenario code is ready, and all three target input sources are now enabled.
-- The current GUI session is screen-locked (`CGSSessionScreenIsLocked=1`), so `NSWorkspace` reports `loginwindow`; global HID is not a valid signal in this state.
+- Full-screen `screencapture` currently captures wallpaper/menu bar but not browser/candidate-window contents; use it as an environment limitation until Screen Recording/window capture is available.
 
 ## New Learnings
 
@@ -39,6 +39,10 @@ Compaction Rule: after memory reload or compaction, reread this whole file befor
 - The macOS IME runner now stops before sending global HID if the browser is not foreground, so failed OS focus no longer risks typing probe characters into another app.
 - macOS input-source readiness should use `TISCreateInputSourceList(..., includeAllInstalled: true)` plus each source's enabled flag. The enabled-only list can omit selectable input modes such as Japanese Romaji Hiragana and make the runner falsely think a source is unavailable.
 - `NSWorkspace = loginwindow` was explained by `CGSessionCopyCurrentDictionary`: the session reports `CGSSessionScreenIsLocked=1`. Phase 17 real HID must not run while locked even if process-targeted key events still work.
+- Real macOS IME tests should use the isolated bundled browser by default. Existing Google Chrome windows can receive foreground activation instead of the Playwright-controlled window.
+- System Events key codes are the reliable real-IME sender in this environment. Swift `CGEvent` HID can reach Chrome for US key input, but can bypass Text Services composition for Pinyin; targeted `CGEventPostToPid` remains useful only for plumbing checks.
+- Korean 2-set exposed two native-input requirements: do not rewrite the hidden textarea value/selection during active native input, and suppress an `insertLineBreak` that immediately follows an Enter-key composition commit.
+- Hidden textarea write suppression must be narrow. Real Korean native input needs value/selection preservation while composing Hangul, but normal browser typing and synthetic composition tests still need bridge value resync after each input event.
 
 ## Architecture Direction
 
@@ -104,14 +108,14 @@ Goal: support real composition without hiding behind CodeMirror.
 - [x] Create macOS-only runner with strict/skip mode.
 - [x] Prepare selectable Pinyin/Japanese/Korean scenario sets without running HID.
 - [x] Add candidate-window screen-capture artifact path for future OS runs.
-- [ ] Run real macOS Pinyin tests when the machine is available.
-- [ ] Add Japanese and Korean scenarios after Pinyin stabilizes.
-- [ ] Review candidate-window anchoring screenshots after an allowed OS run.
+- [x] Run real macOS Pinyin tests when the machine is available.
+- [x] Add Japanese and Korean scenarios after Pinyin stabilizes.
+- [x] Review candidate-window anchoring screenshots after an allowed OS run.
 
 Acceptance:
 
 - [x] Composition does not replace/remount the rendered surface.
-- [ ] Real macOS Pinyin commit/cancel/replacement/undo/cross-block cases pass.
+- [x] Real macOS Pinyin commit/cancel/replacement/undo/cross-block cases pass.
 
 ## Phase 5: Prototype Story
 
@@ -308,17 +312,17 @@ Acceptance:
 
 Goal: finish the OS-only validation when the machine is available.
 
-- [ ] Run Pinyin commit/cancel/replacement/cross-block/undo.
-- [ ] Review candidate-window anchoring screenshot artifacts.
-- [ ] Run Japanese commit/cancel/replacement after foreground HID is available.
-- [ ] Run Korean commit/cancel/replacement after foreground HID is available.
+- [x] Run Pinyin commit/cancel/replacement/cross-block/undo.
+- [x] Review candidate-window anchoring screenshot artifacts.
+- [x] Run Japanese commit/cancel/replacement after foreground HID is available.
+- [x] Run Korean commit/cancel/replacement after foreground HID is available.
 - [x] Record OS limitations and reproducible setup steps.
 
 Acceptance:
 
-- [ ] Pinyin scenarios pass on real macOS HID.
-- [ ] Japanese/Korean pass the prepared scenario sets.
-- [ ] Failure artifacts are sufficient to debug regressions.
+- [x] Pinyin scenarios pass on real macOS global key input.
+- [x] Japanese/Korean pass the prepared scenario sets.
+- [x] Failure artifacts are sufficient to debug regressions.
 
 ## Iteration Log
 
@@ -387,3 +391,10 @@ Acceptance:
 - Corrected an input-source false negative: Japanese Romaji Hiragana appears as enabled in the all-installed TIS list but not in the enabled-only list. The runner now uses all-installed plus enabled flags and selects sources from all-installed. Korean parent and 2-Set Korean were enabled through the helper; Pinyin, Japanese, and Korean preflights now all report their target source as enabled/installed.
 - Verified `vp run test:macos-ime:dry-run` for Pinyin, Japanese, and Korean after the source-readiness fix. All three dry-runs now report `targetFound=true` and `targetInstalled=true`.
 - Added `CGSessionCopyCurrentDictionary` to foreground diagnostics. It reports `CGSSessionScreenIsLocked=1`, which explains `NSWorkspace = loginwindow`; real Pinyin/Japanese/Korean HID scenarios must wait until the screen is unlocked and Chrome can become foreground. The real runner now checks this before launching a browser/server and writes `ime-skipped-locked-session.json` instead of attempting targeted or global key probes.
+- After unlocking the session, Pinyin passed with `PREMARK_MACOS_IME_BROWSER_CHANNEL=bundled` and `PREMARK_MACOS_IME_GLOBAL_KEY_METHOD=system-events`. The default real-run path was changed to those values because installed Chrome can fight for foreground and Swift HID can bypass Pinyin composition.
+- Pinyin key sequence was corrected: Space commits `你好`; the previous trailing Return inserted an unwanted source newline during replacement.
+- Japanese required enabling the `Kotoeri.RomajiTyping` parent source before `Kotoeri.RomajiTyping.Japanese` could be selected. After that, Japanese commit/cancel/replacement passed through real System Events key input.
+- Korean exposed real editor bugs. The hidden textarea bridge now avoids rewriting textarea value/selection during active input/composition, preserving Korean syllable composition such as `안녕`. It also suppresses the line break that Chrome emits immediately after Enter commits a Korean composition. Korean commit/cancel/replacement now pass.
+- Candidate-window screen artifact was reviewed. The scenario itself passes and writes `pinyin-candidate-anchor-screen.png`, but current full-screen capture only shows wallpaper/menu bar, not browser/candidate-window contents. This is recorded as a Screen Recording/window-capture limitation rather than an editor failure.
+- Final regression after tightening the IME bridge: suppress textarea value writes only for `InputEvent.isComposing` or Korean jamo/syllable `insertText`; normal input now resyncs the bridge. This fixed a Canvas browser regression where cross-block replacement followed by multi-character typing collapsed the markdown before synthetic composition.
+- Final verification on 2026-04-21: `vp check --fix`, `vp test` (207 tests), `vp run build`, and `vp run test:browser` (31 Playwright tests) pass. Strict real macOS IME runs also pass for default Pinyin, `PREMARK_MACOS_IME_SCENARIO_SET=japanese`, and `PREMARK_MACOS_IME_SCENARIO_SET=korean` using bundled Chrome for Testing plus System Events.
