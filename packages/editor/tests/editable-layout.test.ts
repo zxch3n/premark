@@ -105,6 +105,33 @@ describe("EditableLayoutIndex", () => {
     }
   });
 
+  it("records limited bidi hit-test behavior with logical source offsets", () => {
+    const markdown = "English עברית 123 **bold** عربي [קישור](https://example.com)";
+    const state = createIncrementalParseState(markdown);
+    const inlineSources = createMarkdownInlineSourceMap(state);
+    const layout = createLayoutEngine({ fontTheme: "github" }).layout(markdown, 520);
+    const index = createEditableLayoutIndex({
+      markdown,
+      layout,
+      blockSpans: state.blockSpans,
+      inlineSources,
+    });
+
+    for (const text of ["English", "עברית", "123", "bold", "عربي", "קישור"]) {
+      const fragment = index.fragments.find((candidate) => candidate.text.includes(text));
+      expect(fragment, `bidi fragment for ${text}`).toBeDefined();
+      const startInFragment = fragment!.text.indexOf(text);
+      const hit = index.hitTest(
+        fragment!.rect.x +
+          (fragment!.rect.width * (startInFragment + text.length / 2)) / fragment!.text.length,
+        fragment!.rect.y + fragment!.rect.height / 2,
+      );
+      const sourceOffset = markdown.indexOf(text);
+      expect(hit.offset).toBeGreaterThanOrEqual(sourceOffset);
+      expect(hit.offset).toBeLessThanOrEqual(sourceOffset + text.length);
+    }
+  });
+
   it("resolves character, word, line and block ranges from source offsets and hit-test points", () => {
     const markdown = [
       "# Heading",

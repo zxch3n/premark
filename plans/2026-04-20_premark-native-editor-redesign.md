@@ -90,7 +90,7 @@ Goal: make rendered Premark output addressable enough to edit directly.
 - [x] Implement line/word/block granularity hit-test helpers.
 - [x] Add tests for Latin, CJK, emoji, inline code, links, list markers, blockquotes, and code blocks.
 - [x] Add grapheme fixtures for combining marks, emoji ZWJ sequences, flags, skin tones, and CJK punctuation.
-- [ ] Add bidi fixtures for mixed English/Hebrew/Arabic/numbers/Markdown markers, even if first support is limited to documented behavior.
+- [x] Add bidi fixtures for mixed English/Hebrew/Arabic/numbers/Markdown markers, even if first support is limited to documented behavior.
 - [x] Add coordinate transform tests for scroll, zoom, device scale factor, and nested canvas/world transforms.
 
 Acceptance:
@@ -243,3 +243,4 @@ Acceptance:
 - Added editor coordinate transform helpers for client, surface, device-pixel, and nested world coordinates. Tests cover scroll offsets, CSS scale, device scale factor, and world offset/scale round trips before Canvas integration starts.
 - Updated the accepted design doc with the current supported/deferred editing scope, Chromium/macOS/mobile matrix, IME fallback policy, and screenshot artifact policy. Phase 0 requirements are now closed against that doc and the pitfall matrix.
 - Expanded Playwright focus/anchoring coverage to include CSS zoom and a mobile context with touch input plus visual viewport shrink modeling. This does not claim full native mobile handle support, but it closes the hidden-textarea anchoring case under mobile-style viewport changes.
+- Added a bidi fixture for mixed English, Hebrew, Arabic, numbers, strong markers, and link markers. Current support is explicitly limited to logical UTF-16 source-offset hit-test behavior; precise visual-order bidi caret movement remains a later task.
