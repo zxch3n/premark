@@ -60,7 +60,7 @@ export type NormalizedInputIntent =
   | {
       readonly type: "keyboard-selection";
       readonly key: string;
-      readonly by: "character" | "line" | "document-boundary";
+      readonly by: "character" | "word" | "line" | "line-boundary" | "page" | "document-boundary";
       readonly extend: boolean;
     };
 
@@ -230,19 +230,44 @@ function keyboardSelectionIntent(event: {
   readonly key: string;
   readonly shiftKey?: boolean;
   readonly metaKey?: boolean;
+  readonly altKey?: boolean;
 }): NormalizedInputIntent | null {
-  if (!event.key.startsWith("Arrow")) {
+  if (
+    !event.key.startsWith("Arrow") &&
+    event.key !== "Home" &&
+    event.key !== "End" &&
+    event.key !== "PageUp" &&
+    event.key !== "PageDown"
+  ) {
     return null;
   }
 
   return {
     type: "keyboard-selection",
     key: event.key,
-    by: event.metaKey
-      ? "document-boundary"
-      : event.key === "ArrowUp" || event.key === "ArrowDown"
-        ? "line"
-        : "character",
+    by: keyboardSelectionGranularity(event),
     extend: event.shiftKey === true,
   };
+}
+
+function keyboardSelectionGranularity(event: {
+  readonly key: string;
+  readonly metaKey?: boolean;
+  readonly altKey?: boolean;
+}): Extract<NormalizedInputIntent, { type: "keyboard-selection" }>["by"] {
+  if (event.key === "Home" || event.key === "End") {
+    return "line-boundary";
+  }
+  if (event.key === "PageUp" || event.key === "PageDown") {
+    return "page";
+  }
+  if (event.altKey === true && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+    return "word";
+  }
+  if (event.metaKey === true) {
+    return event.key === "ArrowLeft" || event.key === "ArrowRight"
+      ? "line-boundary"
+      : "document-boundary";
+  }
+  return event.key === "ArrowUp" || event.key === "ArrowDown" ? "line" : "character";
 }

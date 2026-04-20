@@ -11,7 +11,14 @@ export {
   EditorDocumentState,
 } from "./editor-state.ts";
 export { createEditableLayoutIndex, EditableLayoutIndex } from "./editable-layout.ts";
-export type { CaretRect, EditableFragment, HitTestResult, Rect } from "./editable-layout.ts";
+export type {
+  CaretRect,
+  EditableFragment,
+  GranularHitTestResult,
+  HitTestGranularity,
+  HitTestResult,
+  Rect,
+} from "./editable-layout.ts";
 export {
   createInMemoryTextDocumentAdapter,
   InMemoryTextDocumentAdapter,

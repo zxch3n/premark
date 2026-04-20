@@ -1,5 +1,6 @@
 import type { DocumentLayout, InlineFragment } from "@pretext-md/layout";
 import type { BlockSpan, MarkdownInlineSourceRecord, SourceRange } from "@pretext-md/parser";
+import { createWordSegments } from "./text-segments.ts";
 
 export interface Rect {
   readonly x: number;
@@ -26,6 +27,13 @@ export interface HitTestResult {
   readonly affinity: "before" | "after";
 }
 
+export type HitTestGranularity = "character" | "word" | "line" | "block";
+
+export interface GranularHitTestResult extends HitTestResult {
+  readonly granularity: HitTestGranularity;
+  readonly range: SourceRange;
+}
+
 export interface CaretRect {
   readonly offset: number;
   readonly rect: Rect;
@@ -40,9 +48,13 @@ export interface EditableLayoutIndexInput {
 }
 
 export class EditableLayoutIndex {
+  readonly markdown: string;
+  readonly blockSpans: readonly BlockSpan[];
   readonly fragments: readonly EditableFragment[];
 
   constructor(input: EditableLayoutIndexInput) {
+    this.markdown = input.markdown;
+    this.blockSpans = input.blockSpans;
     this.fragments = buildEditableFragments(input);
   }
 
@@ -118,6 +130,65 @@ export class EditableLayoutIndex {
     };
   }
 
+  hitTestSourceRange(x: number, y: number, granularity: HitTestGranularity): GranularHitTestResult {
+    const hit = this.hitTest(x, y);
+    return {
+      ...hit,
+      granularity,
+      range: this.sourceRangeAtOffset(hit.offset, granularity, hit.affinity),
+    };
+  }
+
+  sourceRangeAtOffset(
+    offset: number,
+    granularity: HitTestGranularity,
+    affinity: "before" | "after" = "after",
+  ): SourceRange {
+    switch (granularity) {
+      case "character":
+        return collapsedRange(clampOffset(offset, this.markdown.length));
+      case "word":
+        return wordRangeAtOffset(this.markdown, offset, affinity);
+      case "line":
+        return this.sourceLineRangeAtOffset(offset, affinity);
+      case "block":
+        return this.sourceBlockRangeAtOffset(offset, affinity);
+    }
+  }
+
+  sourceLineRangeAtOffset(offset: number, affinity: "before" | "after" = "after"): SourceRange {
+    const caret = this.sourceOffsetToCaretRect(offset, affinity);
+    const fragment = caret.fragment;
+    if (fragment === null) {
+      return collapsedRange(clampOffset(offset, this.markdown.length));
+    }
+
+    const lineFragments = this.fragments.filter(
+      (candidate) =>
+        candidate.blockIndex === fragment.blockIndex && candidate.lineIndex === fragment.lineIndex,
+    );
+    return sourceRangeCoveringFragments(lineFragments, offset, this.markdown.length);
+  }
+
+  sourceBlockRangeAtOffset(offset: number, affinity: "before" | "after" = "after"): SourceRange {
+    const bounded = clampOffset(offset, this.markdown.length);
+    const span =
+      this.blockSpans.find((candidate) =>
+        affinity === "before"
+          ? bounded > candidate.from && bounded <= candidate.to
+          : bounded >= candidate.from && bounded < candidate.to,
+      ) ??
+      this.blockSpans.find((candidate) => bounded >= candidate.from && bounded <= candidate.to);
+
+    if (span === undefined) {
+      return collapsedRange(bounded);
+    }
+    return {
+      from: span.from,
+      to: span.to,
+    };
+  }
+
   sourceRangeToSelectionRects(range: SourceRange): Rect[] {
     const from = Math.min(range.from, range.to);
     const to = Math.max(range.from, range.to);
@@ -135,6 +206,55 @@ export class EditableLayoutIndex {
     }
     return mergeLineRects(rects);
   }
+}
+
+function sourceRangeCoveringFragments(
+  fragments: readonly EditableFragment[],
+  fallbackOffset: number,
+  textLength: number,
+): SourceRange {
+  if (fragments.length === 0) {
+    return collapsedRange(clampOffset(fallbackOffset, textLength));
+  }
+  return {
+    from: Math.min(...fragments.map((fragment) => fragment.sourceRange.from)),
+    to: Math.max(...fragments.map((fragment) => fragment.sourceRange.to)),
+  };
+}
+
+function wordRangeAtOffset(
+  markdown: string,
+  offset: number,
+  affinity: "before" | "after",
+): SourceRange {
+  const bounded = clampOffset(offset, markdown.length);
+  for (const segment of createWordSegments(markdown)) {
+    if (!segment.isWordLike) continue;
+    const contains =
+      bounded > segment.from && bounded < segment.to
+        ? true
+        : affinity === "before"
+          ? bounded === segment.to
+          : bounded === segment.from;
+    if (contains) {
+      return {
+        from: segment.from,
+        to: segment.to,
+      };
+    }
+  }
+  return collapsedRange(bounded);
+}
+
+function collapsedRange(offset: number): SourceRange {
+  return {
+    from: offset,
+    to: offset,
+  };
+}
+
+function clampOffset(offset: number, length: number): number {
+  return Math.min(Math.max(offset, 0), length);
 }
 
 export function createEditableLayoutIndex(input: EditableLayoutIndexInput): EditableLayoutIndex {

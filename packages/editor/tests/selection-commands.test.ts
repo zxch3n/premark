@@ -104,6 +104,37 @@ describe("selection commands", () => {
     expect(geometry.range).toEqual({ from: 2, to: 4 });
   });
 
+  it("moves by word and line boundary granularities", () => {
+    const text = "alpha beta gamma\nsecond line";
+    const editor = createInMemoryEditorDocumentState(text, 600);
+    editor.setSelection(text.indexOf("beta") + 2, text.indexOf("beta") + 2);
+
+    applyKeyboardSelectionIntent(editor, {
+      type: "keyboard-selection",
+      key: "ArrowLeft",
+      by: "word",
+      extend: false,
+    });
+
+    expect(editor.selectionSourceRange).toEqual({
+      from: text.indexOf("beta"),
+      to: text.indexOf("beta"),
+    });
+
+    applyKeyboardSelectionIntent(editor, {
+      type: "keyboard-selection",
+      key: "End",
+      by: "line-boundary",
+      extend: true,
+    });
+
+    const geometry = createSelectionGeometry(editor);
+    expect(geometry.anchorOffset).toBe(text.indexOf("beta"));
+    expect(geometry.headOffset).toBe(
+      editor.editableIndex.sourceLineRangeAtOffset(text.indexOf("beta")).to,
+    );
+  });
+
   it("moves to document boundaries for Shift+Command+Arrow style intents", () => {
     const editor = createInMemoryEditorDocumentState("abcdef", 600);
     editor.setSelection(2, 2);
@@ -133,6 +164,23 @@ describe("selection commands", () => {
       type: "keyboard-selection",
       key: "ArrowDown",
       by: "line",
+      extend: false,
+    });
+
+    expect(editor.selectionSourceRange.from).toBeGreaterThan(0);
+  });
+
+  it("moves by page granularity", () => {
+    const editor = createInMemoryEditorDocumentState(
+      Array.from({ length: 18 }, (_, index) => `Line ${index + 1} with text`).join("\n\n"),
+      240,
+    );
+    editor.setSelection(0, 0);
+
+    applyKeyboardSelectionIntent(editor, {
+      type: "keyboard-selection",
+      key: "PageDown",
+      by: "page",
       extend: false,
     });
 
