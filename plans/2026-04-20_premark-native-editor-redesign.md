@@ -17,6 +17,12 @@ Last Updated: 2026-04-20
 - A whole-note CodeMirror overlay improves selection but still makes CodeMirror the real editor and Premark the inactive skin. That does not match the desired direction.
 - Obsidian Live Preview is closer to "one continuous editor with rendered decorations" than "many block overlays"; MarkText/Muya is closer to a custom rendered editing surface.
 - The new route should make Premark's rendered tree the editable surface and build selection/input/hit-test/IME around it.
+- MarkText/Muya uses CodeMirror only for source-code mode. Its realtime preview editor is a separate contenteditable rendered DOM editor.
+- Muya keeps its own block tree, maps DOM selection to block-local offsets, lets browser input mutate editable DOM, then reconciles changed DOM text back into the block tree and re-renders affected blocks.
+- Muya validates the route, but it also shows the main risk: relying on browser-edited rendered DOM creates many browser-specific edge cases around cursor restoration, IME, inline syntax hiding, images, tables, and block transforms.
+- Premark should reuse the continuous rendered-surface idea, but prefer source ranges, layout fragments, and explicit operations as the source of truth instead of treating post-input DOM text as the primary model.
+- The first native editor design chooses hidden textarea input plus Premark-painted selection/caret/composition, with shared DOM-debug and Canvas renderers over one layout/source-map core.
+- Selection testing must be much broader than basic drag selection: mouse drag/reversal, Arrow navigation, Shift+Arrow, Shift+Command+Arrow, cross-block ranges, and mobile touch selection all need coverage.
 
 ## Removed From This Branch
 
@@ -80,12 +86,15 @@ Goal: paint native selection and caret on the rendered surface.
 - [ ] Paint multi-line and cross-block selection rects.
 - [ ] Paint caret rect with blink disabled in tests.
 - [ ] Support collapsed, forward, backward, and multi-block selections.
+- [ ] Support mouse drag selection, drag reversal, keyboard arrows, Shift+arrows, and Shift+Command+arrows.
+- [ ] Define mobile selection behavior for touch long press, drag handles, soft keyboard focus, scroll, and zoom.
 - [ ] Add visual tests for selection overlays independent of CodeMirror.
 
 Acceptance:
 
 - [ ] Selection over rendered Markdown looks continuous across paragraphs/lists/code.
 - [ ] Selection geometry matches source range mapping within strict pixel thresholds.
+- [ ] Desktop and mobile-specific selection behaviors have automated coverage or an explicit documented automation gap.
 
 ## Phase 3: Input Bridge
 
@@ -141,3 +150,5 @@ Acceptance:
 - Removed CodeMirror overlay-specific playground modes, tests, Storybook examples, scripts, and dependencies from the new branch.
 - Current hypothesis: Premark-native editing is harder up front, but it avoids the product mismatch caused by making an external text editor the real editing surface.
 - Known risk: native input/IME is the hardest part and must be validated with real OS automation early, not deferred.
+- Cloned MarkText and studied Muya. It confirms that a non-CodeMirror WYSIWYG Markdown editor is practical, but the first prototype should isolate browser-native editing behavior behind a small bridge and keep Premark's model/layout authoritative.
+- Accepted design direction: hidden textarea bridge near caret, Premark-rendered caret/selection/composition, inline marker reveal for strong/code/link, UTF-16 offsets with grapheme sidecar, CRDT-agnostic stable ranges, local undo, and strict logic/browser/visual/IME/mobile testing.
