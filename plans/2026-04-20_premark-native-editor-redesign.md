@@ -138,7 +138,7 @@ Goal: receive real OS text input while keeping Premark as the visible editor.
 - [x] Add tests proving text insertion does not rely on keydown, so mobile autocorrect/autosuggest/swipe-like input can be modeled as input operations.
 - [x] Add clipboard tests for Markdown, plain text, HTML, cross-block cut, cross-block paste, and paste while a selection is active.
 - [x] Add focus/textarea-anchoring tests for scroll, viewport resize, and editor blur/refocus.
-- [ ] Add focus/textarea-anchoring tests for zoom and mobile visual viewport resize.
+- [x] Add focus/textarea-anchoring tests for zoom and mobile visual viewport resize.
 
 Acceptance:
 
@@ -242,3 +242,4 @@ Acceptance:
 - Expanded hit-test fixtures across Latin, CJK, emoji ZWJ, inline code, links, list items, blockquotes, and fenced code blocks. This exposed that code blocks were opaque layout lines with no editable fragments; added an initial code-block fragment so code content can be addressed by source range.
 - Added editor coordinate transform helpers for client, surface, device-pixel, and nested world coordinates. Tests cover scroll offsets, CSS scale, device scale factor, and world offset/scale round trips before Canvas integration starts.
 - Updated the accepted design doc with the current supported/deferred editing scope, Chromium/macOS/mobile matrix, IME fallback policy, and screenshot artifact policy. Phase 0 requirements are now closed against that doc and the pitfall matrix.
+- Expanded Playwright focus/anchoring coverage to include CSS zoom and a mobile context with touch input plus visual viewport shrink modeling. This does not claim full native mobile handle support, but it closes the hidden-textarea anchoring case under mobile-style viewport changes.
