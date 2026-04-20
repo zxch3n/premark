@@ -177,7 +177,7 @@ Goal: remove the full-document editable-index rebuild found by Phase 9.
 
 - [x] Design dirty-block/viewport editable index ownership and cache invalidation.
 - [x] Add an API that can rebuild editable fragments for dirty source/layout blocks while reusing stable fragments outside the dirty range.
-- [ ] Keep active-marker reveal and composition views correct when only the active block is rebuilt.
+- [x] Keep active-marker reveal and composition views correct; rebuild source-mapped or virtual-composition views conservatively until incremental source-map reuse is explicitly designed.
 - [x] Add benchmarks proving editable-index work scales with dirty fragments, not whole document size.
 - [x] Add regression tests for source offset shifts, blank source lines, code blocks, links, emoji, and hidden/revealed controls across reused fragments.
 
@@ -220,3 +220,4 @@ Acceptance:
 - Phase 10 API work started. `DocumentLayout` now carries optional update metadata for full vs incremental layout, dirty normalized block range, suffix block mapping/y offset, and parser source change. This is the input the editor sidecar needs before it can safely reuse editable fragments. Targeted layout/editor tests and `vp run build` pass.
 - Editor refresh now computes one incremental parse result and passes it into layout via `applyParseResult`, so editor state, layout update metadata, and future sidecar reuse can share the same source change instead of parsing twice. Targeted editor/input/layout tests pass.
 - Incremental editable sidecar API added. `createIncrementalEditableLayoutIndex` rebuilds dirty layout blocks, reuses stable prefix fragments as-is, transforms stable suffix fragments through source-change and layout suffix metadata, then regenerates virtual source-newline fragments. Source-mapped active marker views still rebuild conservatively. Editor state now uses this path for normal hidden-marker editing. Benchmark result on 2026-04-21 with `--chars 100000 --docs 120 --iterations 3`: full editable index was about `1.67-1.73s`; incremental editable index was about `37-55ms` for local edit, remote edit, and AI append. `vp check --fix`, `vp test`, `vp run build`, and `vp run test:browser` pass; browser coverage stayed at 25 passing tests.
+- Phase 10 completed with a conservative boundary: hidden-marker editor state uses incremental editable fragments; active-marker/source-mapped and virtual composition render views rebuild full indexes for now because their rendered markdown/source-map identity differs from the hidden view. This keeps correctness while leaving source-map-aware sidecar reuse as a future optimization, not a blocker for the current native editor route.
