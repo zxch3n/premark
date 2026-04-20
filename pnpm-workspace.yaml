@@ -4,20 +4,11 @@ packages:
   - tools/*
 
 catalog:
-  "@codemirror/commands": ^6.10.3
-  "@codemirror/lang-markdown": ^6.5.0
-  "@codemirror/language": ^6.12.3
-  "@codemirror/state": ^6.6.0
-  "@codemirror/view": ^6.41.1
   "@lezer/common": ^1.5.1
   "@lezer/markdown": ^1.6.3
   "@napi-rs/canvas": ^0.1.97
-  "@playwright/test": ^1.59.1
   "@types/node": ^25
-  "@types/pngjs": ^6.0.5
   jiti: ^2.6.1
-  pixelmatch: ^7.1.0
-  pngjs: ^7.0.0
   typescript: ^6
   vite: npm:@voidzero-dev/vite-plus-core@latest
   vite-plus: latest

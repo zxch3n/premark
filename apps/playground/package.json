@@ -11,11 +11,6 @@
     "test": "vp test"
   },
   "dependencies": {
-    "@codemirror/commands": "catalog:",
-    "@codemirror/lang-markdown": "catalog:",
-    "@codemirror/language": "catalog:",
-    "@codemirror/state": "catalog:",
-    "@codemirror/view": "catalog:",
     "@pretext-md/highlight": "workspace:*",
     "@pretext-md/html-renderer": "workspace:*",
     "@pretext-md/layout": "workspace:*",
