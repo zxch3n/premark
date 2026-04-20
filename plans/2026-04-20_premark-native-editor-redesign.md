@@ -30,6 +30,7 @@ Last Updated: 2026-04-20
 - Pointer and keyboard selection should also be split: first a pure command layer over source offsets, then browser event wiring and screenshots.
 - Input should follow the same split: normalized intents can be fully tested against the source model before wiring real browser `beforeinput` / `input` events.
 - Browser `historyUndo` / `historyRedo` should normalize into explicit history intents and share the same local undo manager used by source operations.
+- The first Storybook prototype can reuse the HTML renderer for visible Markdown while Premark editor core owns selection, caret, hit-test, hidden textarea sync, and source operations. This is still a DOM debug renderer, not the final Canvas renderer.
 
 ## Removed From This Branch
 
@@ -118,10 +119,10 @@ Acceptance:
 
 Goal: receive real OS text input while keeping Premark as the visible editor.
 
-- [ ] Add hidden textarea/input bridge anchored near caret.
-- [ ] Keep platform focus in the bridge while visible caret/selection are Premark-rendered.
+- [x] Add hidden textarea/input bridge anchored near caret.
+- [x] Keep platform focus in the bridge while visible caret/selection are Premark-rendered.
 - [x] Convert normalized `beforeinput` / `input` / keyboard commands into source operations.
-- [ ] Wire real browser `beforeinput` / `input` / keyboard events to normalized source operations.
+- [x] Wire real browser `beforeinput` / `input` / keyboard events to normalized source operations in the Storybook prototype.
 - [x] Handle core insert text, delete/backspace, Enter, selectionchange, and composition intents.
 - [x] Handle undo/redo through normalized history intents and `LocalUndoManager`.
 - [x] Handle paste and clipboard transforms in the core intent path.
@@ -162,11 +163,11 @@ Acceptance:
 
 Goal: replace the removed CodeMirror Storybook examples with a native Premark editing prototype.
 
-- [ ] Add Storybook `Editing/Premark Native Editor`.
-- [ ] Click rendered text to place caret.
-- [ ] Drag across blocks to select.
-- [ ] Type, delete, paste, and undo in supported blocks.
-- [ ] Show debug overlay for source offsets, hit-test rects, and selection ranges.
+- [x] Add Storybook `Editing/Premark Native Editor`.
+- [x] Click rendered text to place caret.
+- [x] Drag across blocks to select.
+- [x] Type, delete, paste, and undo in supported blocks.
+- [x] Show debug overlay for source offsets, hit-test rects, and selection ranges.
 - [ ] Add a screenshot mode that renders small fixed-size crops for key states: idle, caret, selected range, active marker, composition, paste preview, and remote edit.
 - [ ] Add a screenshot review log template beside the generated artifacts.
 
@@ -215,3 +216,4 @@ Acceptance:
 - Added `applyInputIntent` to apply normalized input intents to `EditorDocumentState`. Tests cover text replacement, cross-block deletion, grapheme-safe delete backward/forward, Enter paragraph insertion, selectionchange, and virtual-to-committed composition.
 - Connected normalized `historyUndo` / `historyRedo` intents to `LocalUndoManager`. Text edits and composition commits can now record undo entries through `applyInputIntent`; tests cover undo/redo round trips.
 - Added core clipboard intent handling. Paste chooses Markdown before plain text before a simple HTML-to-text fallback; cut uses the same source edit path. Tests cover selection paste, HTML fallback, cross-block paste, and cross-block cut.
+- Added Storybook `Editing/Premark Native Editor`. It renders Markdown through Premark HTML layout, paints Premark selection/caret overlays, anchors a hidden textarea near the caret, wires pointer drag and keyboard/input/beforeinput events into editor core, and records textarea edits in `LocalUndoManager`. `vp run storybook:build` passes; screenshot tests are still open.
