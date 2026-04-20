@@ -53,6 +53,11 @@ test.describe("Premark native editor story", () => {
     await bridge.evaluate((element) => {
       element.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
       element.dispatchEvent(new CompositionEvent("compositionupdate", { data: "shi" }));
+    });
+    await expect(surface).toContainText("shi");
+    await expect(source).not.toContainText("shi");
+
+    await bridge.evaluate((element) => {
       element.dispatchEvent(new CompositionEvent("compositionend", { data: "世界" }));
     });
 

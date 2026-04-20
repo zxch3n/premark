@@ -1,5 +1,6 @@
 import { createHighlighter } from "../packages/highlight/src/index.ts";
 import { renderToHtml } from "../packages/html-renderer/src/index.ts";
+import { createLayoutEngine } from "../packages/layout/src/index.ts";
 import {
   applyInputIntent,
   applyTextareaBridgeChange,
@@ -29,6 +30,10 @@ Click text, drag across blocks, then type directly on the rendered surface.
 Try **bold text**, \`inline code\`, 中文输入, and emoji 👨‍👩‍👧‍👦.`;
 
 const highlighter = createHighlighter();
+const previewLayoutEngine = createLayoutEngine({
+  fontTheme: "modern",
+  highlighter,
+});
 
 export const InteractiveNativePrototype = () => {
   const root = document.createElement("div");
@@ -78,13 +83,17 @@ export const InteractiveNativePrototype = () => {
   const debugSource = root.querySelector<HTMLPreElement>("[data-debug-source]")!;
 
   function render() {
-    const rendered = renderToHtml(editor.layout, {
+    const layout =
+      editor.compositionView === null
+        ? editor.layout
+        : previewLayoutEngine.layout(editor.compositionView.virtualText, 720);
+    const rendered = renderToHtml(layout, {
       codeThemeCss: highlighter.getThemeCss("dark"),
     });
-    surface.style.width = `${editor.layout.containerWidth}px`;
-    surface.style.height = `${editor.layout.totalHeight}px`;
-    overlay.style.width = `${editor.layout.containerWidth}px`;
-    overlay.style.height = `${editor.layout.totalHeight}px`;
+    surface.style.width = `${layout.containerWidth}px`;
+    surface.style.height = `${layout.totalHeight}px`;
+    overlay.style.width = `${layout.containerWidth}px`;
+    overlay.style.height = `${layout.totalHeight}px`;
     surface.innerHTML = `<style>${rendered.css}</style>${rendered.html}`;
     overlay.innerHTML = renderSelectionOverlay();
     debugSelection.textContent = JSON.stringify(createSelectionGeometry(editor), null, 2);

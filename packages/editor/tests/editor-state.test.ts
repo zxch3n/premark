@@ -34,10 +34,12 @@ describe("EditorDocumentState", () => {
 
     expect(editor.markdown).toBe("Hello **world**");
     expect(view.virtualText).toBe("Hello **世界**");
+    expect(editor.compositionView?.virtualText).toBe("Hello **世界**");
 
     editor.commitComposition();
 
     expect(editor.markdown).toBe("Hello **世界**");
+    expect(editor.compositionView).toBeNull();
     expect(editor.selectionSourceRange).toEqual({
       from: worldFrom + "世界".length,
       to: worldFrom + "世界".length,

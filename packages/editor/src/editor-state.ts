@@ -41,6 +41,8 @@ export class EditorDocumentState {
 
   private compositionSession: CompositionSession | null = null;
 
+  private compositionViewValue: CompositionView | null = null;
+
   parseState: IncrementalParseState;
 
   inlineSources: readonly MarkdownInlineSourceRecord[];
@@ -92,6 +94,10 @@ export class EditorDocumentState {
     };
   }
 
+  get compositionView(): CompositionView | null {
+    return this.compositionViewValue;
+  }
+
   setSelection(anchor: number, head: number): void {
     this.adapter.disposeRange(this.selectionRange);
     this.selectionRange = this.adapter.createRange(anchor, head, {
@@ -131,7 +137,9 @@ export class EditorDocumentState {
     if (session === null) {
       throw new Error("No active composition");
     }
-    return session.update(preeditText);
+    const view = session.update(preeditText);
+    this.compositionViewValue = view;
+    return view;
   }
 
   commitComposition(text?: string): TextChange {
@@ -141,6 +149,7 @@ export class EditorDocumentState {
 
     const change = this.compositionSession.commit(text);
     this.compositionSession = null;
+    this.compositionViewValue = null;
     this.setSelection(change.from + change.insert.length, change.from + change.insert.length);
     return change;
   }
@@ -151,6 +160,7 @@ export class EditorDocumentState {
     }
     this.compositionSession.cancel();
     this.compositionSession = null;
+    this.compositionViewValue = null;
   }
 
   resize(containerWidth: number): void {
@@ -165,6 +175,11 @@ export class EditorDocumentState {
     this.inlineSources = createMarkdownInlineSourceMap(this.parseState);
     this.layout = this.layoutEngine.layout(markdown, this.containerWidth);
     this.editableIndex = this.createEditableIndex();
+    if (this.compositionSession !== null && this.compositionViewValue !== null) {
+      this.compositionViewValue = this.compositionSession.update(
+        this.compositionViewValue.preeditText,
+      );
+    }
   }
 
   private createEditableIndex(): EditableLayoutIndex {
