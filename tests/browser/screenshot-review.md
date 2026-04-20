@@ -167,3 +167,14 @@ Current generated folder pattern:
 - Notes:
   - The changed screenshots are intentional: native editing no longer uses Markdown preview softbreak collapsing.
   - Parser semantics are unchanged; this is an editor-layout behavior change.
+
+### 2026-04-20 Font-Ready Canvas Native Baseline
+
+- Reviewer: Codex
+- Scenario: Canvas-native editor visual baseline after waiting for Inter/JetBrains Mono before layout
+- Result: pass on the local macOS Chromium baseline
+- Reviewed baseline screenshots:
+  - `native-editor-visual-canvas-native-editor-darwin.png`: the Canvas-native editor now uses real Inter/JetBrains Mono metrics instead of fallback/serif-like widths; heading, paragraph, list rows, `WWWW`, inline code, link text, CJK text, and emoji remain aligned and non-overlapping.
+- Notes:
+  - The old baseline differed because layout was allowed to happen before the Storybook font stylesheet and FontFaceSet had finished loading.
+  - The browser test now asserts target fragment font readiness and that the layout fragment width matches a fresh `canvas.measureText` width within 1px, so this visual baseline is backed by a geometry check rather than only pixel comparison.

@@ -20,6 +20,7 @@ import {
   type PointerSelectionSession,
   type TextareaBridgeSnapshot,
 } from "../packages/editor/src/index.ts";
+import { waitForPremarkStoryFonts } from "./font-loading.ts";
 
 export default {
   title: "Editing/Premark Native Editor",
@@ -36,33 +37,38 @@ Click text, drag across blocks, then type directly on the rendered surface.
 Try **bold text**, \`inline code\`, [docs](https://example.com), 中文输入, and emoji 👨‍👩‍👧‍👦.`;
 
 const highlighter = createHighlighter();
-const previewLayoutEngine = createLayoutEngine({
-  fontTheme: "modern",
-  highlighter,
-  lineBreakMode: "source",
-});
 
 export const InteractiveNativePrototype = () => {
   const root = document.createElement("div");
   const searchParams = new URL(window.location.href).searchParams;
   const screenshotMode = searchParams.get("screenshot") === "1";
   root.className = screenshotMode ? "pne-root pne-screenshot-mode" : "pne-root";
+  root.dataset.fontsReady = "0";
 
-  const editor = createInMemoryEditorDocumentState(sampleMarkdown, 720, {
-    fontTheme: "modern",
-    highlighter,
-  });
-  const undoManager = new LocalUndoManager();
+  async function initialize() {
+    await waitForPremarkStoryFonts();
+    root.dataset.fontsReady = "1";
+    const previewLayoutEngine = createLayoutEngine({
+      fontTheme: "modern",
+      highlighter,
+      lineBreakMode: "source",
+    });
 
-  let bridgeSnapshot: TextareaBridgeSnapshot = createTextareaBridgeSnapshot(editor);
-  let pointerSession: PointerSelectionSession | null = null;
-  let composing = false;
-  let currentEditableIndex: EditableLayoutIndex = editor.editableIndex;
-  let renderedStyleElement: HTMLStyleElement | null = null;
-  let renderedDocumentElement: HTMLElement | null = null;
-  let renderedSurfaceElement: HTMLElement | null = null;
+    const editor = createInMemoryEditorDocumentState(sampleMarkdown, 720, {
+      fontTheme: "modern",
+      highlighter,
+    });
+    const undoManager = new LocalUndoManager();
 
-  root.innerHTML = `
+    let bridgeSnapshot: TextareaBridgeSnapshot = createTextareaBridgeSnapshot(editor);
+    let pointerSession: PointerSelectionSession | null = null;
+    let composing = false;
+    let currentEditableIndex: EditableLayoutIndex = editor.editableIndex;
+    let renderedStyleElement: HTMLStyleElement | null = null;
+    let renderedDocumentElement: HTMLElement | null = null;
+    let renderedSurfaceElement: HTMLElement | null = null;
+
+    root.innerHTML = `
     <style>${storyCss}</style>
     <div class="pne-shell">
       <main class="pne-editor-wrap">
@@ -89,412 +95,417 @@ export const InteractiveNativePrototype = () => {
     </div>
   `;
 
-  const surface = root.querySelector<HTMLDivElement>("[data-editor-surface]")!;
-  const overlay = root.querySelector<HTMLDivElement>("[data-editor-overlay]")!;
-  const textarea = root.querySelector<HTMLTextAreaElement>("[data-input-bridge]")!;
-  const debugSelection = root.querySelector<HTMLPreElement>("[data-debug-selection]")!;
-  const debugSource = root.querySelector<HTMLPreElement>("[data-debug-source]")!;
+    const surface = root.querySelector<HTMLDivElement>("[data-editor-surface]")!;
+    const overlay = root.querySelector<HTMLDivElement>("[data-editor-overlay]")!;
+    const textarea = root.querySelector<HTMLTextAreaElement>("[data-input-bridge]")!;
+    const debugSelection = root.querySelector<HTMLPreElement>("[data-debug-selection]")!;
+    const debugSource = root.querySelector<HTMLPreElement>("[data-debug-source]")!;
 
-  function render() {
-    const view = createRenderView();
-    const layout = view.layout;
-    currentEditableIndex = view.editableIndex;
-    const rendered = renderToHtml(layout, {
-      codeThemeCss: highlighter.getThemeCss("dark"),
-    });
-    surface.style.width = `${layout.containerWidth}px`;
-    surface.style.height = `${layout.totalHeight}px`;
-    overlay.style.width = `${layout.containerWidth}px`;
-    overlay.style.height = `${layout.totalHeight}px`;
-    renderSurfaceHtml(rendered);
-    overlay.innerHTML = renderSelectionOverlay(layout, currentEditableIndex);
-    debugSelection.textContent = JSON.stringify(
-      createStorySelectionGeometry(currentEditableIndex),
-      null,
-      2,
-    );
-    debugSource.textContent = editor.markdown;
-    syncTextareaBridge();
-  }
-
-  function renderSurfaceHtml(rendered: { html: string; css: string }) {
-    if (!surfaceOwnsRenderedTree()) {
-      surface.replaceChildren();
-      renderedStyleElement = null;
-      renderedDocumentElement = null;
-      renderedSurfaceElement = null;
+    function render() {
+      const view = createRenderView();
+      const layout = view.layout;
+      currentEditableIndex = view.editableIndex;
+      const rendered = renderToHtml(layout, {
+        codeThemeCss: highlighter.getThemeCss("dark"),
+      });
+      surface.style.width = `${layout.containerWidth}px`;
+      surface.style.height = `${layout.totalHeight}px`;
+      overlay.style.width = `${layout.containerWidth}px`;
+      overlay.style.height = `${layout.totalHeight}px`;
+      renderSurfaceHtml(rendered);
+      overlay.innerHTML = renderSelectionOverlay(layout, currentEditableIndex);
+      debugSelection.textContent = JSON.stringify(
+        createStorySelectionGeometry(currentEditableIndex),
+        null,
+        2,
+      );
+      debugSource.textContent = editor.markdown;
+      syncTextareaBridge();
     }
 
-    if (renderedStyleElement === null) {
-      renderedStyleElement = document.createElement("style");
-      renderedStyleElement.dataset.premarkRenderer = "style";
-      surface.append(renderedStyleElement);
+    function renderSurfaceHtml(rendered: { html: string; css: string }) {
+      if (!surfaceOwnsRenderedTree()) {
+        surface.replaceChildren();
+        renderedStyleElement = null;
+        renderedDocumentElement = null;
+        renderedSurfaceElement = null;
+      }
+
+      if (renderedStyleElement === null) {
+        renderedStyleElement = document.createElement("style");
+        renderedStyleElement.dataset.premarkRenderer = "style";
+        surface.append(renderedStyleElement);
+      }
+      renderedStyleElement.textContent = rendered.css;
+
+      const nextDocument = parseRenderedDocument(rendered.html);
+      const nextSurface = nextDocument.querySelector<HTMLElement>(".pmd-surface");
+      if (nextSurface === null) {
+        throw new Error("Rendered Premark document is missing .pmd-surface");
+      }
+
+      if (renderedDocumentElement === null || renderedSurfaceElement === null) {
+        renderedDocumentElement = nextDocument;
+        renderedSurfaceElement = nextSurface;
+        surface.append(renderedDocumentElement);
+        return;
+      }
+
+      syncElementAttributes(renderedDocumentElement, nextDocument);
+      syncElementAttributes(renderedSurfaceElement, nextSurface);
+      renderedSurfaceElement.replaceChildren(...Array.from(nextSurface.childNodes));
     }
-    renderedStyleElement.textContent = rendered.css;
 
-    const nextDocument = parseRenderedDocument(rendered.html);
-    const nextSurface = nextDocument.querySelector<HTMLElement>(".pmd-surface");
-    if (nextSurface === null) {
-      throw new Error("Rendered Premark document is missing .pmd-surface");
+    function surfaceOwnsRenderedTree(): boolean {
+      return (
+        (renderedStyleElement === null || renderedStyleElement.parentElement === surface) &&
+        (renderedDocumentElement === null ||
+          (renderedDocumentElement.parentElement === surface &&
+            renderedSurfaceElement !== null &&
+            renderedDocumentElement.contains(renderedSurfaceElement)))
+      );
     }
 
-    if (renderedDocumentElement === null || renderedSurfaceElement === null) {
-      renderedDocumentElement = nextDocument;
-      renderedSurfaceElement = nextSurface;
-      surface.append(renderedDocumentElement);
-      return;
+    function parseRenderedDocument(html: string): HTMLElement {
+      const template = document.createElement("template");
+      template.innerHTML = html;
+      const documentElement = template.content.firstElementChild;
+      if (!(documentElement instanceof HTMLElement)) {
+        throw new Error("Rendered Premark document is empty");
+      }
+      return documentElement;
     }
 
-    syncElementAttributes(renderedDocumentElement, nextDocument);
-    syncElementAttributes(renderedSurfaceElement, nextSurface);
-    renderedSurfaceElement.replaceChildren(...Array.from(nextSurface.childNodes));
-  }
-
-  function surfaceOwnsRenderedTree(): boolean {
-    return (
-      (renderedStyleElement === null || renderedStyleElement.parentElement === surface) &&
-      (renderedDocumentElement === null ||
-        (renderedDocumentElement.parentElement === surface &&
-          renderedSurfaceElement !== null &&
-          renderedDocumentElement.contains(renderedSurfaceElement)))
-    );
-  }
-
-  function parseRenderedDocument(html: string): HTMLElement {
-    const template = document.createElement("template");
-    template.innerHTML = html;
-    const documentElement = template.content.firstElementChild;
-    if (!(documentElement instanceof HTMLElement)) {
-      throw new Error("Rendered Premark document is empty");
+    function syncElementAttributes(target: HTMLElement, source: HTMLElement) {
+      for (const attribute of Array.from(target.attributes)) {
+        target.removeAttribute(attribute.name);
+      }
+      for (const attribute of Array.from(source.attributes)) {
+        target.setAttribute(attribute.name, attribute.value);
+      }
     }
-    return documentElement;
-  }
 
-  function syncElementAttributes(target: HTMLElement, source: HTMLElement) {
-    for (const attribute of Array.from(target.attributes)) {
-      target.removeAttribute(attribute.name);
-    }
-    for (const attribute of Array.from(source.attributes)) {
-      target.setAttribute(attribute.name, attribute.value);
-    }
-  }
+    function createRenderView(): {
+      layout: ReturnType<typeof previewLayoutEngine.layout>;
+      editableIndex: EditableLayoutIndex;
+    } {
+      const compositionView = editor.compositionView;
+      if (compositionView !== null) {
+        const layout = previewLayoutEngine.layout(compositionView.virtualText, 720);
+        const parseState = createIncrementalParseState(compositionView.virtualText);
+        return {
+          layout,
+          editableIndex: createEditableLayoutIndex({
+            markdown: compositionView.virtualText,
+            layout,
+            blockSpans: parseState.blockSpans,
+            inlineSources: createMarkdownInlineSourceMap(parseState),
+          }),
+        };
+      }
 
-  function createRenderView(): {
-    layout: ReturnType<typeof previewLayoutEngine.layout>;
-    editableIndex: EditableLayoutIndex;
-  } {
-    const compositionView = editor.compositionView;
-    if (compositionView !== null) {
-      const layout = previewLayoutEngine.layout(compositionView.virtualText, 720);
-      const parseState = createIncrementalParseState(compositionView.virtualText);
+      const reveal = createActiveMarkerRevealMarkdown({
+        markdown: editor.markdown,
+        inlineSources: editor.inlineSources,
+        blockSpans: editor.parseState.blockSpans,
+        selectionRange: editor.selectionSourceRange,
+      });
+      if (reveal.markerState === "hidden") {
+        return {
+          layout: editor.layout,
+          editableIndex: editor.editableIndex,
+        };
+      }
+
+      const layout = previewLayoutEngine.layout(reveal.markdown, 720);
       return {
         layout,
         editableIndex: createEditableLayoutIndex({
-          markdown: compositionView.virtualText,
+          markdown: editor.markdown,
           layout,
-          blockSpans: parseState.blockSpans,
-          inlineSources: createMarkdownInlineSourceMap(parseState),
+          blockSpans: editor.parseState.blockSpans,
+          inlineSources: editor.inlineSources,
+          sourceMap: reveal.sourceMap,
         }),
       };
     }
 
-    const reveal = createActiveMarkerRevealMarkdown({
-      markdown: editor.markdown,
-      inlineSources: editor.inlineSources,
-      blockSpans: editor.parseState.blockSpans,
-      selectionRange: editor.selectionSourceRange,
-    });
-    if (reveal.markerState === "hidden") {
+    function createStorySelectionGeometry(index: EditableLayoutIndex) {
+      const resolved = editor.adapter.resolveRange(editor.selection.range);
+      const range = {
+        from: resolved.from,
+        to: resolved.to,
+      };
+      const anchorCaret = index.sourceOffsetToCaretRect(resolved.anchor, "before");
+      const headCaret = index.sourceOffsetToCaretRect(resolved.head, "after");
       return {
-        layout: editor.layout,
-        editableIndex: editor.editableIndex,
+        range,
+        anchorOffset: resolved.anchor,
+        headOffset: resolved.head,
+        direction: resolved.direction,
+        isCollapsed: resolved.isCollapsed,
+        selectionRects: resolved.isCollapsed ? [] : index.sourceRangeToSelectionRects(range),
+        caret: resolved.isCollapsed ? headCaret : null,
+        anchorCaret,
+        headCaret,
       };
     }
 
-    const layout = previewLayoutEngine.layout(reveal.markdown, 720);
-    return {
-      layout,
-      editableIndex: createEditableLayoutIndex({
-        markdown: editor.markdown,
-        layout,
-        blockSpans: editor.parseState.blockSpans,
-        inlineSources: editor.inlineSources,
-        sourceMap: reveal.sourceMap,
-      }),
-    };
-  }
+    function syncTextareaBridge() {
+      const compositionCaret = compositionCaretRect();
+      const geometry = createStorySelectionGeometry(currentEditableIndex);
+      const fallbackCaret = geometry.caret ?? geometry.headCaret;
+      const caretRect = compositionCaret ?? fallbackCaret.rect;
+      bridgeSnapshot = createTextareaBridgeSnapshot(editor);
+      textarea.value = bridgeSnapshot.value;
+      textarea.setSelectionRange(bridgeSnapshot.selectionStart, bridgeSnapshot.selectionEnd);
+      textarea.style.left = `${28 + Math.max(0, caretRect.x)}px`;
+      textarea.style.top = `${28 + Math.max(0, caretRect.y)}px`;
+      textarea.style.height = `${Math.max(16, caretRect.height)}px`;
+    }
 
-  function createStorySelectionGeometry(index: EditableLayoutIndex) {
-    const resolved = editor.adapter.resolveRange(editor.selection.range);
-    const range = {
-      from: resolved.from,
-      to: resolved.to,
-    };
-    const anchorCaret = index.sourceOffsetToCaretRect(resolved.anchor, "before");
-    const headCaret = index.sourceOffsetToCaretRect(resolved.head, "after");
-    return {
-      range,
-      anchorOffset: resolved.anchor,
-      headOffset: resolved.head,
-      direction: resolved.direction,
-      isCollapsed: resolved.isCollapsed,
-      selectionRects: resolved.isCollapsed ? [] : index.sourceRangeToSelectionRects(range),
-      caret: resolved.isCollapsed ? headCaret : null,
-      anchorCaret,
-      headCaret,
-    };
-  }
+    function renderSelectionOverlay(
+      layout: ReturnType<typeof previewLayoutEngine.layout>,
+      editableIndex: EditableLayoutIndex,
+    ): string {
+      const composition = renderCompositionOverlay(layout);
+      if (editor.compositionView !== null) {
+        const caret = compositionCaretRect(layout);
+        const caretHtml =
+          caret === null
+            ? ""
+            : `<div class="pne-caret" style="left:${caret.x}px;top:${caret.y}px;height:${caret.height}px"></div>`;
+        return `${composition}${caretHtml}`;
+      }
 
-  function syncTextareaBridge() {
-    const compositionCaret = compositionCaretRect();
-    const geometry = createStorySelectionGeometry(currentEditableIndex);
-    const fallbackCaret = geometry.caret ?? geometry.headCaret;
-    const caretRect = compositionCaret ?? fallbackCaret.rect;
-    bridgeSnapshot = createTextareaBridgeSnapshot(editor);
-    textarea.value = bridgeSnapshot.value;
-    textarea.setSelectionRange(bridgeSnapshot.selectionStart, bridgeSnapshot.selectionEnd);
-    textarea.style.left = `${28 + Math.max(0, caretRect.x)}px`;
-    textarea.style.top = `${28 + Math.max(0, caretRect.y)}px`;
-    textarea.style.height = `${Math.max(16, caretRect.height)}px`;
-  }
-
-  function renderSelectionOverlay(
-    layout: ReturnType<typeof previewLayoutEngine.layout>,
-    editableIndex: EditableLayoutIndex,
-  ): string {
-    const composition = renderCompositionOverlay(layout);
-    if (editor.compositionView !== null) {
-      const caret = compositionCaretRect(layout);
+      const geometry = createStorySelectionGeometry(editableIndex);
+      const selection = geometry.selectionRects
+        .map(
+          (rect) =>
+            `<div class="pne-selection" style="left:${rect.x}px;top:${rect.y}px;width:${rect.width}px;height:${rect.height}px"></div>`,
+        )
+        .join("");
+      const caret = geometry.caret;
       const caretHtml =
         caret === null
           ? ""
-          : `<div class="pne-caret" style="left:${caret.x}px;top:${caret.y}px;height:${caret.height}px"></div>`;
-      return `${composition}${caretHtml}`;
+          : `<div class="pne-caret" style="left:${caret.rect.x}px;top:${caret.rect.y}px;height:${caret.rect.height}px"></div>`;
+      return `${selection}${composition}${caretHtml}`;
     }
 
-    const geometry = createStorySelectionGeometry(editableIndex);
-    const selection = geometry.selectionRects
-      .map(
-        (rect) =>
-          `<div class="pne-selection" style="left:${rect.x}px;top:${rect.y}px;width:${rect.width}px;height:${rect.height}px"></div>`,
-      )
-      .join("");
-    const caret = geometry.caret;
-    const caretHtml =
-      caret === null
-        ? ""
-        : `<div class="pne-caret" style="left:${caret.rect.x}px;top:${caret.rect.y}px;height:${caret.rect.height}px"></div>`;
-    return `${selection}${composition}${caretHtml}`;
-  }
-
-  function compositionCaretRect(
-    layout: ReturnType<typeof previewLayoutEngine.layout> | null = null,
-  ) {
-    const view = editor.compositionView;
-    if (view === null) {
-      return null;
-    }
-    const activeLayout = layout ?? previewLayoutEngine.layout(view.virtualText, 720);
-    const parseState = createIncrementalParseState(view.virtualText);
-    const editableIndex = createEditableLayoutIndex({
-      markdown: view.virtualText,
-      layout: activeLayout,
-      blockSpans: parseState.blockSpans,
-      inlineSources: createMarkdownInlineSourceMap(parseState),
-    });
-    return editableIndex.sourceOffsetToCaretRect(
-      view.replacementRange.from + view.preeditText.length,
-    ).rect;
-  }
-
-  function renderCompositionOverlay(layout: ReturnType<typeof previewLayoutEngine.layout>): string {
-    const view = editor.compositionView;
-    if (view === null || view.preeditText.length === 0) {
-      return "";
-    }
-
-    const parseState = createIncrementalParseState(view.virtualText);
-    const editableIndex = createEditableLayoutIndex({
-      markdown: view.virtualText,
-      layout,
-      blockSpans: parseState.blockSpans,
-      inlineSources: createMarkdownInlineSourceMap(parseState),
-    });
-    return editableIndex
-      .sourceRangeToSelectionRects({
-        from: view.replacementRange.from,
-        to: view.replacementRange.from + view.preeditText.length,
-      })
-      .map(
-        (rect) =>
-          `<div class="pne-composition" style="left:${rect.x}px;top:${rect.y + rect.height - 3}px;width:${rect.width}px"></div>`,
-      )
-      .join("");
-  }
-
-  function pointFromEvent(event: PointerEvent): { x: number; y: number } {
-    const rect = surface.getBoundingClientRect();
-    return {
-      x: event.clientX - rect.left,
-      y: event.clientY - rect.top,
-    };
-  }
-
-  surface.addEventListener("pointerdown", (event) => {
-    event.preventDefault();
-    const point = pointFromEvent(event);
-    pointerSession = beginPointerSelection(editor, point.x, point.y, currentEditableIndex);
-    textarea.focus();
-    render();
-  });
-
-  window.addEventListener("pointermove", (event) => {
-    if (pointerSession === null) {
-      return;
-    }
-    const point = pointFromEvent(event);
-    updatePointerSelection(editor, pointerSession, point.x, point.y, currentEditableIndex);
-    render();
-  });
-
-  window.addEventListener("pointerup", () => {
-    pointerSession = null;
-  });
-
-  textarea.addEventListener("keydown", (event) => {
-    const intent = normalizeInputTrace([
-      {
-        type: "keydown",
-        key: event.key,
-        shiftKey: event.shiftKey,
-        metaKey: event.metaKey,
-        altKey: event.altKey,
-        ctrlKey: event.ctrlKey,
-      },
-    ])[0];
-    if (intent?.type !== "keyboard-selection" && intent?.type !== "select-all") {
-      return;
-    }
-
-    event.preventDefault();
-    applyInputIntent(editor, intent, { undoManager });
-    render();
-  });
-
-  textarea.addEventListener("beforeinput", (event) => {
-    const intent = normalizeInputTrace([
-      {
-        type: "beforeinput",
-        inputType: event.inputType,
-        data: event.data,
-        isComposing: event.isComposing,
-        cancelable: event.cancelable,
-      },
-    ])[0];
-
-    if (
-      intent?.type !== "insert-paragraph" &&
-      intent?.type !== "delete" &&
-      intent?.type !== "history"
+    function compositionCaretRect(
+      layout: ReturnType<typeof previewLayoutEngine.layout> | null = null,
     ) {
-      return;
+      const view = editor.compositionView;
+      if (view === null) {
+        return null;
+      }
+      const activeLayout = layout ?? previewLayoutEngine.layout(view.virtualText, 720);
+      const parseState = createIncrementalParseState(view.virtualText);
+      const editableIndex = createEditableLayoutIndex({
+        markdown: view.virtualText,
+        layout: activeLayout,
+        blockSpans: parseState.blockSpans,
+        inlineSources: createMarkdownInlineSourceMap(parseState),
+      });
+      return editableIndex.sourceOffsetToCaretRect(
+        view.replacementRange.from + view.preeditText.length,
+      ).rect;
     }
 
-    event.preventDefault();
-    applyInputIntent(editor, intent, { undoManager });
-    render();
-  });
+    function renderCompositionOverlay(
+      layout: ReturnType<typeof previewLayoutEngine.layout>,
+    ): string {
+      const view = editor.compositionView;
+      if (view === null || view.preeditText.length === 0) {
+        return "";
+      }
 
-  textarea.addEventListener("compositionstart", (event) => {
-    composing = true;
-    applyInputIntent(editor, { type: "composition-start" }, { undoManager });
-    render();
-    event.preventDefault();
-  });
-
-  textarea.addEventListener("compositionupdate", (event) => {
-    if (!composing) {
-      return;
+      const parseState = createIncrementalParseState(view.virtualText);
+      const editableIndex = createEditableLayoutIndex({
+        markdown: view.virtualText,
+        layout,
+        blockSpans: parseState.blockSpans,
+        inlineSources: createMarkdownInlineSourceMap(parseState),
+      });
+      return editableIndex
+        .sourceRangeToSelectionRects({
+          from: view.replacementRange.from,
+          to: view.replacementRange.from + view.preeditText.length,
+        })
+        .map(
+          (rect) =>
+            `<div class="pne-composition" style="left:${rect.x}px;top:${rect.y + rect.height - 3}px;width:${rect.width}px"></div>`,
+        )
+        .join("");
     }
-    applyInputIntent(editor, { type: "composition-update", text: event.data }, { undoManager });
-    render();
-  });
 
-  textarea.addEventListener("compositionend", (event) => {
-    composing = false;
-    applyInputIntent(editor, { type: "composition-commit", text: event.data }, { undoManager });
-    render();
-  });
-
-  textarea.addEventListener("paste", (event) => {
-    event.preventDefault();
-    applyInputIntent(
-      editor,
-      {
-        type: "clipboard",
-        action: "paste",
-        markdown: event.clipboardData?.getData("text/markdown") || undefined,
-        plainText: event.clipboardData?.getData("text/plain") || undefined,
-        html: event.clipboardData?.getData("text/html") || undefined,
-      },
-      { undoManager },
-    );
-    render();
-  });
-
-  textarea.addEventListener("cut", (event) => {
-    event.preventDefault();
-    applyInputIntent(editor, { type: "clipboard", action: "cut" }, { undoManager });
-    render();
-  });
-
-  textarea.addEventListener("input", () => {
-    if (composing) {
-      return;
-    }
-    const applied = applyTextareaBridgeChange(editor, bridgeSnapshot, textarea.value, {
-      nextSelectionStart: textarea.selectionStart,
-      nextSelectionEnd: textarea.selectionEnd,
-    });
-    if (applied !== null) {
-      undoManager.recordApplied(editor.adapter, applied);
-    }
-    render();
-  });
-
-  (
-    window as typeof window & {
-      __premarkNativeEditor?: {
-        markdown(): string;
-        insertRemote(offset: number, text: string): void;
-        resize(width: number): void;
-        setSelection(anchor: number, head: number): void;
-        setCaret(offset: number): void;
+    function pointFromEvent(event: PointerEvent): { x: number; y: number } {
+      const rect = surface.getBoundingClientRect();
+      return {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
       };
     }
-  ).__premarkNativeEditor = {
-    markdown: () => editor.markdown,
-    insertRemote(offset, text) {
-      editor.adapter.transact((tx) => {
-        tx.insert(offset, text);
-      });
-      render();
-    },
-    resize(width) {
-      editor.resize(width);
-      render();
-    },
-    setSelection(anchor, head) {
-      editor.setSelection(anchor, head);
-      render();
-    },
-    setCaret(offset) {
-      editor.setSelection(offset, offset);
-      render();
-    },
-  };
 
-  render();
+    surface.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      const point = pointFromEvent(event);
+      pointerSession = beginPointerSelection(editor, point.x, point.y, currentEditableIndex);
+      textarea.focus();
+      render();
+    });
+
+    window.addEventListener("pointermove", (event) => {
+      if (pointerSession === null) {
+        return;
+      }
+      const point = pointFromEvent(event);
+      updatePointerSelection(editor, pointerSession, point.x, point.y, currentEditableIndex);
+      render();
+    });
+
+    window.addEventListener("pointerup", () => {
+      pointerSession = null;
+    });
+
+    textarea.addEventListener("keydown", (event) => {
+      const intent = normalizeInputTrace([
+        {
+          type: "keydown",
+          key: event.key,
+          shiftKey: event.shiftKey,
+          metaKey: event.metaKey,
+          altKey: event.altKey,
+          ctrlKey: event.ctrlKey,
+        },
+      ])[0];
+      if (intent?.type !== "keyboard-selection" && intent?.type !== "select-all") {
+        return;
+      }
+
+      event.preventDefault();
+      applyInputIntent(editor, intent, { undoManager });
+      render();
+    });
+
+    textarea.addEventListener("beforeinput", (event) => {
+      const intent = normalizeInputTrace([
+        {
+          type: "beforeinput",
+          inputType: event.inputType,
+          data: event.data,
+          isComposing: event.isComposing,
+          cancelable: event.cancelable,
+        },
+      ])[0];
+
+      if (
+        intent?.type !== "insert-paragraph" &&
+        intent?.type !== "delete" &&
+        intent?.type !== "history"
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      applyInputIntent(editor, intent, { undoManager });
+      render();
+    });
+
+    textarea.addEventListener("compositionstart", (event) => {
+      composing = true;
+      applyInputIntent(editor, { type: "composition-start" }, { undoManager });
+      render();
+      event.preventDefault();
+    });
+
+    textarea.addEventListener("compositionupdate", (event) => {
+      if (!composing) {
+        return;
+      }
+      applyInputIntent(editor, { type: "composition-update", text: event.data }, { undoManager });
+      render();
+    });
+
+    textarea.addEventListener("compositionend", (event) => {
+      composing = false;
+      applyInputIntent(editor, { type: "composition-commit", text: event.data }, { undoManager });
+      render();
+    });
+
+    textarea.addEventListener("paste", (event) => {
+      event.preventDefault();
+      applyInputIntent(
+        editor,
+        {
+          type: "clipboard",
+          action: "paste",
+          markdown: event.clipboardData?.getData("text/markdown") || undefined,
+          plainText: event.clipboardData?.getData("text/plain") || undefined,
+          html: event.clipboardData?.getData("text/html") || undefined,
+        },
+        { undoManager },
+      );
+      render();
+    });
+
+    textarea.addEventListener("cut", (event) => {
+      event.preventDefault();
+      applyInputIntent(editor, { type: "clipboard", action: "cut" }, { undoManager });
+      render();
+    });
+
+    textarea.addEventListener("input", () => {
+      if (composing) {
+        return;
+      }
+      const applied = applyTextareaBridgeChange(editor, bridgeSnapshot, textarea.value, {
+        nextSelectionStart: textarea.selectionStart,
+        nextSelectionEnd: textarea.selectionEnd,
+      });
+      if (applied !== null) {
+        undoManager.recordApplied(editor.adapter, applied);
+      }
+      render();
+    });
+
+    (
+      window as typeof window & {
+        __premarkNativeEditor?: {
+          markdown(): string;
+          insertRemote(offset: number, text: string): void;
+          resize(width: number): void;
+          setSelection(anchor: number, head: number): void;
+          setCaret(offset: number): void;
+        };
+      }
+    ).__premarkNativeEditor = {
+      markdown: () => editor.markdown,
+      insertRemote(offset, text) {
+        editor.adapter.transact((tx) => {
+          tx.insert(offset, text);
+        });
+        render();
+      },
+      resize(width) {
+        editor.resize(width);
+        render();
+      },
+      setSelection(anchor, head) {
+        editor.setSelection(anchor, head);
+        render();
+      },
+      setCaret(offset) {
+        editor.setSelection(offset, offset);
+        render();
+      },
+    };
+
+    render();
+  }
+
+  void initialize();
   return root;
 };
 
