@@ -160,11 +160,11 @@ Goal: support real composition without hiding behind CodeMirror.
 - [x] Create macOS-only runner with input-source selection, real OS key-event focus probe, screenshot artifacts, and strict/skip behavior.
 - [ ] Run macOS Pinyin real IME tests.
 - [ ] Add Japanese and Korean scenarios after Pinyin stabilizes.
-- [ ] Test browser/spec event-order variants: `beforeinput`/`compositionupdate`/`input`/`compositionend` can arrive in different orders and must normalize to the same editor operation.
-- [ ] Assert composition update never commits real source, never enters undo, and never requires changing browser DOM selection near the composition range.
+- [x] Test browser/spec event-order variants: `beforeinput`/`compositionupdate`/`input`/`compositionend` can arrive in different orders and must normalize to the same editor operation.
+- [x] Assert composition update never commits real source, never enters undo, and never requires changing browser DOM selection near the composition range.
 - [x] Add first screenshot for composition preedit text in the DOM prototype.
 - [ ] Add screenshots for replacement of selected text, composition near strong/code/link markers, and candidate-window anchoring when the OS screenshot path can capture it.
-- [ ] Add remote/AI patch tests during composition: before range, after range, inside selected replacement range, and overlapping composition range.
+- [x] Add remote/AI patch tests during composition: before range, after range, inside selected replacement range, and overlapping composition range.
 
 Acceptance:
 
@@ -261,3 +261,5 @@ Acceptance:
 - Added reusable input trace fixtures for Chromium/WebKit composition order, Firefox composition input-after-end, composition cancel, soft-keyboard text insertion without keydown, beforeinput edit commands, selection plus clipboard, and keyboard selection granularity. The fixtures compare raw trace events to expected normalized editor intents.
 - Added a mobile-emulated Playwright test for tap focus, soft-keyboard-style input without keydown, synthetic touch pointer drag selection, and selection overlay geometry. Codex reviewed the mobile screenshot artifact and recorded the real-device gap for OS long-press handles, magnifier behavior, native selection affordances, and real soft-keyboard candidate bars.
 - Verification for the input/mobile iteration: `vp check --fix` passes with the two existing wiki-canvas warnings, `vp test` passes 113 tests, and `vp run test:browser` passes 10 Playwright tests.
+- Expanded composition automation: event-order trace fixtures now close the browser/spec variant item, core tests cover remote edits before, after, inside, and overlapping a composition range, and a browser test verifies composition rerenders keep DOM selection out of the rendered surface while the hidden textarea remains focused.
+- Verification for the composition automation iteration: targeted composition/core tests pass and `vp run test:browser` passes 11 Playwright tests.

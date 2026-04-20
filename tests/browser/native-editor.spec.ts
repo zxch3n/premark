@@ -318,6 +318,57 @@ test.describe("Premark native editor story", () => {
     await expect(source).toContainText("世界");
   });
 
+  test("keeps rendered DOM selection out of the surface during composition", async ({ page }) => {
+    await page.goto(storyUrl);
+
+    const surface = page.locator("[data-editor-surface]");
+    const bridge = page.locator("[data-input-bridge]");
+    const source = page.locator("[data-debug-source]");
+    await expect(surface).toContainText("Native rendered Markdown");
+
+    await surface.click({ position: { x: 118, y: 86 } });
+    await expect(bridge).toBeFocused();
+
+    const surfaceStableBefore = await surface.evaluate((element) => {
+      (window as typeof window & { __premarkSurfaceForTest?: Element }).__premarkSurfaceForTest =
+        element;
+      return true;
+    });
+    expect(surfaceStableBefore).toBe(true);
+
+    await bridge.evaluate((element) => {
+      element.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+      element.dispatchEvent(new CompositionEvent("compositionupdate", { data: "shi" }));
+    });
+
+    await expect(surface).toContainText("shi");
+    await expect(source).not.toContainText("shi");
+
+    const domSelection = await page.evaluate(() => {
+      const surface = document.querySelector("[data-editor-surface]");
+      const selection = window.getSelection();
+      const anchorNode = selection?.anchorNode ?? null;
+      const anchorElement =
+        anchorNode instanceof Element ? anchorNode : (anchorNode?.parentElement ?? null);
+      return {
+        activeTag: document.activeElement?.tagName,
+        anchorInsideSurface:
+          surface !== null && anchorElement !== null ? surface.contains(anchorElement) : false,
+        rangeCount: selection?.rangeCount ?? 0,
+        selectedText: selection?.toString() ?? "",
+        surfaceElementStable:
+          (window as typeof window & { __premarkSurfaceForTest?: Element })
+            .__premarkSurfaceForTest === surface,
+      };
+    });
+
+    expect(domSelection.activeTag).toBe("TEXTAREA");
+    expect(domSelection.anchorInsideSurface).toBe(false);
+    expect(domSelection.selectedText).toBe("");
+    expect(domSelection.rangeCount).toBeLessThanOrEqual(1);
+    expect(domSelection.surfaceElementStable).toBe(true);
+  });
+
   test("supports desktop keyboard selection intents in the browser story", async ({ page }) => {
     await page.goto(storyUrl);
 
