@@ -23,4 +23,15 @@ Current generated folder pattern:
   - `native-editor-after-replace.png`: selected range is replaced without leaving the previous emoji ZWJ suffix; caret is visible after inserted text.
 - Notes:
   - This is a DOM debug renderer review, not final Canvas visual parity.
-  - Composition preedit screenshots, paste preview screenshots, mobile screenshots, and remote edit screenshots are still pending.
+  - Paste preview screenshots, mobile screenshots, and remote edit screenshots are still pending.
+
+### 2026-04-20 Composition Preedit
+
+- Reviewer: Codex
+- Scenario: native editor Storybook synthetic composition preedit
+- Result: pass for DOM debug renderer, not a real OS IME pass
+- Reviewed screenshots:
+  - `native-editor-composition-preedit.png`: preedit text appears in the rendered paragraph and has a green underline overlay near the active caret.
+- Notes:
+  - This verifies the Storybook DOM event path and virtual rendering path.
+  - It does not verify macOS Pinyin candidate window placement, real event order, or candidate-window screenshots.

@@ -34,6 +34,7 @@ Last Updated: 2026-04-20
 - Browser automation must set `NO_PROXY=127.0.0.1,localhost` in this environment; otherwise Playwright's local web-server readiness probe can be routed through the proxy and time out.
 - Screenshot review caught a real bug: pointer hit-test could land inside an emoji ZWJ sequence and leave a stale suffix after replacement. Pointer selection now snaps hit-test offsets to grapheme boundaries before updating source selection.
 - Synthetic browser composition events are useful as a fast guard for DOM event wiring, but they are not a substitute for real macOS IME automation because they do not exercise OS candidate windows or native event ordering.
+- The DOM prototype now renders composition preedit with a lightweight Premark overlay underline. It is acceptable for the debug renderer but still needs real OS IME screenshots before claiming platform parity.
 
 ## Removed From This Branch
 
@@ -105,7 +106,7 @@ Goal: paint native selection and caret on the rendered surface.
 - [ ] Paint caret rect with blink disabled in tests.
 - [x] Support collapsed, forward, backward, and multi-block selections.
 - [x] Add pure command support for mouse drag selection, drag reversal, keyboard arrows, Shift+arrows, and Shift+Command+arrows.
-- [ ] Wire mouse and keyboard selection commands to browser events in the prototype.
+- [x] Wire mouse and keyboard selection commands to browser events in the prototype.
 - [ ] Define mobile selection behavior for touch long press, drag handles, soft keyboard focus, scroll, and zoom.
 - [ ] Add tests for select-all, Home/End, PageUp/PageDown, line boundary, word boundary, document boundary, and direction-preserving selection extension.
 - [ ] Add screenshot tests for forward selection, backward selection, wrapped-line selection, cross-block selection, active inline marker selection, and high-DPI canvas selection.
@@ -147,13 +148,14 @@ Acceptance:
 Goal: support real composition without hiding behind CodeMirror.
 
 - [x] Track `compositionstart/update/end` as a composing source range.
-- [ ] Render preedit text in Premark with underline/style matching platform expectation as closely as practical.
+- [x] Render preedit text in Premark with underline/style matching platform expectation as closely as practical for the DOM debug prototype.
 - [ ] Commit and cancel composition without losing source selection.
 - [ ] Run macOS Pinyin real IME tests.
 - [ ] Add Japanese and Korean scenarios after Pinyin stabilizes.
 - [ ] Test browser/spec event-order variants: `beforeinput`/`compositionupdate`/`input`/`compositionend` can arrive in different orders and must normalize to the same editor operation.
 - [ ] Assert composition update never commits real source, never enters undo, and never requires changing browser DOM selection near the composition range.
-- [ ] Add screenshots for composition preedit text, replacement of selected text, composition near strong/code/link markers, and candidate-window anchoring when the OS screenshot path can capture it.
+- [x] Add first screenshot for composition preedit text in the DOM prototype.
+- [ ] Add screenshots for replacement of selected text, composition near strong/code/link markers, and candidate-window anchoring when the OS screenshot path can capture it.
 - [ ] Add remote/AI patch tests during composition: before range, after range, inside selected replacement range, and overlapping composition range.
 
 Acceptance:
@@ -173,6 +175,7 @@ Goal: replace the removed CodeMirror Storybook examples with a native Premark ed
 - [x] Show debug overlay for source offsets, hit-test rects, and selection ranges.
 - [ ] Add a screenshot mode that renders small fixed-size crops for key states: idle, caret, selected range, active marker, composition, paste preview, and remote edit.
 - [x] Add first Playwright screenshot artifacts for idle, typing, selection, and replacement states.
+- [x] Add first Playwright screenshot artifact for composition preedit.
 - [x] Add a screenshot review log template beside the generated artifacts.
 
 Acceptance:
@@ -187,7 +190,8 @@ Goal: convert the research checklist into automated coverage and visual review g
 
 - [ ] Create `tests/editor/pitfalls/README.md` with every known pitfall, source, automation status, and owner.
 - [x] Create first Playwright suite for the native editor Storybook desktop pointer/input flow and screenshot crops.
-- [ ] Expand Playwright suites for desktop keyboard selection, clipboard, visual viewport, DOM debug renderer, Canvas renderer, and more screenshot crops.
+- [x] Add Playwright coverage for desktop keyboard selection and browser clipboard paste/cut in the native editor story.
+- [ ] Expand Playwright suites for visual viewport, DOM debug renderer, Canvas renderer, and more screenshot crops.
 - [x] Add first browser composition suite using synthetic `composition*` events against the Storybook hidden textarea.
 - [ ] Create macOS-only IME suite using real OS input where possible and clear skips where CI cannot provide the OS permission or input source.
 - [ ] Create mobile-emulation suite for touch, visual viewport, soft keyboard modeling, and selection geometry; record gaps requiring real-device validation.
@@ -226,3 +230,4 @@ Acceptance:
 - Added Playwright browser coverage for the native editor Storybook. The test builds Storybook, serves the static output, clicks the rendered surface, types through the hidden textarea, drags a rendered selection, replaces the selected range, and saves small screenshots for manual review. Codex reviewed the generated screenshots on 2026-04-20 and accepted idle, typing, selection, and replacement crops after fixing grapheme snapping.
 - Wired Storybook hidden textarea `compositionstart/update/end` events into `applyInputIntent` and added a Playwright synthetic composition test. Real macOS IME testing remains open.
 - Added `tests/browser/screenshot-review.md` with the first Codex visual review entry and pending screenshot categories.
+- Added Storybook paste/cut event wiring and Playwright coverage for Shift+Arrow, Shift+Command+Arrow, paste, and cut. Added a DOM debug composition underline overlay and reviewed the generated composition preedit screenshot.

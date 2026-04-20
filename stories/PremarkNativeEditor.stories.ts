@@ -2,9 +2,14 @@ import { createHighlighter } from "../packages/highlight/src/index.ts";
 import { renderToHtml } from "../packages/html-renderer/src/index.ts";
 import { createLayoutEngine } from "../packages/layout/src/index.ts";
 import {
+  createIncrementalParseState,
+  createMarkdownInlineSourceMap,
+} from "../packages/parser/src/index.ts";
+import {
   applyInputIntent,
   applyTextareaBridgeChange,
   beginPointerSelection,
+  createEditableLayoutIndex,
   createInMemoryEditorDocumentState,
   createSelectionGeometry,
   createTextareaBridgeSnapshot,
@@ -95,7 +100,7 @@ export const InteractiveNativePrototype = () => {
     overlay.style.width = `${layout.containerWidth}px`;
     overlay.style.height = `${layout.totalHeight}px`;
     surface.innerHTML = `<style>${rendered.css}</style>${rendered.html}`;
-    overlay.innerHTML = renderSelectionOverlay();
+    overlay.innerHTML = renderSelectionOverlay(layout);
     debugSelection.textContent = JSON.stringify(createSelectionGeometry(editor), null, 2);
     debugSource.textContent = editor.markdown;
     syncTextareaBridge();
@@ -112,7 +117,7 @@ export const InteractiveNativePrototype = () => {
     textarea.style.height = `${Math.max(16, caret.rect.height)}px`;
   }
 
-  function renderSelectionOverlay(): string {
+  function renderSelectionOverlay(layout: ReturnType<typeof previewLayoutEngine.layout>): string {
     const geometry = createSelectionGeometry(editor);
     const selection = geometry.selectionRects
       .map(
@@ -125,7 +130,32 @@ export const InteractiveNativePrototype = () => {
       caret === null
         ? ""
         : `<div class="pne-caret" style="left:${caret.rect.x}px;top:${caret.rect.y}px;height:${caret.rect.height}px"></div>`;
-    return `${selection}${caretHtml}`;
+    return `${selection}${renderCompositionOverlay(layout)}${caretHtml}`;
+  }
+
+  function renderCompositionOverlay(layout: ReturnType<typeof previewLayoutEngine.layout>): string {
+    const view = editor.compositionView;
+    if (view === null || view.preeditText.length === 0) {
+      return "";
+    }
+
+    const parseState = createIncrementalParseState(view.virtualText);
+    const editableIndex = createEditableLayoutIndex({
+      markdown: view.virtualText,
+      layout,
+      blockSpans: parseState.blockSpans,
+      inlineSources: createMarkdownInlineSourceMap(parseState),
+    });
+    return editableIndex
+      .sourceRangeToSelectionRects({
+        from: view.replacementRange.from,
+        to: view.replacementRange.from + view.preeditText.length,
+      })
+      .map(
+        (rect) =>
+          `<div class="pne-composition" style="left:${rect.x}px;top:${rect.y + rect.height - 3}px;width:${rect.width}px"></div>`,
+      )
+      .join("");
   }
 
   function pointFromEvent(event: PointerEvent): { x: number; y: number } {
@@ -220,6 +250,28 @@ export const InteractiveNativePrototype = () => {
     render();
   });
 
+  textarea.addEventListener("paste", (event) => {
+    event.preventDefault();
+    applyInputIntent(
+      editor,
+      {
+        type: "clipboard",
+        action: "paste",
+        markdown: event.clipboardData?.getData("text/markdown") || undefined,
+        plainText: event.clipboardData?.getData("text/plain") || undefined,
+        html: event.clipboardData?.getData("text/html") || undefined,
+      },
+      { undoManager },
+    );
+    render();
+  });
+
+  textarea.addEventListener("cut", (event) => {
+    event.preventDefault();
+    applyInputIntent(editor, { type: "clipboard", action: "cut" }, { undoManager });
+    render();
+  });
+
   textarea.addEventListener("input", () => {
     if (composing) {
       return;
@@ -307,6 +359,13 @@ const storyCss = `
   .pne-caret {
     position: absolute;
     width: 2px;
+    border-radius: 1px;
+    background: #0f8a5f;
+  }
+
+  .pne-composition {
+    position: absolute;
+    height: 2px;
     border-radius: 1px;
     background: #0f8a5f;
   }
