@@ -1,3 +1,5 @@
+import type { TextChange } from "@pretext-md/parser";
+
 export interface FontTheme {
   sansFamily: string;
   monoFamily: string;
@@ -95,6 +97,17 @@ export interface DocumentLayout {
   totalHeight: number;
   containerWidth: number;
   version: number;
+  update?: LayoutUpdateMetadata;
+}
+
+export interface LayoutUpdateMetadata {
+  readonly mode: "full" | "incremental";
+  readonly dirtyFromBlock: number;
+  readonly dirtyToBlock: number;
+  readonly oldSuffixStartBlock: number;
+  readonly newSuffixStartBlock: number;
+  readonly suffixYOffset: number;
+  readonly sourceChange: TextChange | null;
 }
 
 export interface BlockLayout {
