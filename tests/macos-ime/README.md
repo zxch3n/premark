@@ -22,6 +22,14 @@ The runner builds Storybook, serves the native Premark editor story, then runs t
 - A global HID US keyboard probe verifies that foreground OS key events can reach the focused hidden textarea. This is required before running real IME composition because targeted process events bypass macOS input methods.
 - A real Pinyin probe runs only when the browser can be made the macOS foreground app and global HID key events reach the hidden textarea. This path uses global key codes so the selected macOS input source can create native composition events and candidate UI.
 
+When the real Pinyin path is enabled, the runner executes these scenarios:
+
+- `pinyin-commit`: commit `你好` at the current caret.
+- `pinyin-cancel`: start a preedit and cancel it with Escape, leaving source unchanged.
+- `pinyin-replacement`: replace rendered inline text with committed Pinyin text.
+- `pinyin-cross-block-replacement`: replace a cross-block rendered selection with committed Pinyin text.
+- `pinyin-undo`: commit Pinyin text and undo it through the browser history path.
+
 Current environment boundary:
 
 - `CGEventPostToPid` can deliver physical key events to the browser process even when Chrome is not the foreground app.
@@ -39,7 +47,7 @@ Artifacts:
 
 - `test-results/macos-ime/dry-run.json`: input-source and helper readiness report.
 - `test-results/macos-ime/dry-run.txt`: short dry-run summary.
-- `test-results/macos-ime/pinyin-commit.png`: real Pinyin succeeded.
+- `test-results/macos-ime/pinyin-*.png`: real Pinyin scenario screenshots.
 - `test-results/macos-ime/pinyin-skipped-no-foreground.png`: browser could not become foreground.
 - `test-results/macos-ime/pinyin-skip.txt`: exact skip reason.
 - `test-results/macos-ime/hid-probe-failed.png`: browser was foreground, but global HID events did not reach the focused hidden textarea.
