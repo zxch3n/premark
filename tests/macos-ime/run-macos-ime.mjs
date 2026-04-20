@@ -14,6 +14,53 @@ const targetInputSourceID =
 const strictRealIme = process.env.PREMARK_MACOS_IME_STRICT === "1";
 const dryRun = process.env.PREMARK_MACOS_IME_DRY_RUN === "1" || process.argv.includes("--dry-run");
 
+const PINYIN_NIHAO_KEY_CODES = [45, 34, 4, 0, 31, 49, 36];
+const PINYIN_SCENARIOS = [
+  {
+    name: "pinyin-commit",
+    description: "Commit 你好 at the current caret.",
+    keyCodes: PINYIN_NIHAO_KEY_CODES,
+    expectIncludes: "你好",
+  },
+  {
+    name: "pinyin-cancel",
+    description: "Start a Pinyin preedit and cancel it with Escape.",
+    keyCodes: [45, 34, 53],
+    expectUnchanged: true,
+  },
+  {
+    name: "pinyin-replacement",
+    description: "Replace rendered inline text with a committed Pinyin word.",
+    selection: {
+      anchorText: "Click text",
+      anchorEdge: "start",
+      headText: "Click text",
+      headEdge: "end",
+    },
+    keyCodes: PINYIN_NIHAO_KEY_CODES,
+    expectIncludes: "你好, drag across blocks",
+  },
+  {
+    name: "pinyin-cross-block-replacement",
+    description: "Replace a cross-block source selection with a committed Pinyin word.",
+    selection: {
+      anchorText: "Click text",
+      anchorEdge: "start",
+      headText: "hidden textarea",
+      headEdge: "end",
+    },
+    keyCodes: PINYIN_NIHAO_KEY_CODES,
+    expectIncludes: "你好 mirrors only the active source slice",
+  },
+  {
+    name: "pinyin-undo",
+    description: "Commit Pinyin text and undo it through the browser native history path.",
+    keyCodes: PINYIN_NIHAO_KEY_CODES,
+    after: [{ type: "shortcut", modifiers: "command", keyCode: 6 }],
+    expectNotIncludes: "你好",
+  },
+];
+
 if (process.platform !== "darwin") {
   console.log("[macos-ime] skipped: not running on macOS");
   process.exit(0);
@@ -77,6 +124,7 @@ function writeDryRunReport(report) {
       `usFound=${String(report.usFound)}`,
       `japaneseCandidates=${report.japaneseCandidates.length}`,
       `koreanCandidates=${report.koreanCandidates.length}`,
+      `pinyinScenarios=${report.pinyinScenarios.length}`,
       `osInputHelper=${report.osInputHelper}`,
       "",
     ].join("\n"),
@@ -198,6 +246,12 @@ function sendHidKeyCodes(browserProcessName, keyCodes) {
   swiftOsInput("hid-keycodes", ...keyCodes.map(String));
 }
 
+function sendHidShortcut(browserProcessName, modifiers, keyCode) {
+  activateBrowser(browserProcessName);
+  console.log(`[macos-ime] posting HID shortcut: ${modifiers}+${keyCode}`);
+  swiftOsInput("hid-shortcut", modifiers, String(keyCode));
+}
+
 async function writeImeFailureArtifact(page, name, message) {
   mkdirSync(join(root, "test-results/macos-ime"), { recursive: true });
   const sourceText = await page.locator("[data-debug-source]").textContent();
@@ -210,6 +264,112 @@ async function writeImeFailureArtifact(page, name, message) {
     `${JSON.stringify({ message, events, source: sourceText }, null, 2)}\n`,
   );
   return { events, sourceText };
+}
+
+async function readEditorMarkdown(page) {
+  return page.evaluate(
+    () =>
+      window.__premarkNativeEditor?.markdown?.() ??
+      document.querySelector("[data-debug-source]")?.textContent ??
+      "",
+  );
+}
+
+async function sourceOffset(page, text, edge) {
+  return page.evaluate(
+    ({ text, edge }) => {
+      const markdown =
+        window.__premarkNativeEditor?.markdown?.() ??
+        document.querySelector("[data-debug-source]")?.textContent ??
+        "";
+      const offset = markdown.indexOf(text);
+      if (offset < 0) {
+        throw new Error(`Missing source text for macOS IME scenario: ${text}`);
+      }
+      return edge === "end" ? offset + text.length : offset;
+    },
+    { text, edge },
+  );
+}
+
+async function applyScenarioSelection(page, selection) {
+  if (selection === undefined) {
+    return;
+  }
+  const anchor = await sourceOffset(page, selection.anchorText, selection.anchorEdge);
+  const head = await sourceOffset(page, selection.headText, selection.headEdge);
+  await page.evaluate(
+    ({ anchor, head }) => {
+      window.__premarkNativeEditor?.setSelection?.(anchor, head);
+    },
+    { anchor, head },
+  );
+}
+
+async function resetScenarioPage(page, browserProcessName) {
+  await page.reload();
+  await installEventProbe(page);
+  await page.locator("[data-editor-surface]").click({ position: { x: 118, y: 86 } });
+  await page.locator("[data-input-bridge]").waitFor({ state: "attached" });
+  await focusBridge(page, browserProcessName);
+}
+
+async function assertScenarioResult(page, scenario, beforeMarkdown) {
+  if (scenario.expectIncludes !== undefined) {
+    await page.waitForFunction(
+      (expected) => document.querySelector("[data-debug-source]")?.textContent?.includes(expected),
+      scenario.expectIncludes,
+      { timeout: 10_000 },
+    );
+  }
+  if (scenario.expectNotIncludes !== undefined) {
+    await page.waitForTimeout(600);
+    const source = await readEditorMarkdown(page);
+    if (source.includes(scenario.expectNotIncludes)) {
+      throw new Error(
+        `${scenario.name} expected source not to include ${scenario.expectNotIncludes}, but source was:\n${source}`,
+      );
+    }
+  }
+  if (scenario.expectUnchanged === true) {
+    await page.waitForTimeout(600);
+    const source = await readEditorMarkdown(page);
+    if (source !== beforeMarkdown) {
+      throw new Error(
+        `${scenario.name} expected unchanged source.\nBefore:\n${beforeMarkdown}\nAfter:\n${source}`,
+      );
+    }
+  }
+}
+
+async function runPinyinScenario(page, browserProcessName, scenario) {
+  console.log(`[macos-ime] running scenario: ${scenario.name}`);
+  await resetScenarioPage(page, browserProcessName);
+  await applyScenarioSelection(page, scenario.selection);
+  const beforeMarkdown = await readEditorMarkdown(page);
+  sendHidKeyCodes(browserProcessName, scenario.keyCodes);
+  for (const action of scenario.after ?? []) {
+    if (action.type === "shortcut") {
+      sendHidShortcut(browserProcessName, action.modifiers, action.keyCode);
+    }
+  }
+  try {
+    await assertScenarioResult(page, scenario, beforeMarkdown);
+  } catch (error) {
+    const { events, sourceText } = await writeImeFailureArtifact(
+      page,
+      `${scenario.name}-failed`,
+      `${scenario.name} failed: ${String(error)}`,
+    );
+    throw new Error(
+      `${scenario.name} failed. Browser events were:\n${JSON.stringify(events, null, 2)}\nSource was:\n${sourceText}`,
+      { cause: error },
+    );
+  }
+  await page
+    .locator(".pne-editor-wrap")
+    .screenshot({ path: join(root, `test-results/macos-ime/${scenario.name}.png`) });
+  console.log(`[macos-ime] scenario passed: ${scenario.name}`);
 }
 
 function findPlaywrightBrowserPid() {
@@ -298,6 +458,10 @@ async function main() {
       pinyinCandidates: findImeCandidates(parsedSources, [/pinyin/iu, /SCIM/iu, /ITABC/iu]),
       japaneseCandidates: findImeCandidates(parsedSources, [/japanese/iu, /kotoeri/iu, /romaji/iu]),
       koreanCandidates: findImeCandidates(parsedSources, [/korean/iu, /hangul/iu]),
+      pinyinScenarios: PINYIN_SCENARIOS.map((scenario) => ({
+        name: scenario.name,
+        description: scenario.description,
+      })),
       osInputHelper: swiftOsInput("check"),
       enabledSourceCount: parsedSources.filter((source) => source.enabled).length,
       sourceCount: parsedSources.length,
@@ -399,14 +563,9 @@ async function main() {
       console.log("[macos-ime] skipped HID US probe: com.apple.keylayout.US not found");
     }
 
-    await page.reload();
-    await installEventProbe(page);
-    await page.locator("[data-editor-surface]").click({ position: { x: 118, y: 86 } });
-    await page.locator("[data-input-bridge]").waitFor({ state: "attached" });
-
     const selected = swiftInputSource("select", targetInputSourceID);
     console.log(`[macos-ime] selected input source: ${selected}`);
-    await focusBridge(page, browserProcessName);
+    await resetScenarioPage(page, browserProcessName);
 
     if (!(await foregroundBrowser(browserProcessName))) {
       mkdirSync(join(root, "test-results/macos-ime"), { recursive: true });
@@ -425,34 +584,11 @@ async function main() {
       return;
     }
 
-    sendHidKeyCodes(browserProcessName, [45, 34, 4, 0, 31, 49, 36]);
-
-    await page.locator("[data-debug-source]").waitFor({
-      state: "attached",
-    });
-    try {
-      await page.waitForFunction(
-        () => document.querySelector("[data-debug-source]")?.textContent?.includes("你好"),
-        undefined,
-        { timeout: 10_000 },
-      );
-    } catch (error) {
-      const { events, sourceText } = await writeImeFailureArtifact(
-        page,
-        "pinyin-failed",
-        "Pinyin commit did not produce 你好.",
-      );
-      throw new Error(
-        `Pinyin commit did not produce 你好. Browser events were:\n${JSON.stringify(events, null, 2)}\nSource was:\n${sourceText}`,
-        { cause: error },
-      );
-    }
-
     mkdirSync(join(root, "test-results/macos-ime"), { recursive: true });
-    await page
-      .locator(".pne-editor-wrap")
-      .screenshot({ path: join(root, "test-results/macos-ime/pinyin-commit.png") });
-    console.log("[macos-ime] pinyin commit passed");
+    for (const scenario of PINYIN_SCENARIOS) {
+      await runPinyinScenario(page, browserProcessName, scenario);
+    }
+    console.log("[macos-ime] pinyin scenarios passed");
   } finally {
     if (previousInputSourceID) {
       try {
