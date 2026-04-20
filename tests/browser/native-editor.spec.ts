@@ -80,6 +80,61 @@ async function insertRemoteText(page: Page, offset: number, text: string) {
   );
 }
 
+async function dragTouchPointer(
+  page: Page,
+  selector: string,
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+) {
+  const box = await page.locator(selector).boundingBox();
+  expect(box).not.toBeNull();
+  if (box === null) {
+    return;
+  }
+
+  await page.evaluate(
+    ({ selector, startX, startY, endX, endY }) => {
+      const target = document.querySelector(selector);
+      if (target === null) {
+        throw new Error(`Missing touch target: ${selector}`);
+      }
+
+      const pointer = (type: string, x: number, y: number, buttons: number) =>
+        new PointerEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          clientX: x,
+          clientY: y,
+          pointerId: 41,
+          pointerType: "touch",
+          isPrimary: true,
+          buttons,
+        });
+
+      target.dispatchEvent(pointer("pointerdown", startX, startY, 1));
+      for (let step = 1; step <= 6; step += 1) {
+        const ratio = step / 6;
+        window.dispatchEvent(
+          pointer(
+            "pointermove",
+            startX + (endX - startX) * ratio,
+            startY + (endY - startY) * ratio,
+            1,
+          ),
+        );
+      }
+      window.dispatchEvent(pointer("pointerup", endX, endY, 0));
+    },
+    {
+      selector,
+      startX: box.x + start.x,
+      startY: box.y + start.y,
+      endX: box.x + end.x,
+      endY: box.y + end.y,
+    },
+  );
+}
+
 async function pasteMarkdown(page: Page, markdown: string) {
   await page.locator("[data-input-bridge]").evaluate((element, value) => {
     const data = new DataTransfer();
@@ -483,6 +538,69 @@ test.describe("Premark native editor story", () => {
       expect(bridgeRect.top).toBeLessThanOrEqual(430);
       expect(bridgeRect.left).toBeGreaterThanOrEqual(0);
       expect(bridgeRect.left).toBeLessThanOrEqual(390);
+    } finally {
+      await context.close();
+    }
+  });
+
+  test("models mobile touch selection geometry and soft-keyboard input", async ({
+    browser,
+  }, testInfo) => {
+    const context = await browser.newContext({
+      baseURL: "http://127.0.0.1:6106",
+      deviceScaleFactor: 2,
+      hasTouch: true,
+      isMobile: true,
+      viewport: { width: 390, height: 700 },
+    });
+    const page = await context.newPage();
+    try {
+      await page.goto(storyUrl);
+
+      const editor = page.locator(".pne-editor-wrap");
+      const surface = page.locator("[data-editor-surface]");
+      const bridge = page.locator("[data-input-bridge]");
+      const source = page.locator("[data-debug-source]");
+      await expect(surface).toContainText("Native rendered Markdown");
+
+      await surface.tap({ position: { x: 92, y: 86 } });
+      await expect(bridge).toBeFocused();
+      await setSourceCaret(page, await sourceOffset(page, "Click text", "end"));
+      await bridge.evaluate((element) => {
+        const textarea = element as HTMLTextAreaElement;
+        textarea.setRangeText(" mobile", textarea.selectionStart, textarea.selectionEnd, "end");
+        element.dispatchEvent(
+          new InputEvent("input", {
+            bubbles: true,
+            inputType: "insertText",
+            data: " mobile",
+          }),
+        );
+      });
+      await expect(source).toContainText("mobile");
+
+      await dragTouchPointer(page, "[data-editor-surface]", { x: 30, y: 86 }, { x: 280, y: 196 });
+      const selection = await readSelection(page);
+      expect(selection.isCollapsed).toBe(false);
+      expect(selection.range.to).toBeGreaterThan(selection.range.from);
+
+      const selectionRects = await page.locator(".pne-selection").evaluateAll((elements) =>
+        elements.map((element) => {
+          const rect = element.getBoundingClientRect();
+          return {
+            width: rect.width,
+            height: rect.height,
+            top: rect.top,
+            left: rect.left,
+          };
+        }),
+      );
+      expect(selectionRects.length).toBeGreaterThan(1);
+      expect(selectionRects.every((rect) => rect.width > 0 && rect.height > 0)).toBe(true);
+
+      await editor.screenshot({
+        path: testInfo.outputPath("native-editor-mobile-touch-selection.png"),
+      });
     } finally {
       await context.close();
     }

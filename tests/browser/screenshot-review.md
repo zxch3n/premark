@@ -9,6 +9,7 @@ Current generated folder pattern:
 - `test-results/native-editor-Premark-nati-*/native-editor-selection.png`
 - `test-results/native-editor-Premark-nati-*/native-editor-after-replace.png`
 - `test-results/native-editor-Premark-nati-*/native-editor-shot-*.png`
+- `test-results/native-editor-Premark-nati-*/native-editor-mobile-touch-selection.png`
 - `test-results/macos-ime/pinyin-skipped-no-foreground.png`
 
 ## Review Entries
@@ -72,3 +73,14 @@ Current generated folder pattern:
 - Notes:
   - This review found and fixed a real source-map bug: layout `blockIndex` referred to normalized layout blocks, not parser source blocks, which broke list-item and post-list paragraph mappings.
   - Canvas renderer screenshots, active-marker reveal styling, and real mobile selection-handle screenshots remain pending.
+
+### 2026-04-20 Mobile Touch Selection
+
+- Reviewer: Codex
+- Scenario: mobile-emulated Storybook touch pointer selection and soft-keyboard-style input
+- Result: pass for Playwright mobile emulation, with real-device handle gap documented
+- Reviewed screenshots:
+  - `native-editor-mobile-touch-selection.png`: touch pointer drag selects across the paragraph and list rows with multiple visible selection rects; text inserted through an `input` event without keydown appears after `Click text`.
+- Notes:
+  - This covers Premark's own touch pointer hit-test/selection path, soft-keyboard-style input events, and overlay geometry in a mobile viewport.
+  - It does not cover OS long-press handles, native selection affordances, magnifier behavior, or real soft-keyboard candidate bars. Those require device automation or a manual/device-farm checklist before claiming full mobile support.

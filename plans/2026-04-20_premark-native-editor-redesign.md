@@ -39,6 +39,7 @@ Last Updated: 2026-04-20
 - macOS automation has two separate layers: targeted `CGEventPostToPid` can prove real OS key events reach the browser process and hidden textarea, but it bypasses macOS input-method composition. Real Pinyin/candidate-window coverage must use System Events or HID events with the browser as the foreground app.
 - The current Codex host cannot make Chrome the foreground app; the macOS runner records this as a skip artifact by default and can be made strict with `PREMARK_MACOS_IME_STRICT=1`.
 - Screenshot mode exposed a real source-map bug: layout `blockIndex` is the normalized layout-block index, not the parser source-block index. Editable source mapping now scans rendered fragments in source order and then resolves the containing parser block span.
+- Mobile selection behavior is now split into two claims: Playwright mobile emulation covers Premark touch pointer selection, soft-keyboard-style `input` events, visual viewport shrink, and overlay geometry; OS long-press handles, magnifier behavior, native selection affordances, and real soft-keyboard candidate bars remain a documented real-device gap.
 
 ## Removed From This Branch
 
@@ -111,7 +112,7 @@ Goal: paint native selection and caret on the rendered surface.
 - [x] Support collapsed, forward, backward, and multi-block selections.
 - [x] Add pure command support for mouse drag selection, drag reversal, keyboard arrows, Shift+arrows, and Shift+Command+arrows.
 - [x] Wire mouse and keyboard selection commands to browser events in the prototype.
-- [ ] Define mobile selection behavior for touch long press, drag handles, soft keyboard focus, scroll, and zoom.
+- [x] Define mobile selection behavior for touch long press, drag handles, soft keyboard focus, scroll, and zoom.
 - [x] Add tests for select-all, Home/End, PageUp/PageDown, line boundary, word boundary, document boundary, and direction-preserving selection extension.
 - [x] Add screenshot tests for forward selection, backward selection, wrapped-line selection, cross-block selection, and active inline-token selection in the DOM debug renderer.
 - [ ] Add active-marker reveal and high-DPI Canvas selection screenshots.
@@ -202,9 +203,10 @@ Goal: convert the research checklist into automated coverage and visual review g
 - [ ] Add Canvas renderer screenshot suite.
 - [x] Add first browser composition suite using synthetic `composition*` events against the Storybook hidden textarea.
 - [x] Create macOS-only IME suite using real OS input where possible and clear skips where CI cannot provide the OS permission, foreground app, or input source.
-- [ ] Create mobile-emulation suite for touch, visual viewport, soft keyboard modeling, and selection geometry; record gaps requiring real-device validation.
+- [x] Create mobile-emulation suite for touch, visual viewport, soft keyboard modeling, and selection geometry; record gaps requiring real-device validation.
 - [x] Create DOM screenshot review artifacts with one small crop per scenario and a Codex-reviewed `review.md` that records pass/fail and visual notes.
-- [ ] Create Canvas and mobile screenshot review artifacts with Codex-reviewed visual notes.
+- [x] Create mobile screenshot review artifacts with Codex-reviewed visual notes.
+- [ ] Create Canvas screenshot review artifacts with Codex-reviewed visual notes.
 - [ ] Add CI/reporting guidance so screenshot failures include the actual/expected/diff images and event traces.
 
 Acceptance:
@@ -255,5 +257,7 @@ Acceptance:
 - Added Storybook screenshot mode for deterministic small crops covering idle, caret, forward/backward selection, wrapped selection, cross-block selection, inline-token selection, composition preedit, paste preview, remote edit, and high-DPI DOM selection.
 - Screenshot review found and fixed a source mapping bug caused by treating normalized layout `blockIndex` as parser source block index. `EditableLayoutIndex` now maps visible fragments by source-order scanning and resolves each fragment back to the containing parser block span; a regression test covers list items followed by inline-token paragraphs.
 - Reviewed the screenshot-mode artifacts after the fix. DOM debug renderer screenshots are accepted for this phase; active-marker reveal styling, Canvas screenshots, and real mobile selection-handle screenshots remain pending.
-- Verification for this iteration: `vp check --fix` passes with the two existing wiki-canvas warnings, `vp test` passes 111 tests, `vp run build` passes, and `vp run test:browser` passes 9 Playwright tests.
+- Verification for the screenshot/source-map iteration: `vp check --fix` passes with the two existing wiki-canvas warnings, `vp test` passes 111 tests, `vp run build` passes, and `vp run test:browser` passes 9 Playwright tests.
 - Added reusable input trace fixtures for Chromium/WebKit composition order, Firefox composition input-after-end, composition cancel, soft-keyboard text insertion without keydown, beforeinput edit commands, selection plus clipboard, and keyboard selection granularity. The fixtures compare raw trace events to expected normalized editor intents.
+- Added a mobile-emulated Playwright test for tap focus, soft-keyboard-style input without keydown, synthetic touch pointer drag selection, and selection overlay geometry. Codex reviewed the mobile screenshot artifact and recorded the real-device gap for OS long-press handles, magnifier behavior, native selection affordances, and real soft-keyboard candidate bars.
+- Verification for the input/mobile iteration: `vp check --fix` passes with the two existing wiki-canvas warnings, `vp test` passes 113 tests, and `vp run test:browser` passes 10 Playwright tests.
