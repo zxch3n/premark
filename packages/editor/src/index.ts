@@ -35,6 +35,8 @@ export type {
   TextareaBridgeMode,
   TextareaBridgeSnapshot,
 } from "./input-bridge.ts";
+export { applyInputIntent } from "./input-commands.ts";
+export type { AppliedInputIntent } from "./input-commands.ts";
 export { InputEventTraceRecorder, normalizeInputTrace } from "./input-trace.ts";
 export {
   createResolvedRange,

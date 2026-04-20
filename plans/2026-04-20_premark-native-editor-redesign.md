@@ -28,6 +28,7 @@ Last Updated: 2026-04-20
 - The hidden textarea bridge should first be a pure model: active same-block selections mirror only the current block source, cross-block selections keep an empty bridge value and route replacement/deletion through the editor source selection.
 - Selection painting should be split into a geometry contract and renderer implementation. The geometry contract can be tested deterministically before browser/Canvas screenshots exist.
 - Pointer and keyboard selection should also be split: first a pure command layer over source offsets, then browser event wiring and screenshots.
+- Input should follow the same split: normalized intents can be fully tested against the source model before wiring real browser `beforeinput` / `input` events.
 
 ## Removed From This Branch
 
@@ -118,8 +119,10 @@ Goal: receive real OS text input while keeping Premark as the visible editor.
 
 - [ ] Add hidden textarea/input bridge anchored near caret.
 - [ ] Keep platform focus in the bridge while visible caret/selection are Premark-rendered.
-- [ ] Convert `beforeinput` / `input` / keyboard commands into source operations.
-- [ ] Handle delete/backspace, Enter, paste, undo/redo.
+- [x] Convert normalized `beforeinput` / `input` / keyboard commands into source operations.
+- [ ] Wire real browser `beforeinput` / `input` / keyboard events to normalized source operations.
+- [x] Handle core insert text, delete/backspace, Enter, selectionchange, and composition intents.
+- [ ] Handle paste, undo/redo.
 - [x] Keep bridge content minimal to avoid DOM editor behavior becoming the product.
 - [x] Add an input event trace recorder for `keydown`, `beforeinput`, `input`, `keyup`, `selectionchange`, `composition*`, `paste`, `copy`, and `cut`.
 - [x] Add tests proving text insertion does not rely on keydown, so mobile autocorrect/autosuggest/swipe-like input can be modeled as input operations.
@@ -207,3 +210,4 @@ Acceptance:
 - Added a pure textarea bridge snapshot/diff model. Active-block input maps textarea offsets back to source ranges, cross-block replacement/deletion routes through the editor selection, and tests cover collapsed caret at a next-block boundary so it is not misclassified as cross-block.
 - Added `SelectionGeometry` as the renderer-facing selection/caret contract. Tests cover collapsed caret, forward selection, backward selection, and cross-block multi-rect geometry. This completes the core geometry layer only; DOM/Canvas painting and screenshots are still open.
 - Added pure selection commands for pointer drag/reversal and keyboard movement. Tests cover grapheme-safe ArrowLeft/ArrowRight, Shift+Arrow extension, Shift+Command-style document boundary extension, and wrapped-line ArrowDown movement.
+- Added `applyInputIntent` to apply normalized input intents to `EditorDocumentState`. Tests cover text replacement, cross-block deletion, grapheme-safe delete backward/forward, Enter paragraph insertion, selectionchange, and virtual-to-committed composition.
