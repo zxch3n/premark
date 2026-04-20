@@ -19,6 +19,11 @@ describe("EditorDocumentState", () => {
       to: worldFrom + "Premark".length,
     });
     expect(editor.parseState.text).toBe(editor.markdown);
+    expect(editor.layout.update).toMatchObject({
+      sourceChange: expect.objectContaining({
+        changedChars: expect.any(Number),
+      }),
+    });
     expect(editor.layout.blocks).toHaveLength(1);
     expect(editor.editableIndex.fragments.some((fragment) => fragment.text === "Premark")).toBe(
       true,

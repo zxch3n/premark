@@ -2,6 +2,7 @@ import { createLayoutEngine, type DocumentLayout, type StyleConfig } from "@pret
 import {
   createIncrementalParseState,
   createMarkdownInlineSourceMap,
+  incrementalParse,
   type IncrementalParseState,
   type MarkdownInlineSourceRecord,
 } from "@pretext-md/parser";
@@ -174,9 +175,10 @@ export class EditorDocumentState {
 
   refresh(): void {
     const markdown = this.adapter.getText();
-    this.parseState = createIncrementalParseState(markdown);
+    const parseResult = incrementalParse(this.parseState, markdown);
+    this.parseState = parseResult.state;
     this.inlineSources = createMarkdownInlineSourceMap(this.parseState);
-    this.layout = this.layoutEngine.layout(markdown, this.containerWidth);
+    this.layout = this.layoutEngine.applyParseResult(parseResult, this.containerWidth);
     this.editableIndex = this.createEditableIndex();
     if (this.compositionSession !== null && this.compositionViewValue !== null) {
       this.compositionViewValue = this.compositionSession.update(
