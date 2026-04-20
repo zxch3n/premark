@@ -15,10 +15,12 @@ export interface EditableFragment {
   readonly lineIndex: number;
   readonly fragmentIndex: number;
   readonly text: string;
+  readonly font: string;
   readonly type: InlineFragment["type"] | "code_block";
   readonly sourceRange: SourceRange;
   readonly tokenRange?: SourceRange;
   readonly rect: Rect;
+  readonly textInsetX: number;
 }
 
 export interface HitTestResult {
@@ -289,6 +291,7 @@ function buildEditableFragments(input: EditableLayoutIndexInput): EditableFragme
         lineIndex: line.index,
         fragmentIndex: 0,
         text: line.content.code,
+        font: line.content.font,
         type: "code_block",
         sourceRange,
         rect: {
@@ -300,6 +303,7 @@ function buildEditableFragments(input: EditableLayoutIndexInput): EditableFragme
             line.height - line.content.padding.top - line.content.padding.bottom,
           ),
         },
+        textInsetX: 0,
       });
       sourceCursor = Math.max(sourceRange.to, blockSpan.to);
       continue;
@@ -330,6 +334,7 @@ function buildEditableFragments(input: EditableLayoutIndexInput): EditableFragme
         lineIndex: line.index,
         fragmentIndex,
         text: fragment.text,
+        font: fragment.font,
         type: fragment.type,
         sourceRange,
         tokenRange: findSmallestContainingTokenRange(blockSpan.id, sourceRange, tokenRecords),
@@ -339,6 +344,7 @@ function buildEditableFragments(input: EditableLayoutIndexInput): EditableFragme
           width: fragment.width,
           height: line.height,
         },
+        textInsetX: fragment.type === "inline_code" ? 6 : 0,
       });
       sourceCursor = sourceRange.to;
     });
@@ -393,14 +399,96 @@ function proportionalWidth(
   return (width * textLength) / fragment.text.length;
 }
 
+let cachedMeasurementContext: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null =
+  null;
+
+const fragmentBoundaryCache = new WeakMap<EditableFragment, readonly number[]>();
+
+function getMeasurementContext(): CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D {
+  if (cachedMeasurementContext !== null) {
+    return cachedMeasurementContext;
+  }
+  if (typeof OffscreenCanvas !== "undefined") {
+    cachedMeasurementContext = new OffscreenCanvas(1, 1).getContext("2d");
+  } else if (typeof document !== "undefined") {
+    cachedMeasurementContext = document.createElement("canvas").getContext("2d");
+  }
+  if (cachedMeasurementContext === null) {
+    throw new Error(
+      "No canvas measurement context is available. In Node.js call installNodeCanvas() before using editable layout measurement.",
+    );
+  }
+  return cachedMeasurementContext;
+}
+
+function measureTextWidth(text: string, font: string): number {
+  if (text.length === 0) return 0;
+  const context = getMeasurementContext();
+  context.font = font;
+  return context.measureText(text).width;
+}
+
+function visibleTextWidth(fragment: EditableFragment): number {
+  if (fragment.type === "code_block" || fragment.text.includes("\n")) {
+    return Math.max(0, fragment.rect.width);
+  }
+  return Math.max(0, fragment.rect.width - fragment.textInsetX * 2);
+}
+
+function textBoundaryXs(fragment: EditableFragment): readonly number[] {
+  const cached = fragmentBoundaryCache.get(fragment);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  const boundaries: number[] = [];
+  if (fragment.type === "code_block" || fragment.text.includes("\n")) {
+    for (let offset = 0; offset <= fragment.text.length; offset += 1) {
+      boundaries.push(proportionalWidth(fragment, offset));
+    }
+    fragmentBoundaryCache.set(fragment, boundaries);
+    return boundaries;
+  }
+
+  const fullMeasuredWidth = measureTextWidth(fragment.text, fragment.font);
+  const renderedTextWidth = visibleTextWidth(fragment);
+  const scale = fullMeasuredWidth > 0 ? renderedTextWidth / fullMeasuredWidth : 1;
+  for (let offset = 0; offset <= fragment.text.length; offset += 1) {
+    boundaries.push(measureTextWidth(fragment.text.slice(0, offset), fragment.font) * scale);
+  }
+  fragmentBoundaryCache.set(fragment, boundaries);
+  return boundaries;
+}
+
+function textOffsetToLocalX(fragment: EditableFragment, textOffset: number): number {
+  const clampedOffset = Math.min(Math.max(textOffset, 0), fragment.text.length);
+  const boundaries = textBoundaryXs(fragment);
+  return fragment.textInsetX + (boundaries[clampedOffset] ?? 0);
+}
+
+function textOffsetToX(fragment: EditableFragment, textOffset: number): number {
+  return fragment.rect.x + textOffsetToLocalX(fragment, textOffset);
+}
+
 function offsetInsideFragment(fragment: EditableFragment, x: number): number {
   if (fragment.text.length === 0 || fragment.rect.width <= 0) {
     return fragment.sourceRange.from;
   }
 
-  const clampedX = Math.min(Math.max(x, fragment.rect.x), fragment.rect.x + fragment.rect.width);
-  const ratio = (clampedX - fragment.rect.x) / fragment.rect.width;
-  const delta = Math.round(ratio * fragment.text.length);
+  const textStartX = fragment.rect.x + fragment.textInsetX;
+  const textEndX = textStartX + visibleTextWidth(fragment);
+  const clampedX = Math.min(Math.max(x, textStartX), textEndX);
+  const localX = clampedX - textStartX;
+  const boundaries = textBoundaryXs(fragment);
+  let delta = fragment.text.length;
+  for (let index = 1; index < boundaries.length; index += 1) {
+    const previous = boundaries[index - 1] ?? 0;
+    const next = boundaries[index] ?? previous;
+    if (localX <= (previous + next) / 2) {
+      delta = index - 1;
+      break;
+    }
+  }
   return Math.min(fragment.sourceRange.to, fragment.sourceRange.from + delta);
 }
 
@@ -411,7 +499,7 @@ function caretRectInFragment(fragment: EditableFragment, offset: number): Rect {
   );
   const delta = clampedOffset - fragment.sourceRange.from;
   return {
-    x: fragment.rect.x + proportionalWidth(fragment, delta),
+    x: textOffsetToX(fragment, delta),
     y: fragment.rect.y,
     width: 1,
     height: fragment.rect.height,
@@ -421,11 +509,12 @@ function caretRectInFragment(fragment: EditableFragment, offset: number): Rect {
 function rectForFragmentRange(fragment: EditableFragment, from: number, to: number): Rect {
   const startDelta = from - fragment.sourceRange.from;
   const endDelta = to - fragment.sourceRange.from;
-  const x = fragment.rect.x + proportionalWidth(fragment, startDelta);
+  const x = textOffsetToX(fragment, startDelta);
+  const endX = textOffsetToX(fragment, endDelta);
   return {
     x,
     y: fragment.rect.y,
-    width: proportionalWidth(fragment, endDelta - startDelta),
+    width: Math.max(0, endX - x),
     height: fragment.rect.height,
   };
 }
