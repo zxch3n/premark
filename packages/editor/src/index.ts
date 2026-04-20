@@ -43,7 +43,21 @@ export {
   selectionDirection,
   transformStableRangeRecord,
 } from "./ranges.ts";
+export {
+  applyKeyboardSelectionIntent,
+  beginPointerSelection,
+  updatePointerSelection,
+} from "./selection-commands.ts";
+export type { PointerSelectionSession } from "./selection-commands.ts";
 export { createSelectionGeometry } from "./selection-geometry.ts";
 export type { SelectionGeometry } from "./selection-geometry.ts";
 export { LocalUndoManager } from "./undo.ts";
+export type {
+  InputTraceEvent,
+  NormalizedInputIntent,
+  TraceClipboardEventType,
+  TraceCompositionEventType,
+  TraceInputEventType,
+  TraceKeyboardEventType,
+} from "./input-trace.ts";
 export type * from "./types.ts";
