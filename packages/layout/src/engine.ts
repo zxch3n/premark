@@ -30,6 +30,7 @@ import type {
   FontTheme,
   LayoutEngine,
   LayoutLine,
+  LayoutUpdateMetadata,
   OpaqueLine,
   ResolvedFonts,
   SpacingConfig,
@@ -67,6 +68,28 @@ function emptyLayout(version: number, containerWidth: number): DocumentLayout {
     totalHeight: 0,
     containerWidth,
     version,
+  };
+}
+
+function attachLayoutUpdate(layout: DocumentLayout, update: LayoutUpdateMetadata): DocumentLayout {
+  return {
+    ...layout,
+    update,
+  };
+}
+
+function fullLayoutUpdate(
+  layout: DocumentLayout,
+  sourceChange: LayoutUpdateMetadata["sourceChange"] = null,
+): LayoutUpdateMetadata {
+  return {
+    mode: "full",
+    dirtyFromBlock: 0,
+    dirtyToBlock: layout.blocks.length,
+    oldSuffixStartBlock: layout.blocks.length,
+    newSuffixStartBlock: layout.blocks.length,
+    suffixYOffset: 0,
+    sourceChange,
   };
 }
 
@@ -252,13 +275,14 @@ export class LayoutEngineImpl implements LayoutEngine {
       markdown,
       parseState.blockSpans,
     );
+    const layoutWithUpdate = attachLayoutUpdate(layout, fullLayoutUpdate(layout));
     this.lastMarkdown = markdown;
     this.lastParseState = parseState;
     this.lastBlocks = blocks;
     this.lastNormalizedDocument = normalizedDocument;
-    this.lastLayout = layout;
+    this.lastLayout = layoutWithUpdate;
     this.lastDirtyFromLayoutBlock = 0;
-    return layout;
+    return layoutWithUpdate;
   }
 
   resize(_prevLayout: DocumentLayout, newWidth: number): DocumentLayout {
@@ -268,9 +292,10 @@ export class LayoutEngineImpl implements LayoutEngine {
       this.lastMarkdown,
       this.lastParseState.blockSpans,
     );
-    this.lastLayout = layout;
+    const layoutWithUpdate = attachLayoutUpdate(layout, fullLayoutUpdate(layout));
+    this.lastLayout = layoutWithUpdate;
     this.lastDirtyFromLayoutBlock = 0;
-    return layout;
+    return layoutWithUpdate;
   }
 
   updateFontTheme(theme: FontTheme): void {
@@ -659,14 +684,47 @@ export class LayoutEngineImpl implements LayoutEngine {
           parseResult.state.text,
           parseResult.state.blockSpans,
         );
+    const layoutWithUpdate = attachLayoutUpdate(
+      layout,
+      forceFullLayout
+        ? fullLayoutUpdate(layout, parseResult.change)
+        : this.createIncrementalLayoutUpdate(
+            layout,
+            dirtyFromLayoutBlock,
+            dirtyToLayoutBlock,
+            parseResult.change,
+          ),
+    );
 
     this.lastMarkdown = parseResult.state.text;
     this.lastParseState = parseResult.state;
     this.lastBlocks = parseResult.state.blocks;
     this.lastNormalizedDocument = normalizedDocument;
-    this.lastLayout = layout;
+    this.lastLayout = layoutWithUpdate;
     this.lastDirtyFromLayoutBlock = dirtyFromLayoutBlock;
-    return layout;
+    return layoutWithUpdate;
+  }
+
+  private createIncrementalLayoutUpdate(
+    layout: DocumentLayout,
+    dirtyFromBlock: number,
+    dirtyToBlock: number,
+    sourceChange: LayoutUpdateMetadata["sourceChange"],
+  ): LayoutUpdateMetadata {
+    const suffixCount = layout.blocks.length - dirtyToBlock;
+    const oldSuffixStartBlock = this.lastLayout.blocks.length - suffixCount;
+    const newSuffixStartBlock = dirtyToBlock;
+    const oldSuffixY = this.lastLayout.blocks[oldSuffixStartBlock]?.y ?? 0;
+    const newSuffixY = layout.blocks[newSuffixStartBlock]?.y ?? oldSuffixY;
+    return {
+      mode: "incremental",
+      dirtyFromBlock,
+      dirtyToBlock,
+      oldSuffixStartBlock,
+      newSuffixStartBlock,
+      suffixYOffset: newSuffixY - oldSuffixY,
+      sourceChange,
+    };
   }
 
   private normalizeIncrementally(parseResult: IncrementalParseResult): NormalizedDocument {

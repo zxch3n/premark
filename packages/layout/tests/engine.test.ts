@@ -161,6 +161,17 @@ describe("LayoutStream", () => {
 
     expect(stripVersion(incrementalLayout)).toEqual(stripVersion(fullLayout));
     expect(engine.getLastDirtyFromLayoutBlock()).toBeGreaterThanOrEqual(1);
+    expect(incrementalLayout.update).toMatchObject({
+      mode: "incremental",
+      dirtyFromBlock: expect.any(Number),
+      dirtyToBlock: expect.any(Number),
+      sourceChange: expect.objectContaining({
+        changedChars: expect.any(Number),
+      }),
+    });
+    expect(incrementalLayout.update?.dirtyToBlock).toBeGreaterThan(
+      incrementalLayout.update?.dirtyFromBlock ?? -1,
+    );
   });
 
   it("keeps list-heavy incremental layouts equivalent to full layout", () => {
@@ -218,5 +229,6 @@ function stripVersion(layout: DocumentLayout): DocumentLayout {
   return {
     ...layout,
     version: 0,
+    update: undefined,
   };
 }
