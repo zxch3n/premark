@@ -84,6 +84,7 @@ describe("normalizeInputTrace", () => {
         { type: "keydown", key: "ArrowUp", shiftKey: true, metaKey: true },
         { type: "keydown", key: "End", shiftKey: true },
         { type: "keydown", key: "PageDown", shiftKey: true },
+        { type: "keydown", key: "a", ctrlKey: true },
       ]),
     ).toEqual([
       {
@@ -128,6 +129,7 @@ describe("normalizeInputTrace", () => {
         by: "page",
         extend: true,
       },
+      { type: "select-all" },
     ]);
   });
 });

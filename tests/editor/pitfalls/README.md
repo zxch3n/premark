@@ -8,6 +8,7 @@ Status legend:
 - `planned`: not implemented yet
 - `logic`: covered by deterministic Vitest tests
 - `browser`: covered by Playwright browser tests
+- `logic+browser`: covered by deterministic Vitest tests and Playwright browser tests
 - `macos-ime`: covered by macOS real IME automation
 - `gap`: automation gap is explicitly documented
 - `mobile-gap`: requires real-device or manual validation before claiming support
@@ -24,7 +25,7 @@ Status legend:
 | Soft keyboard input without keydown       | Synthetic mobile input operation tests plus mobile browser coverage                               | planned        |
 | Visual viewport changes                   | VisualViewport resize/scroll anchoring tests                                                      | planned        |
 | Browser selection/focus coupling          | Tests keep Premark selection independent from DOM focus                                           | browser        |
-| Keyboard selection modes                  | Arrow, Shift+Arrow, Shift+Command+Arrow, Home/End, PageUp/PageDown                                | planned        |
+| Keyboard selection modes                  | Arrow, Shift+Arrow, Shift+Command+Arrow, Home/End, PageUp/PageDown                                | logic+browser  |
 | Grapheme boundaries                       | Combining marks, emoji ZWJ, flags, variation selectors, CJK punctuation                           | logic          |
 | Bidi hit-test                             | Mixed English/Hebrew/Arabic/numbers/Markdown markers fixtures                                     | planned        |
 | Multi-format clipboard                    | Markdown, plain text, HTML, cross-block cut/paste                                                 | browser        |

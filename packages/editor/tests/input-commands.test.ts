@@ -95,6 +95,17 @@ describe("applyInputIntent", () => {
     expect(editor.selection.direction).toBe("backward");
   });
 
+  it("selects the full source for select-all intents", () => {
+    const editor = createInMemoryEditorDocumentState("Hello\n\nworld", 600);
+    editor.setSelection(2, 2);
+
+    expect(applyInputIntent(editor, { type: "select-all" })).toEqual({ type: "selection" });
+    expect(editor.selectionSourceRange).toEqual({
+      from: 0,
+      to: editor.markdown.length,
+    });
+  });
+
   it("applies composition update virtually and commits source text", () => {
     const editor = createInMemoryEditorDocumentState("Hello world", 600);
     const worldFrom = editor.markdown.indexOf("world");
