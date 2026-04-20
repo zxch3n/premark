@@ -83,13 +83,17 @@ Current generated folder pattern:
   - `native-editor-shot-inline-token.png`: selecting rendered `bold text` maps to the raw strong-token source range without exposing marker text.
   - `native-editor-shot-active-marker.png`: active strong text reveals the raw `**` markers, caret stays inside the same source token, and the line reflows without overlap.
   - `native-editor-shot-composition.png`: synthetic preedit text appears inside the rendered strong text, with underline and caret aligned to the preedit range.
+  - `native-editor-shot-composition-replace.png`: composition preedit replaces the selected strong text and remains underlined at the replacement range.
+  - `native-editor-shot-composition-strong.png`: preedit near a strong token stays in the bold rendered run without exposing unrelated marker text.
+  - `native-editor-shot-composition-code.png`: preedit at the start of an inline-code token is visible and does not break the inline code pill layout.
+  - `native-editor-shot-composition-link.png`: preedit at the link label start is visible before the rendered link text and does not shift the surrounding line unexpectedly.
   - `native-editor-shot-paste.png`: pasted Markdown renders as bold text before the existing strong token, and the caret lands after the pasted content.
   - `native-editor-shot-remote.png`: a remote blockquote insertion appears above the active document without remounting the rendered surface.
   - `native-editor-shot-code-block.png`: code-block text selection stays inside the rendered code surface and remains aligned to the code text.
   - `native-editor-shot-hidpi.png`: high-DPI DOM crop keeps the selected list text aligned; the right edge intentionally crops unrelated paragraph text.
 - Notes:
   - This review found and fixed a real source-map bug: layout `blockIndex` referred to normalized layout blocks, not parser source blocks, which broke list-item and post-list paragraph mappings.
-  - Final Canvas visual parity and real mobile selection-handle screenshots remain pending.
+  - Final Canvas visual parity, real mobile selection-handle screenshots, and OS candidate-window screenshots remain pending.
 
 ### 2026-04-20 Mobile Touch Selection
 
