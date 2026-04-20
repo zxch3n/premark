@@ -175,11 +175,20 @@ Acceptance:
 
 Goal: remove the full-document editable-index rebuild found by Phase 9.
 
-- [ ] Design dirty-block/viewport editable index ownership and cache invalidation.
+- [x] Design dirty-block/viewport editable index ownership and cache invalidation.
 - [ ] Add an API that can rebuild editable fragments for dirty source/layout blocks while reusing stable fragments outside the dirty range.
 - [ ] Keep active-marker reveal and composition views correct when only the active block is rebuilt.
 - [ ] Add benchmarks proving editable-index work scales with dirty fragments, not whole document size.
 - [ ] Add regression tests for source offset shifts, blank source lines, code blocks, links, emoji, and hidden/revealed controls across reused fragments.
+
+Design notes:
+
+- Layout must expose update metadata alongside `DocumentLayout`: parse mode, dirty normalized block range, suffix y-offset, and source text change. The editor should not infer this by comparing geometry.
+- Editable fragments are owned by `(renderViewId, blockId, markerState)`. Hidden, active-marker, and composition render views must not share fragments unless their source map identity is the same.
+- Reuse policy is conservative: prefix fragments before the dirty range can be reused as-is; suffix fragments can be reused only after applying source-offset transform and layout y/block/line translation; dirty blocks, active marker blocks, composition blocks, and viewport boundary blocks are rebuilt.
+- Source offsets remain authoritative. A reused fragment must transform every `sourceOffsets` entry plus `sourceRange` and `tokenRange`; if a change overlaps a fragment source range, rebuild it.
+- Viewport mode is an allowed optimization layer on top of dirty-block reuse, but the first implementation should keep a full logical index and only make fragment construction incremental. Virtualization can follow after equivalence tests pass.
+- Cache invalidation keys: markdown version, layout version, font readiness epoch, container width, render view source-map identity, active control ranges, and composition replacement range.
 
 Acceptance:
 
@@ -207,3 +216,4 @@ Acceptance:
 - Phase 8 started. Added pointer word/block selection command support, DOM and Canvas story wiring for double-click word selection and triple-click paragraph selection, and browser coverage for both renderers. Hidden textarea bridges now use `pointer-events: none` so the OS input bridge cannot intercept repeated surface clicks. Added browser coverage for reversed cross-block drag selection and expanded keyboard coverage for Home/End, Shift+Home, Alt+ArrowLeft, and Meta+ArrowUp/Down.
 - Completed Phase 8. Enter now inserts one source newline, and `insertParagraph` plus textarea `insertLineBreak` normalize to the same intent. Added pure and browser coverage for source-exact insert/delete/paste/Enter inside strong markers, heading markers, link suffix controls, and rendered-inline-content replacement that preserves surrounding controls. Canvas native story now supports paste/cut through the same hidden textarea bridge. Added committed Canvas-native visual baselines for control, link, and emoji editing states; reviewed all three crops manually.
 - Phase 9 benchmark script added as `vp run benchmark:native-editor`. It reports large-document layout plus editable index, local/remote/AI incremental layout, Canvas dirty tile command counts, stable range rebasing, and concurrent workspace edit+AI streaming. On 2026-04-20 with `--chars 100000 --docs 120 --iterations 3`, layout stayed roughly tens of milliseconds and local/remote/AI parse mode stayed incremental with one dirty block, but editable index rebuild was about 1.4-1.5s before sidecar optimization attempts and remained over 1s after a reverted local optimization attempt. Assumption conflict: core Premark layout is fast enough to keep pursuing, but the current editable sidecar is not yet incremental. Plan changed by adding Phase 10.
+- Phase 10 started. Design decision: do not guess dirty ranges from geometry; have layout expose update metadata, then let editor rebuild dirty/active/composition blocks and transform reusable suffix fragments. A local optimization that only precomputed some source-map scans was tried and reverted because benchmark results were not stable and did not address the real full-index architecture problem.
