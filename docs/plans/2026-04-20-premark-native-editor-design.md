@@ -19,7 +19,15 @@ The first prototype should prove the hardest loop:
 
 ## Scope
 
-The first supported block types are paragraph and heading. The first supported inline syntax cases are:
+The first supported block types are:
+
+- paragraph
+- heading
+- list item
+- blockquote
+- fenced code block
+
+The first supported inline syntax cases are:
 
 - `**strong**`
 - `` `inline code` ``
@@ -29,9 +37,52 @@ Inline markers follow a MarkText/Obsidian-style rule. Markers are hidden normall
 
 Offsets use UTF-16 code unit indexes. This matches JavaScript strings, textarea selection, Lezer ranges, and existing parser/layout APIs. Grapheme data is a sidecar for caret movement, delete behavior, and hit-test snapping so emoji and composed characters are not split.
 
-## Non-Goals
+## Deferred Scope
 
-The first prototype does not need full table editing, image resize, HTML block editing, source-mode parity, mobile production polish, or collaborative undo. It must still model these future needs through the core interfaces, especially stable ranges and source operations.
+The first prototype does not need:
+
+- table-cell rich editing
+- image resize or drag handles
+- HTML block editing
+- source-mode parity
+- mobile production polish
+- collaborative undo
+- full bidi visual-order hit-testing
+- multi-line code-block caret geometry finer than the first opaque fragment mapping
+
+It must still model these future needs through the core interfaces, especially stable ranges, source operations, layout fragments, and coordinate transforms.
+
+## Browser And Platform Matrix
+
+Chromium is the first browser target for automated development. The prototype may run in other browsers, but success is not claimed until Chromium passes the logic, browser, screenshot, and macOS IME gates.
+
+macOS Pinyin is the first required real IME path. Synthetic `composition*` events are useful for fast regression tests, but they are not enough because they skip the native candidate window, OS focus, and browser input-method ordering. Japanese and Korean scenarios are added after Pinyin stabilizes.
+
+Mobile support is tracked separately. Playwright mobile emulation can model viewport and touch-event geometry, but real mobile selection handles and native soft-keyboard behavior require either device automation or an explicit manual/device-farm gap.
+
+## IME Fallback Policy
+
+If real OS IME automation cannot safely run, the test must detect the reason and record an artifact instead of pretending to pass.
+
+Known macOS cases:
+
+- Missing input source: skip with the available source list.
+- Missing Accessibility/Input Monitoring permission: fail in strict mode; otherwise record the permission gap.
+- Browser cannot become foreground: record a foreground gap. Targeted `CGEventPostToPid` can verify key-event plumbing but bypasses macOS input-method composition, so it is not a valid Pinyin success.
+- Real composition starts but commit fails: fail and save browser event traces plus screenshots.
+
+`PREMARK_MACOS_IME_STRICT=1` converts documented skip paths into hard failures for local machines that are expected to provide full OS automation.
+
+## Screenshot Artifact Policy
+
+Screenshot artifacts should be deterministic, small, and tied to one scenario.
+
+- Capture the editor crop, not the whole desktop or browser, unless the scenario needs OS candidate UI.
+- Keep crops below roughly 1200x800 pixels.
+- Use fixed Storybook theme, fixed viewport size, stable font stack, and disabled caret blink/animations where possible.
+- Store Playwright artifacts under `test-results/`; do not commit generated screenshots by default.
+- Record reviewed scenarios in `tests/browser/screenshot-review.md`.
+- A screenshot phase is not complete just because CI generated images. Codex must inspect the artifacts or document why the OS-level image cannot be captured automatically.
 
 ## Architecture
 
