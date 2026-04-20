@@ -207,7 +207,7 @@ Goal: convert the research checklist into automated coverage and visual review g
 - [x] Create DOM screenshot review artifacts with one small crop per scenario and a Codex-reviewed `review.md` that records pass/fail and visual notes.
 - [x] Create mobile screenshot review artifacts with Codex-reviewed visual notes.
 - [ ] Create Canvas screenshot review artifacts with Codex-reviewed visual notes.
-- [ ] Add CI/reporting guidance so screenshot failures include the actual/expected/diff images and event traces.
+- [x] Add CI/reporting guidance so screenshot failures include the actual/expected/diff images and event traces.
 
 Acceptance:
 
@@ -263,3 +263,5 @@ Acceptance:
 - Verification for the input/mobile iteration: `vp check --fix` passes with the two existing wiki-canvas warnings, `vp test` passes 113 tests, and `vp run test:browser` passes 10 Playwright tests.
 - Expanded composition automation: event-order trace fixtures now close the browser/spec variant item, core tests cover remote edits before, after, inside, and overlapping a composition range, and a browser test verifies composition rerenders keep DOM selection out of the rendered surface while the hidden textarea remains focused.
 - Verification for the composition automation iteration: targeted composition/core tests pass and `vp run test:browser` passes 11 Playwright tests.
+- Added Playwright browser reporting guidance. Browser test artifacts now write to ignored `artifacts/playwright-browser`, the HTML report writes to `artifacts/playwright-browser-html`, and `tests/browser/ci-reporting.md` documents uploading failure screenshots, trace zips, future actual/expected/diff images, and event trace fixtures.
+- Verification for browser reporting: `vp check --fix` passes with existing warnings, `vp run test:browser` passes 11 Playwright tests, generated screenshot crops are present under `artifacts/playwright-browser`, and the HTML report exists under `artifacts/playwright-browser-html`.

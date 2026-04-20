@@ -4,12 +4,12 @@ Current artifact sources: `vp run test:browser`, `vp run test:macos-ime`
 
 Current generated folder pattern:
 
-- `test-results/native-editor-Premark-nati-*/native-editor-idle.png`
-- `test-results/native-editor-Premark-nati-*/native-editor-after-typing.png`
-- `test-results/native-editor-Premark-nati-*/native-editor-selection.png`
-- `test-results/native-editor-Premark-nati-*/native-editor-after-replace.png`
-- `test-results/native-editor-Premark-nati-*/native-editor-shot-*.png`
-- `test-results/native-editor-Premark-nati-*/native-editor-mobile-touch-selection.png`
+- `artifacts/playwright-browser/native-editor-Premark-nati-*/native-editor-idle.png`
+- `artifacts/playwright-browser/native-editor-Premark-nati-*/native-editor-after-typing.png`
+- `artifacts/playwright-browser/native-editor-Premark-nati-*/native-editor-selection.png`
+- `artifacts/playwright-browser/native-editor-Premark-nati-*/native-editor-after-replace.png`
+- `artifacts/playwright-browser/native-editor-Premark-nati-*/native-editor-shot-*.png`
+- `artifacts/playwright-browser/native-editor-Premark-nati-*/native-editor-mobile-touch-selection.png`
 - `test-results/macos-ime/pinyin-skipped-no-foreground.png`
 
 ## Review Entries
