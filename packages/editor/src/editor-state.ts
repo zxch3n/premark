@@ -8,7 +8,11 @@ import {
 } from "@pretext-md/parser";
 
 import { createCompositionSession, type CompositionSession } from "./composition.ts";
-import { createEditableLayoutIndex, type EditableLayoutIndex } from "./editable-layout.ts";
+import {
+  createEditableLayoutIndex,
+  createIncrementalEditableLayoutIndex,
+  type EditableLayoutIndex,
+} from "./editable-layout.ts";
 import { applyEditOperation } from "./edit-ops.ts";
 import {
   createInMemoryTextDocumentAdapter,
@@ -174,12 +178,13 @@ export class EditorDocumentState {
   }
 
   refresh(): void {
+    const previousEditableIndex = this.editableIndex;
     const markdown = this.adapter.getText();
     const parseResult = incrementalParse(this.parseState, markdown);
     this.parseState = parseResult.state;
     this.inlineSources = createMarkdownInlineSourceMap(this.parseState);
     this.layout = this.layoutEngine.applyParseResult(parseResult, this.containerWidth);
-    this.editableIndex = this.createEditableIndex();
+    this.editableIndex = this.createEditableIndex(previousEditableIndex);
     if (this.compositionSession !== null && this.compositionViewValue !== null) {
       this.compositionViewValue = this.compositionSession.update(
         this.compositionViewValue.preeditText,
@@ -187,13 +192,16 @@ export class EditorDocumentState {
     }
   }
 
-  private createEditableIndex(): EditableLayoutIndex {
-    return createEditableLayoutIndex({
+  private createEditableIndex(previous?: EditableLayoutIndex): EditableLayoutIndex {
+    const input = {
       markdown: this.adapter.getText(),
       layout: this.layout,
       blockSpans: this.parseState.blockSpans,
       inlineSources: this.inlineSources,
-    });
+    };
+    return previous === undefined
+      ? createEditableLayoutIndex(input)
+      : createIncrementalEditableLayoutIndex(input, previous);
   }
 }
 

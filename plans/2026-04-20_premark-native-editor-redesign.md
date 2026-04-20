@@ -176,10 +176,10 @@ Acceptance:
 Goal: remove the full-document editable-index rebuild found by Phase 9.
 
 - [x] Design dirty-block/viewport editable index ownership and cache invalidation.
-- [ ] Add an API that can rebuild editable fragments for dirty source/layout blocks while reusing stable fragments outside the dirty range.
+- [x] Add an API that can rebuild editable fragments for dirty source/layout blocks while reusing stable fragments outside the dirty range.
 - [ ] Keep active-marker reveal and composition views correct when only the active block is rebuilt.
-- [ ] Add benchmarks proving editable-index work scales with dirty fragments, not whole document size.
-- [ ] Add regression tests for source offset shifts, blank source lines, code blocks, links, emoji, and hidden/revealed controls across reused fragments.
+- [x] Add benchmarks proving editable-index work scales with dirty fragments, not whole document size.
+- [x] Add regression tests for source offset shifts, blank source lines, code blocks, links, emoji, and hidden/revealed controls across reused fragments.
 
 Design notes:
 
@@ -192,9 +192,9 @@ Design notes:
 
 Acceptance:
 
-- [ ] 100KB local edit, remote edit, and AI append no longer spend over 1s rebuilding editable index.
-- [ ] Reused editable fragments keep caret, hit-test, and selection geometry equivalent to a fresh full index.
-- [ ] Browser Storybook behavior remains unchanged after enabling incremental sidecar updates.
+- [x] 100KB local edit, remote edit, and AI append no longer spend over 1s rebuilding editable index.
+- [x] Reused editable fragments keep caret, hit-test, and selection geometry equivalent to a fresh full index.
+- [x] Browser Storybook behavior remains unchanged after enabling incremental sidecar updates.
 
 ## Iteration Log
 
@@ -219,3 +219,4 @@ Acceptance:
 - Phase 10 started. Design decision: do not guess dirty ranges from geometry; have layout expose update metadata, then let editor rebuild dirty/active/composition blocks and transform reusable suffix fragments. A local optimization that only precomputed some source-map scans was tried and reverted because benchmark results were not stable and did not address the real full-index architecture problem.
 - Phase 10 API work started. `DocumentLayout` now carries optional update metadata for full vs incremental layout, dirty normalized block range, suffix block mapping/y offset, and parser source change. This is the input the editor sidecar needs before it can safely reuse editable fragments. Targeted layout/editor tests and `vp run build` pass.
 - Editor refresh now computes one incremental parse result and passes it into layout via `applyParseResult`, so editor state, layout update metadata, and future sidecar reuse can share the same source change instead of parsing twice. Targeted editor/input/layout tests pass.
+- Incremental editable sidecar API added. `createIncrementalEditableLayoutIndex` rebuilds dirty layout blocks, reuses stable prefix fragments as-is, transforms stable suffix fragments through source-change and layout suffix metadata, then regenerates virtual source-newline fragments. Source-mapped active marker views still rebuild conservatively. Editor state now uses this path for normal hidden-marker editing. Benchmark result on 2026-04-21 with `--chars 100000 --docs 120 --iterations 3`: full editable index was about `1.67-1.73s`; incremental editable index was about `37-55ms` for local edit, remote edit, and AI append. `vp check --fix`, `vp test`, `vp run build`, and `vp run test:browser` pass; browser coverage stayed at 25 passing tests.
