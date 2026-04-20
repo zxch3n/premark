@@ -1,12 +1,13 @@
-import type {
-  BlockLayout,
-  CodeBlockContent,
-  DocumentLayout,
-  InlineFragment,
-  OpaqueLine,
-  TableCell,
-  TableContent,
-  TextLine,
+import {
+  measureGraphemeBoundaryXs,
+  type BlockLayout,
+  type CodeBlockContent,
+  type DocumentLayout,
+  type InlineFragment,
+  type OpaqueLine,
+  type TableCell,
+  type TableContent,
+  type TextLine,
 } from "@pretext-md/layout";
 
 export interface TilePalette {
@@ -267,6 +268,28 @@ function fontSize(font: string): number {
   return match === null ? 16 : Number(match[1]);
 }
 
+const EMOJI_LIKE_RE =
+  /[\p{Emoji_Presentation}\p{Extended_Pictographic}\p{Regional_Indicator}\uFE0F\u20E3]/u;
+const canvasGraphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+function drawMeasuredText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  baseline: number,
+  font: string,
+): void {
+  if (!EMOJI_LIKE_RE.test(text)) {
+    ctx.fillText(text, x, baseline);
+    return;
+  }
+
+  const boundaries = measureGraphemeBoundaryXs(text, font);
+  for (const part of canvasGraphemeSegmenter.segment(text)) {
+    ctx.fillText(part.segment, x + (boundaries[part.index] ?? 0), baseline);
+  }
+}
+
 function drawText(
   ctx: CanvasRenderingContext2D,
   text: string,
@@ -287,7 +310,7 @@ function drawText(
   const ascent = size * 0.8;
   const descent = size * 0.2;
   const baseline = top + (lineHeight - (ascent + descent)) / 2 + ascent;
-  ctx.fillText(text, x, baseline);
+  drawMeasuredText(ctx, text, x, baseline, font);
 }
 
 function fragmentColor(fragment: InlineFragment, palette: TilePalette): string {
