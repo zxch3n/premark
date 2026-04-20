@@ -58,6 +58,9 @@ export const InteractiveNativePrototype = () => {
   let pointerSession: PointerSelectionSession | null = null;
   let composing = false;
   let currentEditableIndex: EditableLayoutIndex = editor.editableIndex;
+  let renderedStyleElement: HTMLStyleElement | null = null;
+  let renderedDocumentElement: HTMLElement | null = null;
+  let renderedSurfaceElement: HTMLElement | null = null;
 
   root.innerHTML = `
     <style>${storyCss}</style>
@@ -103,7 +106,7 @@ export const InteractiveNativePrototype = () => {
     surface.style.height = `${layout.totalHeight}px`;
     overlay.style.width = `${layout.containerWidth}px`;
     overlay.style.height = `${layout.totalHeight}px`;
-    surface.innerHTML = `<style>${rendered.css}</style>${rendered.html}`;
+    renderSurfaceHtml(rendered);
     overlay.innerHTML = renderSelectionOverlay(layout, currentEditableIndex);
     debugSelection.textContent = JSON.stringify(
       createStorySelectionGeometry(currentEditableIndex),
@@ -112,6 +115,68 @@ export const InteractiveNativePrototype = () => {
     );
     debugSource.textContent = editor.markdown;
     syncTextareaBridge();
+  }
+
+  function renderSurfaceHtml(rendered: { html: string; css: string }) {
+    if (!surfaceOwnsRenderedTree()) {
+      surface.replaceChildren();
+      renderedStyleElement = null;
+      renderedDocumentElement = null;
+      renderedSurfaceElement = null;
+    }
+
+    if (renderedStyleElement === null) {
+      renderedStyleElement = document.createElement("style");
+      renderedStyleElement.dataset.premarkRenderer = "style";
+      surface.append(renderedStyleElement);
+    }
+    renderedStyleElement.textContent = rendered.css;
+
+    const nextDocument = parseRenderedDocument(rendered.html);
+    const nextSurface = nextDocument.querySelector<HTMLElement>(".pmd-surface");
+    if (nextSurface === null) {
+      throw new Error("Rendered Premark document is missing .pmd-surface");
+    }
+
+    if (renderedDocumentElement === null || renderedSurfaceElement === null) {
+      renderedDocumentElement = nextDocument;
+      renderedSurfaceElement = nextSurface;
+      surface.append(renderedDocumentElement);
+      return;
+    }
+
+    syncElementAttributes(renderedDocumentElement, nextDocument);
+    syncElementAttributes(renderedSurfaceElement, nextSurface);
+    renderedSurfaceElement.replaceChildren(...Array.from(nextSurface.childNodes));
+  }
+
+  function surfaceOwnsRenderedTree(): boolean {
+    return (
+      (renderedStyleElement === null || renderedStyleElement.parentElement === surface) &&
+      (renderedDocumentElement === null ||
+        (renderedDocumentElement.parentElement === surface &&
+          renderedSurfaceElement !== null &&
+          renderedDocumentElement.contains(renderedSurfaceElement)))
+    );
+  }
+
+  function parseRenderedDocument(html: string): HTMLElement {
+    const template = document.createElement("template");
+    template.innerHTML = html;
+    const documentElement = template.content.firstElementChild;
+    if (!(documentElement instanceof HTMLElement)) {
+      throw new Error("Rendered Premark document is empty");
+    }
+    return documentElement;
+  }
+
+  function syncElementAttributes(target: HTMLElement, source: HTMLElement) {
+    for (const attribute of Array.from(target.attributes)) {
+      target.removeAttribute(attribute.name);
+    }
+    for (const attribute of Array.from(source.attributes)) {
+      target.setAttribute(attribute.name, attribute.value);
+    }
   }
 
   function createRenderView(): {
