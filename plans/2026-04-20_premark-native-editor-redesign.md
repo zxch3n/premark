@@ -26,6 +26,7 @@ Last Updated: 2026-04-20
 - External research confirms the main risk areas: IME event order differs across specs/browsers, composition can abort if DOM/selection around it is changed, soft keyboards may not produce reliable keydown events, Selection API focus behavior varies, and mobile visual viewports change under OS keyboards.
 - Screenshot testing must be part of acceptance, not just a debugging aid. Screenshots should be small deterministic crops, stored as artifacts/baselines, and reviewed by Codex before claiming a phase is visually correct.
 - The hidden textarea bridge should first be a pure model: active same-block selections mirror only the current block source, cross-block selections keep an empty bridge value and route replacement/deletion through the editor source selection.
+- Selection painting should be split into a geometry contract and renderer implementation. The geometry contract can be tested deterministically before browser/Canvas screenshots exist.
 
 ## Removed From This Branch
 
@@ -92,10 +93,10 @@ Acceptance:
 
 Goal: paint native selection and caret on the rendered surface.
 
-- [ ] Add selection range to renderer input.
+- [x] Add selection range to renderer input.
 - [ ] Paint multi-line and cross-block selection rects.
 - [ ] Paint caret rect with blink disabled in tests.
-- [ ] Support collapsed, forward, backward, and multi-block selections.
+- [x] Support collapsed, forward, backward, and multi-block selections.
 - [ ] Support mouse drag selection, drag reversal, keyboard arrows, Shift+arrows, and Shift+Command+arrows.
 - [ ] Define mobile selection behavior for touch long press, drag handles, soft keyboard focus, scroll, and zoom.
 - [ ] Add tests for select-all, Home/End, PageUp/PageDown, line boundary, word boundary, document boundary, and direction-preserving selection extension.
@@ -202,3 +203,4 @@ Acceptance:
 - Added `EditorDocumentState` to tie the in-memory adapter, parser state, inline source map, layout, editable index, selection, and composition session into one reusable core object for later DOM/Canvas editor views.
 - Added grapheme sidecar helpers for segmentation, caret snapping, and delete backward/forward ranges over combining marks, emoji ZWJ sequences, flags, skin tones, and CJK text.
 - Added a pure textarea bridge snapshot/diff model. Active-block input maps textarea offsets back to source ranges, cross-block replacement/deletion routes through the editor selection, and tests cover collapsed caret at a next-block boundary so it is not misclassified as cross-block.
+- Added `SelectionGeometry` as the renderer-facing selection/caret contract. Tests cover collapsed caret, forward selection, backward selection, and cross-block multi-rect geometry. This completes the core geometry layer only; DOM/Canvas painting and screenshots are still open.
