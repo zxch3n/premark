@@ -117,8 +117,8 @@ Goal: receive real OS text input while keeping Premark as the visible editor.
 - [ ] Convert `beforeinput` / `input` / keyboard commands into source operations.
 - [ ] Handle delete/backspace, Enter, paste, undo/redo.
 - [ ] Keep bridge content minimal to avoid DOM editor behavior becoming the product.
-- [ ] Add an input event trace recorder for `keydown`, `beforeinput`, `input`, `keyup`, `selectionchange`, `composition*`, `paste`, `copy`, and `cut`.
-- [ ] Add tests proving text insertion does not rely on keydown, so mobile autocorrect/autosuggest/swipe-like input can be modeled as input operations.
+- [x] Add an input event trace recorder for `keydown`, `beforeinput`, `input`, `keyup`, `selectionchange`, `composition*`, `paste`, `copy`, and `cut`.
+- [x] Add tests proving text insertion does not rely on keydown, so mobile autocorrect/autosuggest/swipe-like input can be modeled as input operations.
 - [ ] Add clipboard tests for Markdown, plain text, HTML, cross-block cut, cross-block paste, and paste while a selection is active.
 - [ ] Add focus/textarea-anchoring tests for scroll, zoom, visual viewport resize, and editor blur/refocus.
 
@@ -197,3 +197,4 @@ Acceptance:
 - Researched browser/editor pitfalls from W3C/MDN/Chrome/CodeMirror/ProseMirror/Slate/Draft/Playwright/Unicode sources and added a dedicated automation plus screenshot audit phase.
 - Began implementation with `@pretext-md/editor`: in-memory CRDT-agnostic document adapter, stable ranges, source edit operations, virtual composition session, local undo manager, editable layout sidecar index, pitfall matrix tracker, and deterministic core tests.
 - Verified initial implementation with `vp check --fix`, `vp test`, and `vp run build`. Existing unrelated warnings remain in `packages/wiki-canvas/src/layout.ts` and `tools/wiki-canvas/src/cli.ts`.
+- Added input event trace normalization for composition event-order variants, soft-keyboard-style input without keydown, clipboard events, selectionchange events, and Shift/Command arrow keyboard selection intents.

@@ -10,6 +10,7 @@ export {
   createInMemoryTextDocumentAdapter,
   InMemoryTextDocumentAdapter,
 } from "./memory-adapter.ts";
+export { InputEventTraceRecorder, normalizeInputTrace } from "./input-trace.ts";
 export {
   createResolvedRange,
   defaultRangeOptions,
