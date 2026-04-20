@@ -209,6 +209,21 @@ test.describe("Premark native editor story", () => {
     await insertRemoteText(page, 0, "> Remote edit\n\n");
     await expect(surface).toContainText("Remote edit");
     await editor.screenshot({ path: testInfo.outputPath("native-editor-shot-remote.png") });
+
+    await page.goto(screenshotStoryUrl);
+    await expect(surface).toContainText("Native rendered Markdown");
+    await insertRemoteText(
+      page,
+      (await editorMarkdown(page)).length,
+      "\n\n```ts\nconst x = 1;\n```",
+    );
+    await expect(surface).toContainText("const x = 1;");
+    await setSourceSelection(
+      page,
+      await sourceOffset(page, "const x"),
+      await sourceOffset(page, "const x = 1;", "end"),
+    );
+    await editor.screenshot({ path: testInfo.outputPath("native-editor-shot-code-block.png") });
   });
 
   test("captures high-dpi DOM selection crop", async ({ browser }, testInfo) => {
