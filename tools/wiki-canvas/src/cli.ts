@@ -5,7 +5,7 @@ import process from "node:process";
 
 import { createServer } from "vite";
 
-import { resolveEdges, scanMarkdown, type ScannedNote } from "./scan.ts";
+import { resolveEdges, scanMarkdown } from "./scan.ts";
 
 interface CliOptions {
   root: string;

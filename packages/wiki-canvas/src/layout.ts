@@ -203,7 +203,7 @@ export function layoutMasonry(tiles: MasonryTile[], options: MasonryOptions): Si
   const derivedCols = Math.max(1, Math.round(Math.sqrt(Math.max(1, (totalH * aspect) / colStep))));
   const cols = options.columns ?? derivedCols;
 
-  const colHeights = new Array<number>(cols).fill(0);
+  const colHeights = Array.from({ length: cols }, () => 0);
   const placements: SizedPlacement[] = [];
   for (const tile of order) {
     // Shortest column wins.
