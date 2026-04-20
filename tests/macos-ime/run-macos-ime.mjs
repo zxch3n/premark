@@ -288,6 +288,40 @@ async function frontmostProcessName() {
   );
 }
 
+function nsWorkspaceFrontmostApplication() {
+  const result = spawnSync(
+    "swift",
+    [
+      "-e",
+      `import AppKit
+let app = NSWorkspace.shared.frontmostApplication
+print([(app?.localizedName ?? ""), (app?.bundleIdentifier ?? ""), String(app?.processIdentifier ?? -1)].joined(separator: "\\t"))`,
+    ],
+    { cwd: root, encoding: "utf8" },
+  );
+  if (result.status !== 0) {
+    return {
+      error: result.stderr.trim() || result.stdout.trim() || `swift exited ${result.status}`,
+    };
+  }
+  const [name = "", bundleIdentifier = "", processIdentifier = ""] = result.stdout
+    .trim()
+    .split("\t");
+  return {
+    name,
+    bundleIdentifier,
+    processIdentifier: Number.parseInt(processIdentifier, 10),
+  };
+}
+
+async function foregroundDiagnostics(browserProcessName) {
+  return {
+    browserProcessName,
+    systemEventsFrontmost: await frontmostProcessName(),
+    nsWorkspaceFrontmost: nsWorkspaceFrontmostApplication(),
+  };
+}
+
 async function foregroundBrowser(browserProcessName) {
   activateBrowser(browserProcessName);
   return (await frontmostProcessName()) === browserProcessName;
@@ -309,7 +343,9 @@ async function focusBridge(page, browserProcessName) {
   if ((await activeElement.jsonValue()) !== true) {
     throw new Error("Hidden textarea bridge did not become the active element");
   }
-  console.log(`[macos-ime] frontmost after bridge focus: ${await frontmostProcessName()}`);
+  const frontmost = await frontmostProcessName();
+  console.log(`[macos-ime] frontmost after bridge focus: ${frontmost}`);
+  return frontmost;
 }
 
 function sendSystemKeyCodes(browserProcessName, keyCodes) {
@@ -362,7 +398,7 @@ function captureScreenArtifact(name) {
   console.log(`[macos-ime] screen capture written: ${path}`);
 }
 
-async function writeImeFailureArtifact(page, name, message) {
+async function writeImeFailureArtifact(page, name, message, diagnostics = {}) {
   mkdirSync(join(root, "test-results/macos-ime"), { recursive: true });
   const sourceText = await page.locator("[data-debug-source]").textContent();
   const events = await readEventProbe(page);
@@ -371,7 +407,7 @@ async function writeImeFailureArtifact(page, name, message) {
     .screenshot({ path: join(root, `test-results/macos-ime/${name}.png`) });
   writeFileSync(
     join(root, `test-results/macos-ime/${name}.json`),
-    `${JSON.stringify({ message, events, source: sourceText }, null, 2)}\n`,
+    `${JSON.stringify({ message, ...diagnostics, events, source: sourceText }, null, 2)}\n`,
   );
   return { events, sourceText };
 }
@@ -667,7 +703,22 @@ async function main() {
     if (sources.includes(usSourceID)) {
       const selectedUS = swiftInputSource("select", usSourceID);
       console.log(`[macos-ime] selected input source for HID probe: ${selectedUS}`);
-      await focusBridge(page, browserProcessName);
+      const frontmost = await focusBridge(page, browserProcessName);
+      if (frontmost !== browserProcessName) {
+        const diagnostics = await foregroundDiagnostics(browserProcessName);
+        const message =
+          `skipped real ${selectedScenarioSetName} IME scenarios: cannot make ` +
+          `${browserProcessName || "browser"} the foreground app before the HID probe ` +
+          `(frontmost is ${frontmost || "unknown"}). Real IME automation requires global key events; ` +
+          "targeted CGEventPostToPid bypasses input-method composition.";
+        await writeImeFailureArtifact(page, "hid-probe-no-foreground", message, diagnostics);
+        writeFileSync(join(root, "test-results/macos-ime/ime-skip.txt"), `${message}\n`);
+        if (strictRealIme) {
+          throw new Error(`[macos-ime] ${message}`);
+        }
+        console.log(`[macos-ime] ${message}`);
+        return;
+      }
       sendHidKeyCodes(browserProcessName, [0, 11, 8]);
       try {
         await page.waitForFunction(
@@ -679,7 +730,9 @@ async function main() {
         const message =
           `skipped real ${selectedScenarioSetName} IME scenarios: global HID key events did not reach the foreground browser. ` +
           "Real IME automation requires global key events; targeted CGEventPostToPid bypasses input-method composition.";
-        await writeImeFailureArtifact(page, "hid-probe-failed", message);
+        await writeImeFailureArtifact(page, "hid-probe-failed", message, {
+          foreground: await foregroundDiagnostics(browserProcessName),
+        });
         writeFileSync(join(root, "test-results/macos-ime/ime-skip.txt"), `${message}\n`);
         if (strictRealIme) {
           throw new Error(`[macos-ime] ${message}`, { cause: error });
@@ -705,6 +758,10 @@ async function main() {
       const message =
         `skipped real ${selectedScenarioSetName} IME scenarios: cannot make ${browserProcessName || "browser"} the foreground app ` +
         `(frontmost is ${frontmost}). Targeted CGEventPostToPid is not enough for IME because it bypasses macOS input-method composition.`;
+      writeFileSync(
+        join(root, "test-results/macos-ime/ime-skipped-no-foreground.json"),
+        `${JSON.stringify(await foregroundDiagnostics(browserProcessName), null, 2)}\n`,
+      );
       writeFileSync(join(root, "test-results/macos-ime/ime-skip.txt"), `${message}\n`);
       if (strictRealIme) {
         throw new Error(`[macos-ime] ${message}`);
