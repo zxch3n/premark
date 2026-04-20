@@ -12,6 +12,7 @@ import {
 } from "@codemirror/view";
 
 export interface PremarkLivePreviewOptions {
+  normalizePreviewDocument?: boolean;
   previewAll?: boolean;
   onChange?: (doc: string, update: ViewUpdate) => void;
 }
@@ -36,7 +37,10 @@ export function createCodeMirrorOverlay(
   doc: string,
   options: PremarkLivePreviewOptions = {},
 ): EditorView {
-  const editorDoc = options.previewAll === true ? normalizePreviewDocument(doc) : doc;
+  const editorDoc =
+    options.previewAll === true && options.normalizePreviewDocument !== false
+      ? normalizePreviewDocument(doc)
+      : doc;
   return new EditorView({
     parent,
     state: EditorState.create({

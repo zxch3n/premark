@@ -1,7 +1,7 @@
 import { defaultKeymap, history, historyKeymap, redo } from "@codemirror/commands";
 import { markdown as markdownLanguage } from "@codemirror/lang-markdown";
 import { EditorState } from "@codemirror/state";
-import { EditorView, keymap, type ViewUpdate } from "@codemirror/view";
+import { EditorView, keymap } from "@codemirror/view";
 
 import { createCodeMirrorOverlay } from "../apps/playground/src/visual-parity/codemirror-overlay.ts";
 import { createHighlighter } from "../packages/highlight/src/index.ts";
@@ -17,9 +17,9 @@ export default {
 
 const INITIAL_MARKDOWN = `# Rendered Markdown Canvas
 
-Click this rendered paragraph. The active block is replaced by a transparent CodeMirror editor in the same canvas position.
+Click any rendered block. The whole note becomes a transparent CodeMirror editor in the same canvas position.
 
-- Selection, typing, paste, undo, redo, and IME stay inside CodeMirror.
+- Multi-line selection, typing, paste, undo, redo, and IME stay inside CodeMirror.
 - Premark keeps the rendered canvas in sync while the rest of the document remains rendered.
 
 > The overlay should feel like editing the rendered block, not opening a floating card.
@@ -57,7 +57,7 @@ export const RenderedCanvasOverlay = () => {
     <style>${storyCss}</style>
     <div class="md-editor-toolbar">
       <strong>Rendered canvas overlay</strong>
-      <span data-status>Click a rendered block to edit.</span>
+      <span data-status>Click the rendered note to edit.</span>
       <label><input data-debug type="checkbox" /> Debug outline</label>
       <button data-commit type="button" disabled>Commit</button>
       <button data-cancel type="button" disabled>Cancel</button>
@@ -81,9 +81,6 @@ export const RenderedCanvasOverlay = () => {
     readonly host: HTMLElement;
     readonly editor: EditorView;
     readonly originalMarkdown: string;
-    sourceFrom: number;
-    sourceTo: number;
-    blockIndex: number;
   }
 
   let active: ActiveOverlay | null = null;
@@ -109,83 +106,46 @@ export const RenderedCanvasOverlay = () => {
 
     renderedRoot.querySelectorAll<HTMLElement>(".pmd-block").forEach((block, index) => {
       block.dataset.blockIndex = String(index);
-      block.toggleAttribute("data-active-block", active?.blockIndex === index);
-      block.addEventListener("click", () => openOverlay(index));
+      block.addEventListener("click", () => openOverlay());
     });
 
     positionActiveOverlay();
     updateControls();
   }
 
-  function openOverlay(blockIndex: number): void {
-    destroyOverlay();
-
-    const document = requireDocument(workspace.getDocument("story"));
-    const record = document.records[blockIndex];
-    const block = document.layout.blocks[blockIndex];
-    if (record === undefined || block === undefined) {
+  function openOverlay(): void {
+    if (active !== null) {
+      active.editor.focus();
       return;
     }
+
+    destroyOverlay();
 
     const host = documentElement("div", "md-editor-active-overlay");
     overlayLayer.append(host);
     active = {
       host,
-      editor: createCodeMirrorOverlay(host, markdown.slice(record.source.from, record.source.to), {
-        onChange: (_doc, update) => applyOverlayChange(update),
+      editor: createCodeMirrorOverlay(host, markdown, {
+        normalizePreviewDocument: false,
         previewAll: true,
+        onChange: (doc) => applyOverlayChange(doc),
       }),
       originalMarkdown: markdown,
-      sourceFrom: record.source.from,
-      sourceTo: record.source.to,
-      blockIndex,
     };
     positionActiveOverlay();
     renderCanvas();
     active.editor.focus();
-    status.textContent = "Editing rendered block through CodeMirror.";
+    status.textContent = "Editing the rendered note through CodeMirror.";
   }
 
-  function applyOverlayChange(update: ViewUpdate): void {
+  function applyOverlayChange(doc: string): void {
     if (active === null) {
       return;
     }
 
-    const changes: Array<{ from: number; to: number; text: string }> = [];
-    update.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
-      changes.push({
-        from: active!.sourceFrom + fromA,
-        to: active!.sourceFrom + toA,
-        text: inserted.toString(),
-      });
-    });
-
-    let nextMarkdown = markdown;
-    let delta = 0;
-    for (const change of changes.toReversed()) {
-      nextMarkdown = `${nextMarkdown.slice(0, change.from)}${change.text}${nextMarkdown.slice(change.to)}`;
-      delta += change.text.length - (change.to - change.from);
-    }
-
-    active.sourceTo += delta;
-    markdown = nextMarkdown;
+    markdown = doc;
     workspace.upsertDocument({ id: "story", title: "Story", markdown });
-    syncActiveBlockIndex();
     renderCanvas();
-  }
-
-  function syncActiveBlockIndex(): void {
-    if (active === null) {
-      return;
-    }
-    const document = requireDocument(workspace.getDocument("story"));
-    const index = document.records.findIndex(
-      (record) =>
-        active !== null &&
-        record.source.from <= active.sourceFrom &&
-        active.sourceFrom <= record.source.to,
-    );
-    active.blockIndex = Math.max(0, index);
   }
 
   function positionActiveOverlay(): void {
@@ -193,18 +153,14 @@ export const RenderedCanvasOverlay = () => {
       return;
     }
     const document = requireDocument(workspace.getDocument("story"));
-    const block = document.layout.blocks[active.blockIndex];
-    if (block === undefined) {
-      return;
-    }
-    active.host.style.transform = `translate(${block.contentBox.x}px, ${block.y}px)`;
-    active.host.style.width = `${block.contentBox.width}px`;
-    active.host.style.minHeight = `${block.height}px`;
+    active.host.style.transform = "translate(0px, 0px)";
+    active.host.style.width = `${document.layout.containerWidth}px`;
+    active.host.style.minHeight = `${document.layout.totalHeight}px`;
   }
 
   function commit(): void {
     destroyOverlay();
-    status.textContent = "Committed. Click another rendered block to edit.";
+    status.textContent = "Committed. Click the rendered note to edit.";
     renderCanvas();
   }
 
@@ -214,7 +170,7 @@ export const RenderedCanvasOverlay = () => {
       workspace.upsertDocument({ id: "story", title: "Story", markdown });
     }
     destroyOverlay();
-    status.textContent = "Canceled. Click a rendered block to edit.";
+    status.textContent = "Canceled. Click the rendered note to edit.";
     renderCanvas();
   }
 
@@ -227,6 +183,7 @@ export const RenderedCanvasOverlay = () => {
   function updateControls(): void {
     commitButton.disabled = active === null;
     cancelButton.disabled = active === null;
+    root.toggleAttribute("data-editing", active !== null);
   }
 
   return root;
@@ -359,7 +316,7 @@ const renderedCanvasCss = `
     cursor: text;
   }
 
-  .md-editor-rendered .pmd-block[data-active-block] {
+  .md-editor-story[data-editing] .md-editor-rendered {
     visibility: hidden;
   }
 
