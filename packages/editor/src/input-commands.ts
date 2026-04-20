@@ -35,6 +35,9 @@ export function applyInputIntent(
     case "selection-change":
       editor.setSelection(intent.anchor, intent.head);
       return { type: "selection" };
+    case "select-all":
+      editor.setSelection(0, editor.markdown.length);
+      return { type: "selection" };
     case "keyboard-selection":
       return applyKeyboardSelectionIntent(editor, intent)
         ? { type: "selection" }

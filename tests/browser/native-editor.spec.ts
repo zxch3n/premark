@@ -140,6 +140,12 @@ test.describe("Premark native editor story", () => {
     expect(lineBoundarySelection.isCollapsed).toBe(false);
     expect(lineBoundarySelection.anchorOffset).toBe(wordMoved.headOffset);
     expect(lineBoundarySelection.headOffset).toBeGreaterThan(wordMoved.headOffset);
+
+    await page.keyboard.press("Control+A");
+    const allSelection = await readSelection(page);
+    expect(allSelection.isCollapsed).toBe(false);
+    expect(allSelection.range.from).toBe(0);
+    expect(allSelection.range.to).toBeGreaterThan(100);
   });
 
   test("supports browser paste and cut events through clipboard intents", async ({ page }) => {

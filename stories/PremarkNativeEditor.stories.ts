@@ -195,9 +195,10 @@ export const InteractiveNativePrototype = () => {
         shiftKey: event.shiftKey,
         metaKey: event.metaKey,
         altKey: event.altKey,
+        ctrlKey: event.ctrlKey,
       },
     ])[0];
-    if (intent?.type !== "keyboard-selection") {
+    if (intent?.type !== "keyboard-selection" && intent?.type !== "select-all") {
       return;
     }
 

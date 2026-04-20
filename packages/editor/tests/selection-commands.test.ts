@@ -133,6 +133,18 @@ describe("selection commands", () => {
     expect(geometry.headOffset).toBe(
       editor.editableIndex.sourceLineRangeAtOffset(text.indexOf("beta")).to,
     );
+
+    applyKeyboardSelectionIntent(editor, {
+      type: "keyboard-selection",
+      key: "Home",
+      by: "line-boundary",
+      extend: false,
+    });
+
+    expect(editor.selectionSourceRange).toEqual({
+      from: editor.editableIndex.sourceLineRangeAtOffset(text.indexOf("beta")).from,
+      to: editor.editableIndex.sourceLineRangeAtOffset(text.indexOf("beta")).from,
+    });
   });
 
   it("moves to document boundaries for Shift+Command+Arrow style intents", () => {
@@ -184,6 +196,16 @@ describe("selection commands", () => {
       extend: false,
     });
 
-    expect(editor.selectionSourceRange.from).toBeGreaterThan(0);
+    const pageDownOffset = editor.selectionSourceRange.from;
+    expect(pageDownOffset).toBeGreaterThan(0);
+
+    applyKeyboardSelectionIntent(editor, {
+      type: "keyboard-selection",
+      key: "PageUp",
+      by: "page",
+      extend: false,
+    });
+
+    expect(editor.selectionSourceRange.from).toBeLessThan(pageDownOffset);
   });
 });

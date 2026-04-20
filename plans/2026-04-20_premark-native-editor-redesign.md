@@ -111,7 +111,7 @@ Goal: paint native selection and caret on the rendered surface.
 - [x] Add pure command support for mouse drag selection, drag reversal, keyboard arrows, Shift+arrows, and Shift+Command+arrows.
 - [x] Wire mouse and keyboard selection commands to browser events in the prototype.
 - [ ] Define mobile selection behavior for touch long press, drag handles, soft keyboard focus, scroll, and zoom.
-- [ ] Add tests for select-all, Home/End, PageUp/PageDown, line boundary, word boundary, document boundary, and direction-preserving selection extension.
+- [x] Add tests for select-all, Home/End, PageUp/PageDown, line boundary, word boundary, document boundary, and direction-preserving selection extension.
 - [ ] Add screenshot tests for forward selection, backward selection, wrapped-line selection, cross-block selection, active inline marker selection, and high-DPI canvas selection.
 - [x] Add visual tests for selection overlays independent of CodeMirror.
 
@@ -246,3 +246,4 @@ Acceptance:
 - Added a bidi fixture for mixed English, Hebrew, Arabic, numbers, strong markers, and link markers. Current support is explicitly limited to logical UTF-16 source-offset hit-test behavior; precise visual-order bidi caret movement remains a later task.
 - Reconciled plan state with the implemented DOM prototype: Premark paints caret/selection overlays without CodeMirror, browser tests cover rendered click, cross-block drag, typing, paste/cut, and deterministic screenshot crops.
 - Added composition cancel coverage: virtual preedit updates leave source and undo history unchanged, cancel clears the composition view, and the original selected source range is preserved.
+- Added select-all as an explicit normalized input intent and expanded keyboard selection coverage for Home/End, PageUp/PageDown, word, line boundary, document boundary, and anchor-preserving extension. Browser coverage now includes Control+A through the Storybook input bridge.

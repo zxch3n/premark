@@ -57,6 +57,7 @@ export type NormalizedInputIntent =
       readonly markdown?: string;
     }
   | { readonly type: "selection-change"; readonly anchor: number; readonly head: number }
+  | { readonly type: "select-all" }
   | {
       readonly type: "keyboard-selection";
       readonly key: string;
@@ -231,7 +232,12 @@ function keyboardSelectionIntent(event: {
   readonly shiftKey?: boolean;
   readonly metaKey?: boolean;
   readonly altKey?: boolean;
+  readonly ctrlKey?: boolean;
 }): NormalizedInputIntent | null {
+  if ((event.metaKey === true || event.ctrlKey === true) && event.key.toLowerCase() === "a") {
+    return { type: "select-all" };
+  }
+
   if (
     !event.key.startsWith("Arrow") &&
     event.key !== "Home" &&
