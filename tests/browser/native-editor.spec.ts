@@ -1104,6 +1104,56 @@ test.describe("Premark native editor story", () => {
     expect(allSelection.range.to).toBeGreaterThan(100);
   });
 
+  test("applies Markdown list and blockquote editing behavior through browser input", async ({
+    page,
+  }) => {
+    await page.goto(storyUrl);
+
+    const surface = page.locator("[data-editor-surface]");
+    const bridge = page.locator("[data-input-bridge]");
+    const source = page.locator("[data-debug-source]");
+    await expect(surface).toContainText("Native rendered Markdown");
+
+    await setSourceCaret(page, await sourceOffset(page, "source offsets.", "end"));
+    await bridge.focus();
+    await page.keyboard.press("Enter");
+    await expect(source).toContainText("- Selection is stored as source offsets.\n- ");
+
+    await page.keyboard.type("continued");
+    await expect(source).toContainText("- continued");
+
+    const hiddenLine = await sourceOffset(page, "- The hidden textarea");
+    await setSourceCaret(page, hiddenLine);
+    await bridge.focus();
+    await page.keyboard.press("Tab");
+    expect(await editorMarkdown(page)).toContain("\n  - The hidden textarea");
+
+    await page.keyboard.down("Shift");
+    await page.keyboard.press("Tab");
+    await page.keyboard.up("Shift");
+    expect(await editorMarkdown(page)).toContain("\n- The hidden textarea");
+    expect(await editorMarkdown(page)).not.toContain("\n  - The hidden textarea");
+
+    const end = (await editorMarkdown(page)).length;
+    await page.evaluate(
+      (offset) =>
+        (
+          window as typeof window & {
+            __premarkNativeEditor?: { insertRemote(offset: number, text: string): void };
+          }
+        ).__premarkNativeEditor?.insertRemote(offset, "\n\n> quoted"),
+      end,
+    );
+    await setSourceCaret(page, (await editorMarkdown(page)).length);
+    await bridge.focus();
+    await page.keyboard.press("Enter");
+    await expect(source).toContainText("> quoted\n> ");
+
+    await page.keyboard.press("Enter");
+    expect(await editorMarkdown(page)).toContain("> quoted\n");
+    expect(await editorMarkdown(page)).not.toContain("> quoted\n> ");
+  });
+
   test("supports browser paste and cut events through clipboard intents", async ({ page }) => {
     await page.goto(storyUrl);
 

@@ -5,6 +5,8 @@ import {
   applyInputIntent,
   createInMemoryEditorDocumentState,
   LocalUndoManager,
+  normalizeInputTrace,
+  toggleTaskCheckbox,
 } from "../src/index.ts";
 
 installNodeCanvas();
@@ -80,6 +82,71 @@ describe("applyInputIntent", () => {
       from: split + 1,
       to: split + 1,
     });
+  });
+
+  it("continues unordered, ordered and task list items on Enter", () => {
+    const unordered = createInMemoryEditorDocumentState("- one", 600);
+    unordered.setSelection(unordered.markdown.length, unordered.markdown.length);
+
+    applyInputIntent(unordered, { type: "insert-paragraph" });
+
+    expect(unordered.markdown).toBe("- one\n- ");
+    expect(unordered.selectionSourceRange).toEqual({
+      from: unordered.markdown.length,
+      to: unordered.markdown.length,
+    });
+
+    const ordered = createInMemoryEditorDocumentState("7. seven", 600);
+    ordered.setSelection(ordered.markdown.length, ordered.markdown.length);
+
+    applyInputIntent(ordered, { type: "insert-paragraph" });
+
+    expect(ordered.markdown).toBe("7. seven\n8. ");
+
+    const task = createInMemoryEditorDocumentState("- [x] done", 600);
+    task.setSelection(task.markdown.length, task.markdown.length);
+
+    applyInputIntent(task, { type: "insert-paragraph" });
+
+    expect(task.markdown).toBe("- [x] done\n- [ ] ");
+  });
+
+  it("exits empty list and blockquote items on Enter", () => {
+    const list = createInMemoryEditorDocumentState("Before\n- \nAfter", 600);
+    const listCaret = list.markdown.indexOf("- ") + "- ".length;
+    list.setSelection(listCaret, listCaret);
+
+    applyInputIntent(list, { type: "insert-paragraph" });
+
+    expect(list.markdown).toBe("Before\n\nAfter");
+    expect(list.selectionSourceRange).toEqual({
+      from: "Before\n".length,
+      to: "Before\n".length,
+    });
+
+    const quote = createInMemoryEditorDocumentState("> ", 600);
+    quote.setSelection(quote.markdown.length, quote.markdown.length);
+
+    applyInputIntent(quote, { type: "insert-paragraph" });
+
+    expect(quote.markdown).toBe("");
+    expect(quote.selectionSourceRange).toEqual({ from: 0, to: 0 });
+  });
+
+  it("continues blockquotes and blockquote list items on Enter", () => {
+    const quote = createInMemoryEditorDocumentState("> quoted", 600);
+    quote.setSelection(quote.markdown.length, quote.markdown.length);
+
+    applyInputIntent(quote, { type: "insert-paragraph" });
+
+    expect(quote.markdown).toBe("> quoted\n> ");
+
+    const quoteList = createInMemoryEditorDocumentState("> - nested", 600);
+    quoteList.setSelection(quoteList.markdown.length, quoteList.markdown.length);
+
+    applyInputIntent(quoteList, { type: "insert-paragraph" });
+
+    expect(quoteList.markdown).toBe("> - nested\n> - ");
   });
 
   it("edits inline control characters exactly when the caret is inside them", () => {
@@ -173,6 +240,93 @@ describe("applyInputIntent", () => {
       from: linkSuffixOffset + 1,
       to: linkSuffixOffset + 1,
     });
+  });
+
+  it("indents and outdents selected list lines through Tab key intents", () => {
+    const editor = createInMemoryEditorDocumentState("- one\n- two", 600);
+    const twoStart = editor.markdown.indexOf("- two");
+    editor.setSelection(twoStart, twoStart);
+
+    const indent = normalizeInputTrace([{ type: "keydown", key: "Tab" }])[0]!;
+    expect(indent).toEqual({ type: "line-indent", direction: "in" });
+    applyInputIntent(editor, indent);
+
+    expect(editor.markdown).toBe("- one\n  - two");
+    expect(editor.selectionSourceRange).toEqual({
+      from: twoStart + 2,
+      to: twoStart + 2,
+    });
+
+    const outdent = normalizeInputTrace([{ type: "keydown", key: "Tab", shiftKey: true }])[0]!;
+    expect(outdent).toEqual({ type: "line-indent", direction: "out" });
+    applyInputIntent(editor, outdent);
+
+    expect(editor.markdown).toBe("- one\n- two");
+    expect(editor.selectionSourceRange).toEqual({
+      from: twoStart,
+      to: twoStart,
+    });
+  });
+
+  it("keeps Enter and Tab source-exact inside fenced code blocks", () => {
+    const editor = createInMemoryEditorDocumentState("```ts\nconst x = 1\n```", 600);
+    const codeOffset = editor.markdown.indexOf("x =") + 1;
+    editor.setSelection(codeOffset, codeOffset);
+
+    applyInputIntent(editor, { type: "insert-paragraph" });
+
+    expect(editor.markdown).toBe("```ts\nconst x\n = 1\n```");
+    expect(editor.selectionSourceRange).toEqual({
+      from: codeOffset + 1,
+      to: codeOffset + 1,
+    });
+
+    const indent = normalizeInputTrace([{ type: "keydown", key: "Tab" }])[0]!;
+    applyInputIntent(editor, indent);
+
+    expect(editor.markdown).toBe("```ts\nconst x\n\t = 1\n```");
+    expect(editor.selectionSourceRange).toEqual({
+      from: codeOffset + 2,
+      to: codeOffset + 2,
+    });
+  });
+
+  it("keeps paste and multi-line replacement source-exact inside fenced code blocks", () => {
+    const editor = createInMemoryEditorDocumentState("```ts\nalpha\nbeta\n```", 600);
+    const from = editor.markdown.indexOf("alpha");
+    const to = editor.markdown.indexOf("beta") + "beta".length;
+    editor.setSelection(from, to);
+
+    applyInputIntent(editor, {
+      type: "clipboard",
+      action: "paste",
+      markdown: "x\ny",
+    });
+
+    expect(editor.markdown).toBe("```ts\nx\ny\n```");
+    expect(editor.selectionSourceRange).toEqual({
+      from: from + "x\ny".length,
+      to: from + "x\ny".length,
+    });
+  });
+
+  it("toggles task checkboxes without changing the current selection", () => {
+    const editor = createInMemoryEditorDocumentState("- [ ] todo\n- [x] done", 600);
+    const selectionFrom = editor.markdown.indexOf("todo");
+    editor.setSelection(selectionFrom, selectionFrom + "todo".length);
+
+    const result = toggleTaskCheckbox(editor, selectionFrom);
+
+    expect(result.type).toBe("edit");
+    expect(editor.markdown).toBe("- [x] todo\n- [x] done");
+    expect(editor.selectionSourceRange).toEqual({
+      from: selectionFrom,
+      to: selectionFrom + "todo".length,
+    });
+
+    toggleTaskCheckbox(editor, editor.markdown.indexOf("done"));
+
+    expect(editor.markdown).toBe("- [x] todo\n- [ ] done");
   });
 
   it("applies browser selection-change intents to the editor model", () => {

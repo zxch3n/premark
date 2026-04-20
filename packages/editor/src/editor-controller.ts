@@ -12,7 +12,11 @@ import {
   type EditorDocumentState,
   type EditorDocumentStateOptions,
 } from "./editor-state.ts";
-import { applyInputIntent, type AppliedInputIntent } from "./input-commands.ts";
+import {
+  applyInputIntent,
+  toggleTaskCheckbox as toggleTaskCheckboxIntent,
+  type AppliedInputIntent,
+} from "./input-commands.ts";
 import type { NormalizedInputIntent } from "./input-trace.ts";
 import { createActiveMarkerRevealMarkdown, type ActiveMarkdownControl } from "./marker-reveal.ts";
 import { LocalUndoManager } from "./undo.ts";
@@ -373,6 +377,12 @@ export class PremarkEditorController {
       this.emitCompositionChange();
     }
     return applied;
+  }
+
+  toggleTaskCheckbox(offset = this.selection().from): AppliedInputIntent {
+    return this.runDocumentMutation(() =>
+      toggleTaskCheckboxIntent(this.state, offset, { undoManager: this.undoManager }),
+    );
   }
 
   undo(): boolean {

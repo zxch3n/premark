@@ -88,7 +88,7 @@ export type {
   TextareaBridgeMode,
   TextareaBridgeSnapshot,
 } from "./input-bridge.ts";
-export { applyInputIntent } from "./input-commands.ts";
+export { applyInputIntent, toggleTaskCheckbox } from "./input-commands.ts";
 export type { AppliedInputIntent, ApplyInputIntentOptions } from "./input-commands.ts";
 export { InputEventTraceRecorder, normalizeInputTrace } from "./input-trace.ts";
 export {

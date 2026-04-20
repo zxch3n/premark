@@ -29,7 +29,7 @@ export function applyInputIntent(
     case "insert-text":
       return replaceSelection(editor, intent.text, options);
     case "insert-paragraph":
-      return replaceSelection(editor, "\n", options);
+      return applyInsertParagraphIntent(editor, options);
     case "delete":
       return applyDeleteIntent(editor, intent.direction, options);
     case "selection-change":
@@ -42,6 +42,8 @@ export function applyInputIntent(
       return applyKeyboardSelectionIntent(editor, intent)
         ? { type: "selection" }
         : { type: "ignored" };
+    case "line-indent":
+      return applyLineIndentIntent(editor, intent.direction, options);
     case "composition-start":
       editor.startComposition();
       return { type: "composition-start" };
@@ -80,6 +82,34 @@ export function applyInputIntent(
   }
 }
 
+export function toggleTaskCheckbox(
+  editor: EditorDocumentState,
+  offset = editor.selectionSourceRange.from,
+  options: ApplyInputIntentOptions = {},
+): AppliedInputIntent {
+  const line = lineAtOffset(editor.markdown, offset);
+  const marker = taskMarkerRange(line.text, line.start);
+  if (marker === null) {
+    return { type: "ignored" };
+  }
+  const next = marker.checked ? " " : "x";
+  return {
+    type: "edit",
+    applied: applySourceEdit(
+      editor,
+      {
+        type: "replace",
+        range: {
+          from: marker.checkboxOffset,
+          to: marker.checkboxOffset + 1,
+        },
+        insert: next,
+      },
+      options,
+    ),
+  };
+}
+
 function replaceSelection(
   editor: EditorDocumentState,
   insert: string,
@@ -109,6 +139,94 @@ function applySourceEdit(
   const applied = applyEditOperation(editor.adapter, operation);
   options.undoManager?.recordApplied(editor.adapter, applied);
   return applied;
+}
+
+function applyInsertParagraphIntent(
+  editor: EditorDocumentState,
+  options: ApplyInputIntentOptions,
+): AppliedInputIntent {
+  const selection = editor.selectionSourceRange;
+  if (selection.from !== selection.to || isInsideFencedCode(editor.markdown, selection.from)) {
+    return replaceSelection(editor, "\n", options);
+  }
+
+  const line = lineAtOffset(editor.markdown, selection.from);
+  const context = markdownLineContext(line.text);
+  if (context === null || selection.from < line.start + context.editableContentFrom) {
+    return replaceSelection(editor, "\n", options);
+  }
+
+  if (line.text.slice(context.editableContentFrom).trim().length === 0) {
+    const applied = applySourceEdit(
+      editor,
+      {
+        type: "delete",
+        range: {
+          from: line.start + context.emptyExitDeleteFrom,
+          to: line.start + context.emptyExitDeleteTo,
+        },
+      },
+      options,
+    );
+    const caret = line.start + context.emptyExitDeleteFrom;
+    editor.setSelection(caret, caret);
+    return {
+      type: "edit",
+      applied,
+    };
+  }
+
+  return replaceSelection(editor, `\n${context.continuation}`, options);
+}
+
+function applyLineIndentIntent(
+  editor: EditorDocumentState,
+  direction: "in" | "out",
+  options: ApplyInputIntentOptions,
+): AppliedInputIntent {
+  const selection = editor.selectionSourceRange;
+  if (selection.from === selection.to && isInsideFencedCode(editor.markdown, selection.from)) {
+    return replaceSelection(editor, direction === "in" ? "\t" : "", options);
+  }
+
+  const lineStarts = selectedLineStarts(editor.markdown, selection);
+  let applied: AppliedEditOperation | null = null;
+  for (const lineStart of lineStarts.toReversed()) {
+    if (direction === "in") {
+      applied = applySourceEdit(
+        editor,
+        {
+          type: "insert",
+          offset: lineStart,
+          text: "  ",
+        },
+        options,
+      );
+      continue;
+    }
+
+    const deleteTo = outdentDeleteTo(editor.markdown, lineStart);
+    if (deleteTo > lineStart) {
+      applied = applySourceEdit(
+        editor,
+        {
+          type: "delete",
+          range: {
+            from: lineStart,
+            to: deleteTo,
+          },
+        },
+        options,
+      );
+    }
+  }
+
+  return applied === null
+    ? { type: "ignored" }
+    : {
+        type: "edit",
+        applied,
+      };
 }
 
 function applyDeleteIntent(
@@ -196,4 +314,181 @@ function deleteRange(text: string, offset: number, direction: "backward" | "forw
   return direction === "backward"
     ? graphemeDeleteBackwardRange(text, offset)
     : graphemeDeleteForwardRange(text, offset);
+}
+
+interface SourceLine {
+  readonly start: number;
+  readonly end: number;
+  readonly text: string;
+}
+
+interface MarkdownLineContext {
+  readonly continuation: string;
+  readonly editableContentFrom: number;
+  readonly emptyExitDeleteFrom: number;
+  readonly emptyExitDeleteTo: number;
+}
+
+interface ListMarkerContext {
+  readonly full: string;
+  readonly indent: string;
+  readonly continuation: string;
+  readonly checkboxOffsetInMarker?: number;
+}
+
+function lineAtOffset(text: string, offset: number): SourceLine {
+  const safeOffset = Math.max(0, Math.min(offset, text.length));
+  const lineStart = text.lastIndexOf("\n", Math.max(0, safeOffset - 1)) + 1;
+  const nextLineBreak = text.indexOf("\n", safeOffset);
+  const lineEnd = nextLineBreak < 0 ? text.length : nextLineBreak;
+  return {
+    start: lineStart,
+    end: lineEnd,
+    text: text.slice(lineStart, lineEnd),
+  };
+}
+
+function markdownLineContext(line: string): MarkdownLineContext | null {
+  const quotePrefix = quotePrefixOf(line);
+  const quoteContent = line.slice(quotePrefix.length);
+  const list = listMarkerContext(quoteContent);
+  if (list !== null) {
+    return {
+      continuation: `${quotePrefix}${list.continuation}`,
+      editableContentFrom: quotePrefix.length + list.full.length,
+      emptyExitDeleteFrom: quotePrefix.length + list.indent.length,
+      emptyExitDeleteTo: quotePrefix.length + list.full.length,
+    };
+  }
+
+  if (quotePrefix.length > 0) {
+    return {
+      continuation: quotePrefix,
+      editableContentFrom: quotePrefix.length,
+      emptyExitDeleteFrom: 0,
+      emptyExitDeleteTo: quotePrefix.length,
+    };
+  }
+
+  return null;
+}
+
+function quotePrefixOf(line: string): string {
+  return /^(?:(?: {0,3}> ?)+)/u.exec(line)?.[0] ?? "";
+}
+
+function listMarkerContext(line: string): ListMarkerContext | null {
+  const match = /^([ \t]*)(?:([-+*])|(\d+)([.)]))([ \t]+)(?:\[([ xX])\]([ \t]+))?/u.exec(line);
+  if (match === null) {
+    return null;
+  }
+
+  const indent = match[1] ?? "";
+  const bullet = match[2];
+  const orderedNumber = match[3];
+  const orderedSuffix = match[4] ?? ".";
+  const markerSpaces = match[5] ?? " ";
+  const taskState = match[6];
+  const taskSpaces = match[7] ?? "";
+  const baseMarker =
+    orderedNumber === undefined
+      ? `${bullet}${markerSpaces}`
+      : `${Number.parseInt(orderedNumber, 10) + 1}${orderedSuffix}${markerSpaces}`;
+  const taskMarker = taskState === undefined ? "" : `[ ]${taskSpaces}`;
+  const full = match[0];
+
+  return {
+    full,
+    indent,
+    continuation: `${indent}${baseMarker}${taskMarker}`,
+    checkboxOffsetInMarker:
+      taskState === undefined ? undefined : full.indexOf(`[${taskState}]`) + 1,
+  };
+}
+
+function taskMarkerRange(
+  line: string,
+  lineStart: number,
+): { readonly checkboxOffset: number; readonly checked: boolean } | null {
+  const quotePrefix = quotePrefixOf(line);
+  const list = listMarkerContext(line.slice(quotePrefix.length));
+  if (list?.checkboxOffsetInMarker === undefined) {
+    return null;
+  }
+  const checkboxOffset = lineStart + quotePrefix.length + list.checkboxOffsetInMarker;
+  return {
+    checkboxOffset,
+    checked: line[quotePrefix.length + list.checkboxOffsetInMarker].toLowerCase() === "x",
+  };
+}
+
+function selectedLineStarts(text: string, selection: SourceRange): number[] {
+  const from = Math.min(selection.from, selection.to);
+  const to = Math.max(selection.from, selection.to);
+  const lastOffset = to > from && text[to - 1] === "\n" ? to - 1 : to;
+  const firstLine = lineAtOffset(text, from);
+  const lastLine = lineAtOffset(text, lastOffset);
+  const starts: number[] = [];
+  let current = firstLine.start;
+  while (current <= lastLine.start) {
+    starts.push(current);
+    const next = text.indexOf("\n", current);
+    if (next < 0) {
+      break;
+    }
+    current = next + 1;
+  }
+  return starts;
+}
+
+function outdentDeleteTo(text: string, lineStart: number): number {
+  if (text[lineStart] === "\t") {
+    return lineStart + 1;
+  }
+  let spaces = 0;
+  while (spaces < 2 && text[lineStart + spaces] === " ") {
+    spaces += 1;
+  }
+  return lineStart + spaces;
+}
+
+function isInsideFencedCode(markdown: string, offset: number): boolean {
+  let inFence = false;
+  let fenceChar = "";
+  let fenceLength = 0;
+  let lineStart = 0;
+  const safeOffset = Math.max(0, Math.min(offset, markdown.length));
+
+  while (lineStart <= markdown.length) {
+    const nextBreak = markdown.indexOf("\n", lineStart);
+    const lineEnd = nextBreak < 0 ? markdown.length : nextBreak;
+    const line = markdown.slice(lineStart, lineEnd);
+    const fence = /^ {0,3}(`{3,}|~{3,})/u.exec(line)?.[1];
+    let currentLineIsFence = false;
+
+    if (fence !== undefined) {
+      currentLineIsFence = true;
+      if (!inFence) {
+        inFence = true;
+        fenceChar = fence[0] ?? "";
+        fenceLength = fence.length;
+      } else if (fence[0] === fenceChar && fence.length >= fenceLength) {
+        if (safeOffset >= lineStart && safeOffset <= lineEnd) {
+          return true;
+        }
+        inFence = false;
+      }
+    }
+
+    if (safeOffset >= lineStart && safeOffset <= lineEnd) {
+      return inFence || currentLineIsFence;
+    }
+
+    if (nextBreak < 0) {
+      break;
+    }
+    lineStart = nextBreak + 1;
+  }
+
+  return false;
 }
