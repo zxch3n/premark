@@ -1,12 +1,9 @@
 import { createHighlighter } from "../packages/highlight/src/index.ts";
-import { createPremarkHtmlRenderHost, renderToHtml } from "../packages/html-renderer/src/index.ts";
+import { createPremarkDomEditorHost, renderToHtml } from "../packages/html-renderer/src/index.ts";
 import {
   createInMemoryEditorDocumentState,
-  createPremarkBrowserInputHost,
   createPremarkEditorController,
-  createSelectionGeometry,
   LocalUndoManager,
-  type EditableLayoutIndex,
 } from "../packages/editor/src/index.ts";
 import { waitForPremarkStoryFonts } from "./font-loading.ts";
 
@@ -43,9 +40,6 @@ export const InteractiveNativePrototype = () => {
     const undoManager = new LocalUndoManager();
     const controller = createPremarkEditorController({ state: editor, undoManager });
 
-    let currentEditableIndex: EditableLayoutIndex = editor.editableIndex;
-    let inputHost: ReturnType<typeof createPremarkBrowserInputHost>;
-
     root.innerHTML = `
     <style>${storyCss}</style>
     <div class="pne-shell">
@@ -78,116 +72,28 @@ export const InteractiveNativePrototype = () => {
     const textarea = root.querySelector<HTMLTextAreaElement>("[data-input-bridge]")!;
     const debugSelection = root.querySelector<HTMLPreElement>("[data-debug-selection]")!;
     const debugSource = root.querySelector<HTMLPreElement>("[data-debug-source]")!;
-    const htmlHost = createPremarkHtmlRenderHost(surface);
-
-    function render(options: { readonly syncBridgeValue?: boolean } = {}) {
-      const view = controller.renderSnapshot();
-      const layout = view.layout;
-      currentEditableIndex = view.editableIndex;
-      const rendered = renderToHtml(layout, {
-        codeThemeCss: highlighter.getThemeCss("dark"),
-      });
-      surface.style.width = `${layout.containerWidth}px`;
-      surface.style.height = `${layout.totalHeight}px`;
-      overlay.style.width = `${layout.containerWidth}px`;
-      overlay.style.height = `${layout.totalHeight}px`;
-      htmlHost.render(rendered);
-      overlay.innerHTML = renderSelectionOverlay(currentEditableIndex, view.compositionRects);
-      debugSelection.textContent = JSON.stringify(
-        createSelectionGeometry(editor, currentEditableIndex),
-        null,
-        2,
-      );
-      debugSource.textContent = controller.markdown();
-      syncTextareaBridge({ writeValue: options.syncBridgeValue !== false });
-    }
-
-    function syncTextareaBridge(options: { readonly writeValue?: boolean } = {}) {
-      const compositionCaret = compositionCaretRect();
-      const geometry = createSelectionGeometry(editor, currentEditableIndex);
-      const fallbackCaret = geometry.caret ?? geometry.headCaret;
-      const caretRect = compositionCaret ?? fallbackCaret.rect;
-      inputHost.syncBridge(caretRect, { writeValue: options.writeValue });
-    }
-
-    function renderSelectionOverlay(
-      editableIndex: EditableLayoutIndex,
-      compositionRects: readonly { x: number; y: number; width: number; height: number }[],
-    ): string {
-      const composition = renderCompositionOverlay(compositionRects);
-      if (editor.compositionView !== null) {
-        const caret = compositionCaretRect();
-        const caretHtml =
-          caret === null
-            ? ""
-            : `<div class="pne-caret" style="left:${caret.x}px;top:${caret.y}px;height:${caret.height}px"></div>`;
-        return `${composition}${caretHtml}`;
-      }
-
-      const geometry = createSelectionGeometry(editor, editableIndex);
-      const selection = geometry.selectionRects
-        .map(
-          (rect) =>
-            `<div class="pne-selection" style="left:${rect.x}px;top:${rect.y}px;width:${rect.width}px;height:${rect.height}px"></div>`,
-        )
-        .join("");
-      const caret = geometry.caret;
-      const caretHtml =
-        caret === null
-          ? ""
-          : `<div class="pne-caret" style="left:${caret.rect.x}px;top:${caret.rect.y}px;height:${caret.rect.height}px"></div>`;
-      return `${selection}${composition}${caretHtml}`;
-    }
-
-    function compositionCaretRect() {
-      const view = editor.compositionView;
-      if (view === null) {
-        return null;
-      }
-      return currentEditableIndex.sourceOffsetToCaretRect(
-        view.replacementRange.from + view.preeditText.length,
-      ).rect;
-    }
-
-    function renderCompositionOverlay(
-      compositionRects: readonly { x: number; y: number; width: number; height: number }[],
-    ): string {
-      const view = editor.compositionView;
-      if (view === null || view.preeditText.length === 0) {
-        return "";
-      }
-
-      return compositionRects
-        .map(
-          (rect) =>
-            `<div class="pne-composition" style="left:${rect.x}px;top:${rect.y + rect.height - 3}px;width:${rect.width}px"></div>`,
-        )
-        .join("");
-    }
-
-    function pointFromEvent(event: MouseEvent): { x: number; y: number } {
-      const rect = surface.getBoundingClientRect();
-      return {
-        x: event.clientX - rect.left,
-        y: event.clientY - rect.top,
-      };
-    }
-
-    inputHost = createPremarkBrowserInputHost({
+    const host = createPremarkDomEditorHost({
       editor,
+      controller,
       undoManager,
       surface,
-      textarea,
-      editableIndex: () => currentEditableIndex,
-      pointFromEvent,
-      render,
-      positionBridge(caretRect) {
-        textarea.style.left = `${28 + Math.max(0, caretRect.x)}px`;
-        textarea.style.top = `${28 + Math.max(0, caretRect.y)}px`;
-        textarea.style.height = `${Math.max(16, caretRect.height)}px`;
+      overlay,
+      inputBridge: textarea,
+      contentInset: { x: 28, y: 28 },
+      renderMarkdown(snapshot) {
+        return renderToHtml(snapshot.layout, {
+          codeThemeCss: highlighter.getThemeCss("dark"),
+        });
+      },
+      onRender(state) {
+        debugSelection.textContent = JSON.stringify(state.geometry, null, 2);
+        debugSource.textContent = controller.markdown();
       },
     });
-    inputHost.install();
+
+    function render(options: { readonly syncBridgeValue?: boolean } = {}) {
+      host.render(options);
+    }
 
     (
       window as typeof window & {
@@ -211,12 +117,7 @@ export const InteractiveNativePrototype = () => {
         render();
       },
       pointForSourceRange(from, to) {
-        const fromCaret = currentEditableIndex.sourceOffsetToCaretRect(from);
-        const toCaret = currentEditableIndex.sourceOffsetToCaretRect(to, "before");
-        return {
-          x: (fromCaret.rect.x + toCaret.rect.x) / 2,
-          y: (fromCaret.rect.y + toCaret.rect.y) / 2 + fromCaret.rect.height / 2,
-        };
+        return host.pointForSourceRange(from, to);
       },
       setSelection(anchor, head) {
         controller.setSelection(anchor, head);

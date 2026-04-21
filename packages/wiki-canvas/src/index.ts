@@ -4,6 +4,15 @@ export {
   type TileDrawOptions,
   type TilePalette,
 } from "./canvas-draw.ts";
+export { createPremarkCanvasEditorHost } from "./editor-host.ts";
+export type {
+  PremarkCanvasDrawDocument,
+  PremarkCanvasEditorHost,
+  PremarkCanvasEditorHostOptions,
+  PremarkCanvasEditorHostPaintOptions,
+  PremarkCanvasEditorHostPaintState,
+  PremarkCanvasEditorHostRenderState,
+} from "./editor-host.ts";
 export {
   layoutMasonry,
   layoutNodes,

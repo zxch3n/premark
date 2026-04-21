@@ -1,13 +1,14 @@
 # Premark Native Editor Redesign Plan
 
-Status: Phase 19 mostly complete; DOM/Canvas stories now share the browser input host
+Status: Phase 21 completed; DOM and Canvas editor renderer hosts extracted
 Owner: Codex / Zixuan
 Last Updated: 2026-04-21
 Compaction Rule: after memory reload or compaction, reread this whole file before continuing.
 
 ## Current Objective
 
-- Productize the browser input host so DOM, Canvas, Safari, and real OS-input paths share one hidden-textarea/IME/pointer implementation.
+- Keep DOM and Canvas Storybook examples as thin wrappers over reusable editor host APIs.
+- Keep the shared browser input host as the single hidden-textarea/IME/pointer implementation.
 - Preserve the Safari/WebKit and real foreground interaction acceptance added in Phase 18.
 - Keep the native Premark-rendered editor as the product path; CodeMirror overlay remains removed.
 - Record core invariants, architecture decisions, and test-ladder rules in `AGENTS.md` so future agents get the right assumptions before touching editor code.
@@ -54,6 +55,9 @@ Compaction Rule: after memory reload or compaction, reread this whole file befor
 - Storybook currently owns too much product logic: hidden textarea synchronization, IME preservation, Korean line-break suppression, clipboard handling, keyboard normalization, pointer sessions, and click-count tracking are duplicated between DOM and Canvas stories. This conflicts with the product architecture and should move into a reusable browser input host.
 - `renderSnapshot()` currently builds source, active-control, and composition views directly. This is correct enough, but view identity/cache ownership should eventually move into a render view manager so active controls and composition can become incrementally reusable.
 - Font readiness cannot remain only a Storybook convention. The editor needs an explicit font/measurement epoch or refresh API before product integration, because caret geometry depends on the font used by `measureText`.
+- DOM selection/caret/composition overlay rendering, hidden textarea positioning, and stable rendered-tree mounting are editor renderer host behavior, not Storybook behavior.
+- Canvas viewport/wheel handling, DPR setup, dirty clipping, dirty overlay debug paint, Canvas bridge positioning, and source-to-point test helpers belong in a Canvas editor host with customization hooks.
+- Storybook browser gates must alias workspace package names to `src` entries; otherwise production Storybook builds can resolve stale local `dist` files and miss current source exports.
 
 ## Architecture Direction
 
@@ -394,6 +398,24 @@ Acceptance:
 - [ ] Render snapshot cache identity is explicit and inspectable.
 - [ ] No active-control/composition performance optimization can reuse geometry across incompatible source-map identities.
 
+## Phase 21: DOM And Canvas Editor Hosts
+
+Goal: make the interactive DOM and Canvas examples thin wrappers over reusable host APIs.
+
+- [x] Add `createPremarkDomEditorHost` as the DOM editor entry. It should own HTML render mounting, selection/caret/composition overlay DOM, hidden textarea positioning, point transforms, input host wiring, and source-to-point helpers.
+- [x] Add DOM customization hooks for overlay classes/renderers, content inset, render callback, and renderMarkdown override while keeping source geometry non-overridable.
+- [x] Add `createPremarkCanvasEditorHost` as the Canvas editor entry. It should own DPR setup, Canvas painting, selection/caret/composition paint options, viewport/wheel handling, dirty clip calculation, optional dirty overlay, hidden textarea positioning, and source-to-point helpers.
+- [x] Add Canvas customization hooks for palette, paint callbacks, overlay colors, wheel policy, DPR policy, dirty overlay, and drawDocument override while keeping source geometry non-overridable.
+- [x] Migrate `Editing/Premark Native Editor` to the DOM host.
+- [x] Migrate `Editing/Premark Canvas Native Editor` to the Canvas host.
+- [x] Keep test-only fixture helpers in Storybook only when they are clearly adapters over host/controller APIs, not product logic.
+
+Acceptance:
+
+- [x] DOM story does not implement selection/caret/composition overlay HTML or stable render-tree mounting itself.
+- [x] Canvas story does not implement wheel/viewport, dirty clip, dirty overlay, DPR setup, or bridge positioning itself.
+- [x] `vp check --fix`, `vp test`, `vp run test:browser`, and `vp run test:browser:webkit` pass.
+
 ## Iteration Log
 
 ### 2026-04-20
@@ -481,3 +503,9 @@ Acceptance:
 - Added `packages/editor/tests/browser-input-host.test.ts` for the host's native-input preservation rules. Verification after the migration: `vp check --fix`, `vp test` (21 files, 210 tests), `vp run test:browser` (31 tests), and `vp run test:browser:webkit` (7 passed, 5 skipped) all pass.
 - Deep demo-thinness review found one more product fix still living in Storybook: DOM rendered-tree synchronization preserved `.pmd-doc/.pmd-surface` identities during composition. Moved it into `packages/html-renderer/src/dom-render-host.ts` and changed the DOM story to use that host plus `createSelectionGeometry` from the editor package. Verification after the move: `vp check --fix`, `vp test`, `vp run test:browser`, and `vp run test:browser:webkit` pass.
 - Remaining demo-thinness candidates: Canvas viewport/wheel/dirty-overlay render binding, test-only source-to-point helpers exposed on `window.__premark*`, and AI streaming fixture helpers. These are less urgent than input/DOM tree stability because they are either renderer binding or test fixture adapters, but product integration should eventually get reusable DOM/Canvas editor host packages.
+- Phase 21 completed. Added `createPremarkDomEditorHost` and `createPremarkCanvasEditorHost`, then migrated both interactive native editor stories so they only provide fixture content, debug panels, and small test adapters over host/controller APIs.
+- The DOM host now owns stable HTML render mounting, overlay DOM, hidden textarea positioning, point transforms, and source-to-point helpers. The Canvas host now owns DPR setup, Canvas painting, selection/caret/composition paint, viewport/wheel handling, dirty clip calculation, optional dirty overlay, hidden textarea positioning, and source-to-point helpers.
+- Added customization hooks while keeping source geometry non-overridable: DOM supports overlay class names/renderers, content inset, render callbacks, and `renderMarkdown`; Canvas supports palette, paint callbacks, overlay colors, wheel policy, DPR policy, dirty overlay settings, and `drawDocument`.
+- New issue found and fixed: Storybook production builds resolved workspace package names to stale local `dist` files, which hid the new editor exports. `.storybook/main.ts` now aliases workspace package names to `src` entries so browser gates test current source.
+- No rollback occurred. `vp install` was needed after adding workspace dependencies; the first install hit one npm registry `ECONNRESET` retry but completed successfully. A root build run exposed one existing unused-parameter failure in `packages/editor/src/editable-layout.ts`; the parameter was removed without changing behavior.
+- Verification for Phase 21: `vp check --fix` passes with no warnings, `vp test` passes 210 tests, `vp run build` passes, `vp run test:browser` passes 31 tests, and `vp run test:browser:webkit` passes 7 tests with 5 expected skips.
