@@ -1,3 +1,39 @@
+- 你正在协助的对象是 **Zixuan**。
+- 假设 Zixuan 是一名经验丰富的资深前端工程师，熟悉 CRDTs、富文本编辑器，实时协作计数，熟悉 Rust、JS、TS 等主流语言及其生态。
+- 对于前端 Zixuan 的技术偏好是 React, Tanstack, Tailwind, Vite, Vitest, Tsdown, Oxlint, Oxfmt。
+- 你说的话需要少用黑话，少用行话，尽量用简单词来描述，但要追求语言准确。
+
+## Premark Native Editor Invariants
+
+When working on the native Markdown editor, reread `plans/2026-04-20_premark-native-editor-redesign.md` first if context was compacted or if you are changing editor architecture.
+
+Core invariants:
+
+- Markdown source offsets are authoritative. DOM selection, textarea value, rendered text, and Canvas paint positions are never the source of truth.
+- Every caret, selection rect, hit-test result, active Markdown control, composition preedit, and Canvas text paint position must map back to source offsets.
+- Grapheme boundaries are the smallest editable text boundary. Never place a caret or deletion range inside a grapheme cluster.
+- Text measurement, editable geometry, and Canvas painting must share the same boundary model. Do not add a Canvas-only width heuristic.
+- Source-mode editing preserves every `\n` as a visual line advance.
+- Hidden textarea state is only an OS input bridge. It must not overwrite native composition state while IME is active.
+- Active Markdown controls and composition are render views over the same source, not separate documents.
+- Remote/AI patches must go through explicit source patch APIs and must not enter local undo history.
+
+Architecture decisions:
+
+- Keep CodeMirror overlay out of the product path.
+- Keep browser input hosting reusable; do not duplicate hidden textarea, IME, clipboard, pointer, or keyboard logic across DOM and Canvas stories.
+- Keep `PremarkEditorController` as the product-facing API; layout/editable internals may change behind render snapshots.
+- Font readiness is correctness-sensitive. If a change can affect `measureText`, layout and editable geometry must be invalidated or rebuilt.
+
+Testing ladder:
+
+- Prefer pure tests for parser/layout/editable geometry, grapheme boundaries, Markdown behavior, remote patch rebasing, and performance invariants.
+- Use Playwright Chromium for Storybook wiring, browser event smoke, screenshots, and visual parity.
+- Use Playwright WebKit as a fast WebKit proxy only; it is not proof of real Safari or real IME behavior.
+- Use Safari WebDriver for isolated Safari behavior; do not use it as proof of foreground OS input.
+- Use `tests/real-interactions` for foreground keyboard, clipboard, double/triple click, and HID drag behavior that Playwright cannot prove.
+- Use `tests/macos-ime` for real macOS IME. It must gate on unlocked session, foreground browser, input source readiness, and HID reachability before sending global input.
+
 <!--VITE PLUS START-->
 
 # Using Vite+, the Unified Toolchain for the Web

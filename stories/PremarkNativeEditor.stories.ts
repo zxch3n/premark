@@ -1,19 +1,12 @@
 import { createHighlighter } from "../packages/highlight/src/index.ts";
-import { renderToHtml } from "../packages/html-renderer/src/index.ts";
+import { createPremarkHtmlRenderHost, renderToHtml } from "../packages/html-renderer/src/index.ts";
 import {
-  applyInputIntent,
-  applyTextareaBridgeChange,
-  beginPointerSelection,
   createInMemoryEditorDocumentState,
+  createPremarkBrowserInputHost,
   createPremarkEditorController,
-  createTextareaBridgeSnapshot,
+  createSelectionGeometry,
   LocalUndoManager,
-  normalizeInputTrace,
-  selectPointerRange,
-  updatePointerSelection,
   type EditableLayoutIndex,
-  type PointerSelectionSession,
-  type TextareaBridgeSnapshot,
 } from "../packages/editor/src/index.ts";
 import { waitForPremarkStoryFonts } from "./font-loading.ts";
 
@@ -50,21 +43,8 @@ export const InteractiveNativePrototype = () => {
     const undoManager = new LocalUndoManager();
     const controller = createPremarkEditorController({ state: editor, undoManager });
 
-    let bridgeSnapshot: TextareaBridgeSnapshot = createTextareaBridgeSnapshot(editor);
-    let pointerSession: PointerSelectionSession | null = null;
-    let composing = false;
-    let compositionCommitKeyWasEnter = false;
-    let suppressLineBreakUntil = 0;
     let currentEditableIndex: EditableLayoutIndex = editor.editableIndex;
-    let pointerClickCount = 0;
-    let lastPointerClick: {
-      readonly time: number;
-      readonly x: number;
-      readonly y: number;
-    } | null = null;
-    let renderedStyleElement: HTMLStyleElement | null = null;
-    let renderedDocumentElement: HTMLElement | null = null;
-    let renderedSurfaceElement: HTMLElement | null = null;
+    let inputHost: ReturnType<typeof createPremarkBrowserInputHost>;
 
     root.innerHTML = `
     <style>${storyCss}</style>
@@ -98,6 +78,7 @@ export const InteractiveNativePrototype = () => {
     const textarea = root.querySelector<HTMLTextAreaElement>("[data-input-bridge]")!;
     const debugSelection = root.querySelector<HTMLPreElement>("[data-debug-selection]")!;
     const debugSource = root.querySelector<HTMLPreElement>("[data-debug-source]")!;
+    const htmlHost = createPremarkHtmlRenderHost(surface);
 
     function render(options: { readonly syncBridgeValue?: boolean } = {}) {
       const view = controller.renderSnapshot();
@@ -110,10 +91,10 @@ export const InteractiveNativePrototype = () => {
       surface.style.height = `${layout.totalHeight}px`;
       overlay.style.width = `${layout.containerWidth}px`;
       overlay.style.height = `${layout.totalHeight}px`;
-      renderSurfaceHtml(rendered);
+      htmlHost.render(rendered);
       overlay.innerHTML = renderSelectionOverlay(currentEditableIndex, view.compositionRects);
       debugSelection.textContent = JSON.stringify(
-        createStorySelectionGeometry(currentEditableIndex),
+        createSelectionGeometry(editor, currentEditableIndex),
         null,
         2,
       );
@@ -121,115 +102,12 @@ export const InteractiveNativePrototype = () => {
       syncTextareaBridge({ writeValue: options.syncBridgeValue !== false });
     }
 
-    function renderSurfaceHtml(rendered: { html: string; css: string }) {
-      if (!surfaceOwnsRenderedTree()) {
-        surface.replaceChildren();
-        renderedStyleElement = null;
-        renderedDocumentElement = null;
-        renderedSurfaceElement = null;
-      }
-
-      if (renderedStyleElement === null) {
-        renderedStyleElement = document.createElement("style");
-        renderedStyleElement.dataset.premarkRenderer = "style";
-        surface.append(renderedStyleElement);
-      }
-      renderedStyleElement.textContent = rendered.css;
-
-      const nextDocument = parseRenderedDocument(rendered.html);
-      const nextSurface = nextDocument.querySelector<HTMLElement>(".pmd-surface");
-      if (nextSurface === null) {
-        throw new Error("Rendered Premark document is missing .pmd-surface");
-      }
-
-      if (renderedDocumentElement === null || renderedSurfaceElement === null) {
-        renderedDocumentElement = nextDocument;
-        renderedSurfaceElement = nextSurface;
-        surface.append(renderedDocumentElement);
-        return;
-      }
-
-      syncElementAttributes(renderedDocumentElement, nextDocument);
-      syncElementAttributes(renderedSurfaceElement, nextSurface);
-      renderedSurfaceElement.replaceChildren(...Array.from(nextSurface.childNodes));
-    }
-
-    function surfaceOwnsRenderedTree(): boolean {
-      return (
-        (renderedStyleElement === null || renderedStyleElement.parentElement === surface) &&
-        (renderedDocumentElement === null ||
-          (renderedDocumentElement.parentElement === surface &&
-            renderedSurfaceElement !== null &&
-            renderedDocumentElement.contains(renderedSurfaceElement)))
-      );
-    }
-
-    function parseRenderedDocument(html: string): HTMLElement {
-      const template = document.createElement("template");
-      template.innerHTML = html;
-      const documentElement = template.content.firstElementChild;
-      if (!(documentElement instanceof HTMLElement)) {
-        throw new Error("Rendered Premark document is empty");
-      }
-      return documentElement;
-    }
-
-    function syncElementAttributes(target: HTMLElement, source: HTMLElement) {
-      for (const attribute of Array.from(target.attributes)) {
-        target.removeAttribute(attribute.name);
-      }
-      for (const attribute of Array.from(source.attributes)) {
-        target.setAttribute(attribute.name, attribute.value);
-      }
-    }
-
-    function createStorySelectionGeometry(index: EditableLayoutIndex) {
-      const resolved = editor.adapter.resolveRange(editor.selection.range);
-      const range = {
-        from: resolved.from,
-        to: resolved.to,
-      };
-      const anchorCaret = index.sourceOffsetToCaretRect(resolved.anchor, "before");
-      const headCaret = index.sourceOffsetToCaretRect(resolved.head, "after");
-      return {
-        range,
-        anchorOffset: resolved.anchor,
-        headOffset: resolved.head,
-        direction: resolved.direction,
-        isCollapsed: resolved.isCollapsed,
-        selectionRects: resolved.isCollapsed ? [] : index.sourceRangeToSelectionRects(range),
-        caret: resolved.isCollapsed ? headCaret : null,
-        anchorCaret,
-        headCaret,
-      };
-    }
-
     function syncTextareaBridge(options: { readonly writeValue?: boolean } = {}) {
       const compositionCaret = compositionCaretRect();
-      const geometry = createStorySelectionGeometry(currentEditableIndex);
+      const geometry = createSelectionGeometry(editor, currentEditableIndex);
       const fallbackCaret = geometry.caret ?? geometry.headCaret;
       const caretRect = compositionCaret ?? fallbackCaret.rect;
-      bridgeSnapshot = createTextareaBridgeSnapshot(editor);
-      if (options.writeValue !== false) {
-        textarea.value = bridgeSnapshot.value;
-        textarea.setSelectionRange(bridgeSnapshot.selectionStart, bridgeSnapshot.selectionEnd);
-      }
-      textarea.style.left = `${28 + Math.max(0, caretRect.x)}px`;
-      textarea.style.top = `${28 + Math.max(0, caretRect.y)}px`;
-      textarea.style.height = `${Math.max(16, caretRect.height)}px`;
-    }
-
-    function shouldPreserveNativeInputContext(event: Event): boolean {
-      if (!(event instanceof InputEvent)) {
-        return false;
-      }
-      if (event.isComposing) {
-        return true;
-      }
-      const data = event.data ?? "";
-      return (
-        event.inputType === "insertText" && /[\u1100-\u11ff\u3130-\u318f\uac00-\ud7af]/u.test(data)
-      );
+      inputHost.syncBridge(caretRect, { writeValue: options.writeValue });
     }
 
     function renderSelectionOverlay(
@@ -246,7 +124,7 @@ export const InteractiveNativePrototype = () => {
         return `${composition}${caretHtml}`;
       }
 
-      const geometry = createStorySelectionGeometry(editableIndex);
+      const geometry = createSelectionGeometry(editor, editableIndex);
       const selection = geometry.selectionRects
         .map(
           (rect) =>
@@ -295,197 +173,21 @@ export const InteractiveNativePrototype = () => {
       };
     }
 
-    function clickCountFromPointer(event: PointerEvent, point: { x: number; y: number }): number {
-      if (
-        lastPointerClick !== null &&
-        event.timeStamp - lastPointerClick.time < 500 &&
-        Math.hypot(point.x - lastPointerClick.x, point.y - lastPointerClick.y) < 6
-      ) {
-        pointerClickCount += 1;
-      } else {
-        pointerClickCount = 1;
-      }
-      lastPointerClick = {
-        time: event.timeStamp,
-        x: point.x,
-        y: point.y,
-      };
-      return Math.max(event.detail, pointerClickCount);
-    }
-
-    surface.addEventListener("pointerdown", (event) => {
-      event.preventDefault();
-      const point = pointFromEvent(event);
-      const clickCount = clickCountFromPointer(event, point);
-      if (clickCount >= 3) {
-        selectPointerRange(editor, point.x, point.y, "block", currentEditableIndex);
-        pointerSession = null;
-        textarea.focus();
-        render();
-        return;
-      }
-      if (clickCount === 2) {
-        selectPointerRange(editor, point.x, point.y, "word", currentEditableIndex);
-        pointerSession = null;
-        textarea.focus();
-        render();
-        return;
-      }
-      pointerSession = beginPointerSelection(editor, point.x, point.y, currentEditableIndex);
-      textarea.focus();
-      render();
+    inputHost = createPremarkBrowserInputHost({
+      editor,
+      undoManager,
+      surface,
+      textarea,
+      editableIndex: () => currentEditableIndex,
+      pointFromEvent,
+      render,
+      positionBridge(caretRect) {
+        textarea.style.left = `${28 + Math.max(0, caretRect.x)}px`;
+        textarea.style.top = `${28 + Math.max(0, caretRect.y)}px`;
+        textarea.style.height = `${Math.max(16, caretRect.height)}px`;
+      },
     });
-
-    surface.addEventListener("click", (event) => {
-      if (event.detail < 2) {
-        return;
-      }
-      const point = pointFromEvent(event);
-      selectPointerRange(
-        editor,
-        point.x,
-        point.y,
-        event.detail >= 3 ? "block" : "word",
-        currentEditableIndex,
-      );
-      pointerSession = null;
-      textarea.focus();
-      render();
-    });
-
-    window.addEventListener("pointermove", (event) => {
-      if (pointerSession === null) {
-        return;
-      }
-      const point = pointFromEvent(event);
-      updatePointerSelection(editor, pointerSession, point.x, point.y, currentEditableIndex);
-      render();
-    });
-
-    window.addEventListener("pointerup", () => {
-      pointerSession = null;
-    });
-
-    textarea.addEventListener("keydown", (event) => {
-      if (composing && event.key === "Enter") {
-        compositionCommitKeyWasEnter = true;
-      }
-      const intent = normalizeInputTrace([
-        {
-          type: "keydown",
-          key: event.key,
-          shiftKey: event.shiftKey,
-          metaKey: event.metaKey,
-          altKey: event.altKey,
-          ctrlKey: event.ctrlKey,
-        },
-      ])[0];
-      if (
-        intent?.type !== "keyboard-selection" &&
-        intent?.type !== "select-all" &&
-        intent?.type !== "line-indent"
-      ) {
-        return;
-      }
-
-      event.preventDefault();
-      applyInputIntent(editor, intent, { undoManager });
-      render();
-    });
-
-    textarea.addEventListener("beforeinput", (event) => {
-      if (
-        (event.inputType === "insertParagraph" || event.inputType === "insertLineBreak") &&
-        performance.now() <= suppressLineBreakUntil
-      ) {
-        suppressLineBreakUntil = 0;
-        event.preventDefault();
-        return;
-      }
-      const intent = normalizeInputTrace([
-        {
-          type: "beforeinput",
-          inputType: event.inputType,
-          data: event.data,
-          isComposing: event.isComposing,
-          cancelable: event.cancelable,
-        },
-      ])[0];
-
-      if (
-        intent?.type !== "insert-paragraph" &&
-        intent?.type !== "delete" &&
-        intent?.type !== "history"
-      ) {
-        return;
-      }
-
-      event.preventDefault();
-      applyInputIntent(editor, intent, { undoManager });
-      render();
-    });
-
-    textarea.addEventListener("compositionstart", (event) => {
-      composing = true;
-      compositionCommitKeyWasEnter = false;
-      applyInputIntent(editor, { type: "composition-start" }, { undoManager });
-      render({ syncBridgeValue: false });
-      event.preventDefault();
-    });
-
-    textarea.addEventListener("compositionupdate", (event) => {
-      if (!composing) {
-        return;
-      }
-      applyInputIntent(editor, { type: "composition-update", text: event.data }, { undoManager });
-      render({ syncBridgeValue: false });
-    });
-
-    textarea.addEventListener("compositionend", (event) => {
-      composing = false;
-      if (compositionCommitKeyWasEnter && event.data.length > 0) {
-        suppressLineBreakUntil = performance.now() + 500;
-      }
-      compositionCommitKeyWasEnter = false;
-      applyInputIntent(editor, { type: "composition-commit", text: event.data }, { undoManager });
-      render();
-    });
-
-    textarea.addEventListener("paste", (event) => {
-      event.preventDefault();
-      applyInputIntent(
-        editor,
-        {
-          type: "clipboard",
-          action: "paste",
-          markdown: event.clipboardData?.getData("text/markdown") || undefined,
-          plainText: event.clipboardData?.getData("text/plain") || undefined,
-          html: event.clipboardData?.getData("text/html") || undefined,
-        },
-        { undoManager },
-      );
-      render();
-    });
-
-    textarea.addEventListener("cut", (event) => {
-      event.preventDefault();
-      applyInputIntent(editor, { type: "clipboard", action: "cut" }, { undoManager });
-      render();
-    });
-
-    textarea.addEventListener("input", (event) => {
-      if (composing) {
-        return;
-      }
-      const applied = applyTextareaBridgeChange(editor, bridgeSnapshot, textarea.value, {
-        nextSelectionStart: textarea.selectionStart,
-        nextSelectionEnd: textarea.selectionEnd,
-      });
-      if (applied !== null) {
-        undoManager.recordApplied(editor.adapter, applied);
-      }
-      render({ syncBridgeValue: !shouldPreserveNativeInputContext(event) });
-    });
+    inputHost.install();
 
     (
       window as typeof window & {

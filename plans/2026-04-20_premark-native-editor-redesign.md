@@ -1,17 +1,16 @@
 # Premark Native Editor Redesign Plan
 
-Status: Phase 18 in progress; WebKit proxy, Safari preflight, and real foreground interaction runners are in place
+Status: Phase 19 mostly complete; DOM/Canvas stories now share the browser input host
 Owner: Codex / Zixuan
 Last Updated: 2026-04-21
 Compaction Rule: after memory reload or compaction, reread this whole file before continuing.
 
 ## Current Objective
 
-- Add Safari/WebKit acceptance without weakening the current Chrome/macOS IME gate.
+- Productize the browser input host so DOM, Canvas, Safari, and real OS-input paths share one hidden-textarea/IME/pointer implementation.
+- Preserve the Safari/WebKit and real foreground interaction acceptance added in Phase 18.
 - Keep the native Premark-rendered editor as the product path; CodeMirror overlay remains removed.
-- Treat Playwright WebKit as a fast browser-engine proxy, not as real Safari or real IME proof.
-- Use Safari WebDriver for isolated desktop Safari behavior, but keep real OS IME in a separate foreground Safari gate because WebDriver automation windows install a glass pane.
-- Add iOS/iPadOS Safari as its own acceptance surface for soft keyboard, visual viewport, touch selection, and mobile IME behavior.
+- Record core invariants, architecture decisions, and test-ladder rules in `AGENTS.md` so future agents get the right assumptions before touching editor code.
 
 ## New Learnings
 
@@ -52,6 +51,9 @@ Compaction Rule: after memory reload or compaction, reread this whole file befor
 - Desktop Safari WebDriver runner is implemented, but local execution is currently blocked by Safari Remote Automation being disabled. `safaridriver --enable` asks for a password in this environment, so Zixuan must enable it once.
 - Playwright remains a weak oracle for real OS input timing. Real double/triple click, cross-block HID drag, macOS keyboard shortcuts, and system clipboard cut/copy/paste now have a separate foreground `real-interactions` runner for Chrome-based browsers and Safari.
 - Regular Safari foreground interaction tests should use Safari AppleScript `do JavaScript` only for state inspection and System Events / Swift HID for input. Safari WebDriver stays separate because automation windows are not a valid proof for foreground OS input.
+- Storybook currently owns too much product logic: hidden textarea synchronization, IME preservation, Korean line-break suppression, clipboard handling, keyboard normalization, pointer sessions, and click-count tracking are duplicated between DOM and Canvas stories. This conflicts with the product architecture and should move into a reusable browser input host.
+- `renderSnapshot()` currently builds source, active-control, and composition views directly. This is correct enough, but view identity/cache ownership should eventually move into a render view manager so active controls and composition can become incrementally reusable.
+- Font readiness cannot remain only a Storybook convention. The editor needs an explicit font/measurement epoch or refresh API before product integration, because caret geometry depends on the font used by `measureText`.
 
 ## Architecture Direction
 
@@ -360,6 +362,38 @@ Acceptance:
 - [ ] iOS/iPadOS Safari smoke validates soft keyboard anchoring, visual viewport behavior, touch selection, and mobile IME/autocorrect behavior.
 - [ ] Safari failures are classified by root cause; no issue is left as a generic "Safari bug".
 
+## Phase 19: Productize Browser Input Host
+
+Goal: remove duplicated browser input behavior from DOM and Canvas stories and make it reusable for product integrations.
+
+- [x] Record Premark editor invariants, architecture decisions, and testing ladder in `AGENTS.md`.
+- [x] Add a reusable browser input host in `packages/editor/src` for hidden textarea sync, keyboard normalization, beforeinput/input, composition, paste/cut, IME preservation, and pointer selection.
+- [x] Migrate `Editing/Premark Native Editor` to the shared input host without changing behavior.
+- [x] Migrate `Editing/Premark Canvas Native Editor` to the shared input host without changing behavior.
+- [x] Add focused tests for the host's IME-preserve and Enter-after-composition suppression rules where practical.
+- [x] Verify existing DOM/Canvas browser tests still cover typing, paste/cut, selection, composition, active controls, Canvas geometry, and WebKit proxy behavior.
+
+Acceptance:
+
+- [x] DOM and Canvas stories no longer duplicate hidden textarea / IME / pointer event logic.
+- [ ] Korean native-input preservation and Enter suppression remain covered by macOS IME and browser regressions.
+- [x] `vp check --fix`, `vp test`, `vp run test:browser`, and `vp run test:browser:webkit` pass or have exact environment skips recorded.
+
+## Phase 20: Render View And Font Epoch Hardening
+
+Goal: make render view identity and font-dependent measurement invalidation explicit before product integration.
+
+- [ ] Design a render view manager for source, active-control, and composition views with explicit cache keys.
+- [ ] Add a font/measurement epoch API to invalidate layout and editable geometry after web fonts become ready or font configuration changes.
+- [ ] Add pure tests that simulate measurement epoch changes and assert caret/hit-test geometry rebuilds.
+- [ ] Keep active-control and composition view reuse conservative until source-map-aware incremental reuse is proven.
+
+Acceptance:
+
+- [ ] Product code can trigger a measurement refresh without recreating the editor.
+- [ ] Render snapshot cache identity is explicit and inspectable.
+- [ ] No active-control/composition performance optimization can reuse geometry across incompatible source-map identities.
+
 ## Iteration Log
 
 ### 2026-04-20
@@ -441,3 +475,9 @@ Acceptance:
 - Added `tests/real-interactions/run-real-interactions.mjs` and `tests/real-interactions/README.md`. The runner uses real foreground System Events / Swift HID input for Chrome-based browsers and regular Safari, while using Playwright or Safari Apple Events only to inspect editor state. The scenario set now covers real text input, Shift+Option word selection, Shift+Command document selection, Command+C/X/V with the system clipboard, Return, double/triple click, cross-block drag, and Canvas click/drag editing.
 - Extended the Swift OS input helper with HID mouse click and drag commands so pointer gestures no longer depend on Playwright pointer synthesis. Planned experiment: run `vp run test:real-interactions:chrome` first because it has Playwright state inspection, then run `vp run test:real-interactions:safari` after confirming Safari allows JavaScript from Apple Events.
 - Verification after adding real-interaction runners: `node --check tests/real-interactions/run-real-interactions.mjs`, `swift tests/macos-ime/os-input.swift check`, `vp check --fix`, `vp test` (207 tests), `vp run test:safari:preflight`, and `vp run test:browser:webkit` (7 passed, 5 skipped) all pass. `PREMARK_REAL_INTERACTIONS_TARGET=all node tests/real-interactions/run-real-interactions.mjs` safely skipped both Chrome and Safari because `CGSessionCopyCurrentDictionary` reports the macOS screen is locked, so no HID events were posted.
+- Phase 19 started. Added the native-editor invariant and testing ladder guidance to `AGENTS.md`, keeping detailed execution state in this plan file for progressive context loading.
+- Added `PremarkBrowserInputHost` in `packages/editor/src/browser-input-host.ts` and exported it through the editor package. It now owns hidden textarea bridge sync, keydown normalization, beforeinput/input application, paste/cut, composition start/update/end, Korean native-input preservation, Enter-after-composition suppression, click counting, word/block pointer selection, and drag selection.
+- Migrated both DOM and Canvas native Storybook editors to the shared browser input host. This removed duplicated hidden textarea / IME / pointer event logic from the stories while leaving renderer-specific geometry and bridge positioning in each story.
+- Added `packages/editor/tests/browser-input-host.test.ts` for the host's native-input preservation rules. Verification after the migration: `vp check --fix`, `vp test` (21 files, 210 tests), `vp run test:browser` (31 tests), and `vp run test:browser:webkit` (7 passed, 5 skipped) all pass.
+- Deep demo-thinness review found one more product fix still living in Storybook: DOM rendered-tree synchronization preserved `.pmd-doc/.pmd-surface` identities during composition. Moved it into `packages/html-renderer/src/dom-render-host.ts` and changed the DOM story to use that host plus `createSelectionGeometry` from the editor package. Verification after the move: `vp check --fix`, `vp test`, `vp run test:browser`, and `vp run test:browser:webkit` pass.
+- Remaining demo-thinness candidates: Canvas viewport/wheel/dirty-overlay render binding, test-only source-to-point helpers exposed on `window.__premark*`, and AI streaming fixture helpers. These are less urgent than input/DOM tree stability because they are either renderer binding or test fixture adapters, but product integration should eventually get reusable DOM/Canvas editor host packages.

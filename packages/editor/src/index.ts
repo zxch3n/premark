@@ -1,5 +1,15 @@
 export { createCompositionSession, CompositionSession } from "./composition.ts";
 export {
+  createPremarkBrowserInputHost,
+  PremarkBrowserInputHost,
+  shouldPreserveNativeInputContext,
+} from "./browser-input-host.ts";
+export type {
+  BrowserInputHostOptions,
+  BrowserInputHostPoint,
+  BrowserInputHostRenderOptions,
+} from "./browser-input-host.ts";
+export {
   clientPointToSurfacePoint,
   clientPointToWorldPoint,
   surfacePointToClientPoint,
