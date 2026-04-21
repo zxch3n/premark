@@ -1,9 +1,9 @@
-import { defineConfig } from "@playwright/test";
+import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
   testDir: "tests/browser",
-  testIgnore: /native-editor-webkit\.spec\.ts/,
-  outputDir: "artifacts/playwright-browser",
+  testMatch: /native-editor-webkit\.spec\.ts/,
+  outputDir: "artifacts/playwright-webkit",
   timeout: 30_000,
   expect: {
     timeout: 5_000,
@@ -14,9 +14,31 @@ export default defineConfig({
       "html",
       {
         open: "never",
-        outputFolder: "artifacts/playwright-browser-html",
+        outputFolder: "artifacts/playwright-webkit-html",
       },
     ],
+  ],
+  workers: 1,
+  projects: [
+    {
+      name: "chromium-reference",
+      use: {
+        browserName: "chromium",
+      },
+    },
+    {
+      name: "webkit",
+      use: {
+        browserName: "webkit",
+      },
+    },
+    {
+      name: "mobile-webkit-proxy",
+      use: {
+        ...devices["iPhone 15"],
+        browserName: "webkit",
+      },
+    },
   ],
   use: {
     baseURL: "http://127.0.0.1:6106",
