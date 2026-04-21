@@ -33,6 +33,23 @@ describe("parseMarkdown", () => {
     expect(blocks[3]).toMatchObject({ type: "code-block", info: "ts" });
   });
 
+  it("splits list blocks at explicit blank source lines between items", () => {
+    const unordered = parseMarkdown("- a\n\n- b\n- c");
+    expect(unordered).toHaveLength(2);
+    expect(unordered[0]).toMatchObject({ type: "list", kind: "unordered", items: [{}] });
+    expect(unordered[1]).toMatchObject({ type: "list", kind: "unordered", items: [{}, {}] });
+
+    const ordered = parseMarkdown("1. a\n\n3. c\n4. d");
+    expect(ordered).toHaveLength(2);
+    expect(ordered[0]).toMatchObject({ type: "list", kind: "ordered", start: 1, items: [{}] });
+    expect(ordered[1]).toMatchObject({
+      type: "list",
+      kind: "ordered",
+      start: 3,
+      items: [{}, {}],
+    });
+  });
+
   it("captures heading inline content for ATX and Setext variants", () => {
     expect(parseMarkdown("# Hello World")[0]).toMatchObject({
       type: "heading",
@@ -608,6 +625,16 @@ describe("incrementalParse", () => {
       {
         name: "decrease list indentation",
         oldText: "- one\n  - two",
+        newText: "- one\n- two",
+      },
+      {
+        name: "split list at explicit blank source line",
+        oldText: "- one\n- two",
+        newText: "- one\n\n- two",
+      },
+      {
+        name: "join lists after removing explicit blank source line",
+        oldText: "- one\n\n- two",
         newText: "- one\n- two",
       },
       {

@@ -1,7 +1,6 @@
 import {
   layoutNextLine,
   prepareWithSegments,
-  walkLineRanges,
   type LayoutCursor,
   type PreparedTextWithSegments,
 } from "@chenglou/pretext";
@@ -15,6 +14,7 @@ import type {
   TextLine,
 } from "../types.ts";
 
+import { measureTextWidth } from "../measurement-context.ts";
 import type { ListPrefix } from "./list.ts";
 
 const LINE_START_CURSOR: LayoutCursor = {
@@ -155,24 +155,14 @@ function getFontForStyle(
   };
 }
 
-function measureSingleLineWidth(prepared: PreparedTextWithSegments): number {
-  let maxWidth = 0;
-  walkLineRanges(prepared, UNBOUNDED_WIDTH, (line) => {
-    if (line.width > maxWidth) {
-      maxWidth = line.width;
-    }
-  });
-  return maxWidth;
-}
-
 function measureCollapsedSpaceWidth(font: string): number {
   const cached = collapsedSpaceWidthCache.get(font);
   if (cached !== undefined) {
     return cached;
   }
 
-  const joinedWidth = measureSingleLineWidth(prepareWithSegments("A A", font));
-  const compactWidth = measureSingleLineWidth(prepareWithSegments("AA", font));
+  const joinedWidth = measureTextWidth("A A", font);
+  const compactWidth = measureTextWidth("AA", font);
   const collapsedWidth = Math.max(0, joinedWidth - compactWidth);
   collapsedSpaceWidthCache.set(font, collapsedWidth);
   return collapsedWidth;
@@ -395,7 +385,7 @@ function prepareInlineItems(specs: readonly InlineSpec[]): PreparedInlineItem[] 
       prepared,
       endCursor: fullLine.end,
       fullText: fullLine.text,
-      fullWidth: fullLine.width,
+      fullWidth: measureTextWidth(fullLine.text, spec.font),
       leadingGap,
       chromeWidth: spec.chromeWidth,
       font: spec.font,
@@ -542,12 +532,8 @@ export function layoutRichText(
     contentFragmentCount = 0;
   }
 
-  function addFragment(
-    item: PreparedTextItem,
-    text: string,
-    width: number,
-    leadingGap: number,
-  ): void {
+  function addFragment(item: PreparedTextItem, text: string, leadingGap: number): void {
+    const width = measureTextWidth(text, item.font);
     const fragment: InlineFragment = {
       text,
       x: lineWidth + leadingGap,
@@ -601,7 +587,7 @@ export function layoutRichText(
     if (textCursor === null) {
       const fullWidth = leadingGap + item.fullWidth + item.chromeWidth;
       if (fullWidth <= remainingWidth) {
-        addFragment(item, item.fullText, item.fullWidth, leadingGap);
+        addFragment(item, item.fullText, leadingGap);
         itemIndex += 1;
         continue;
       }
@@ -616,7 +602,7 @@ export function layoutRichText(
 
     if (line === null || cursorsMatch(startCursor, line.end)) {
       if (contentFragmentCount === 0) {
-        addFragment(item, item.fullText, item.fullWidth, leadingGap);
+        addFragment(item, item.fullText, leadingGap);
         itemIndex += 1;
         continue;
       }
@@ -626,7 +612,7 @@ export function layoutRichText(
       continue;
     }
 
-    addFragment(item, line.text, line.width, leadingGap);
+    addFragment(item, line.text, leadingGap);
 
     if (cursorsMatch(line.end, item.endCursor)) {
       itemIndex += 1;

@@ -71,7 +71,6 @@ export interface PremarkCanvasEditorHostPaintState {
   readonly ctx: CanvasRenderingContext2D;
   readonly snapshot: PremarkEditorRenderSnapshot;
   readonly geometry: SelectionGeometry;
-  readonly clipRect: Rect | undefined;
   readonly width: number;
   readonly height: number;
   readonly contentPadding: number;
@@ -92,7 +91,6 @@ export interface PremarkCanvasEditorHost {
 }
 
 const DEFAULT_CONTENT_PADDING = 28;
-const DIRTY_CLIP_MARGIN = 4;
 
 export function createPremarkCanvasEditorHost(
   options: PremarkCanvasEditorHostOptions,
@@ -110,8 +108,6 @@ class PremarkCanvasEditorHostImpl implements PremarkCanvasEditorHost {
   private readonly overscanY: number;
   private activeEditableIndex: EditableLayoutIndex;
   private lastSnapshot: PremarkEditorRenderSnapshot | null = null;
-  private hasRendered = false;
-  private lastRenderedVersion = -1;
 
   constructor(private readonly options: PremarkCanvasEditorHostOptions) {
     const ctx = options.canvas.getContext("2d");
@@ -157,14 +153,12 @@ class PremarkCanvasEditorHostImpl implements PremarkCanvasEditorHost {
     const snapshot = this.options.controller.renderSnapshot();
     this.activeEditableIndex = snapshot.editableIndex;
     const geometry = this.createGeometry(snapshot);
-    const clipRect = this.createDirtyClipRect(snapshot);
     const state: PremarkCanvasEditorHostRenderState = {
       canvas: this.options.canvas,
       ctx: this.context,
       snapshot,
       geometry,
       editableIndex: snapshot.editableIndex,
-      clipRect,
       width: this.options.width,
       height: this.options.height,
       contentPadding: this.contentPadding,
@@ -177,8 +171,6 @@ class PremarkCanvasEditorHostImpl implements PremarkCanvasEditorHost {
     }
     this.options.paint?.afterPaint?.(state);
 
-    this.hasRendered = true;
-    this.lastRenderedVersion = snapshot.version;
     this.lastSnapshot = snapshot;
     this.syncInputBridge(snapshot, geometry, {
       writeValue: options.syncBridgeValue !== false,
@@ -246,7 +238,6 @@ class PremarkCanvasEditorHostImpl implements PremarkCanvasEditorHost {
       cardRadius: paint?.cardRadius ?? 0,
       contentPadding: this.contentPadding,
       scrollY: state.snapshot.viewport.scrollTop,
-      clipRect: state.clipRect,
       selectionRects: state.geometry.selectionRects,
       selectionColor: paint?.selectionColor ?? "rgba(52, 139, 99, 0.34)",
       caretRect: state.geometry.caret?.rect,
@@ -315,31 +306,6 @@ class PremarkCanvasEditorHostImpl implements PremarkCanvasEditorHost {
       },
       options,
     );
-  }
-
-  private createDirtyClipRect(snapshot: PremarkEditorRenderSnapshot): Rect | undefined {
-    if (
-      !this.hasRendered ||
-      snapshot.version === this.lastRenderedVersion ||
-      snapshot.renderUpdate.dirtyRects.length !== 1
-    ) {
-      return undefined;
-    }
-    return this.canvasClipFromDirtyRect(
-      snapshot.renderUpdate.dirtyRects[0]!,
-      snapshot.viewport.scrollTop,
-    );
-  }
-
-  private canvasClipFromDirtyRect(rect: Rect, scrollTop: number): Rect {
-    const x = Math.max(0, this.contentPadding + rect.x - DIRTY_CLIP_MARGIN);
-    const y = Math.max(0, this.contentPadding + rect.y - scrollTop - DIRTY_CLIP_MARGIN);
-    return {
-      x,
-      y,
-      width: Math.min(this.options.width - x, rect.width + DIRTY_CLIP_MARGIN * 2),
-      height: Math.min(this.options.height - y, rect.height + DIRTY_CLIP_MARGIN * 2),
-    };
   }
 
   private drawDirtyOverlay(rects: readonly Rect[], scrollTop: number): void {

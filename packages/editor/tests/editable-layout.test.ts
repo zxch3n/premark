@@ -270,9 +270,7 @@ describe("EditableLayoutIndex", () => {
       fragment!.text.slice(0, localOffset),
       fragment!.font,
     );
-    const measuredFullWidth = measuredTextWidth(fragment!.text, fragment!.font);
-    const expectedX =
-      fragment!.rect.x + (measuredPrefixWidth / measuredFullWidth) * fragment!.rect.width;
+    const expectedX = fragment!.rect.x + measuredPrefixWidth;
     const proportionalX =
       fragment!.rect.x + (fragment!.rect.width * localOffset) / fragment!.text.length;
 
@@ -296,10 +294,8 @@ describe("EditableLayoutIndex", () => {
     const emojiTo = emojiFrom + emoji.length;
     const localEmojiTo = emojiTo - fragment!.sourceRange.from;
     const boundaryXs = measureGraphemeBoundaryXs(fragment!.text, fragment!.font);
-    const measuredFullWidth = boundaryXs.at(-1)!;
     const measuredEmojiEndWidth = boundaryXs[localEmojiTo]!;
-    const expectedEmojiEndX =
-      fragment!.rect.x + (measuredEmojiEndWidth / measuredFullWidth) * fragment!.rect.width;
+    const expectedEmojiEndX = fragment!.rect.x + measuredEmojiEndWidth;
 
     const before = index.sourceOffsetToCaretRect(emojiFrom, "before");
     const insideBefore = index.sourceOffsetToCaretRect(emojiFrom + 2, "before");
@@ -327,13 +323,10 @@ describe("EditableLayoutIndex", () => {
     expect(fragment).toBeDefined();
 
     const boundaryXs = measureGraphemeBoundaryXs(fragment!.text, fragment!.font);
-    const measuredWidth = boundaryXs.at(-1)!;
-    const visibleWidth = fragment!.rect.width - fragment!.textInsetX * 2;
-    const scale = measuredWidth > 0 ? visibleWidth / measuredWidth : 1;
     const carets = Array.from({ length: 8 }, (_, emojiIndex) => {
       const offset = emojiIndex * emoji.length;
       const caret = index.sourceOffsetToCaretRect(offset);
-      const expectedX = fragment!.rect.x + fragment!.textInsetX + boundaryXs[offset]! * scale;
+      const expectedX = fragment!.rect.x + fragment!.textInsetX + boundaryXs[offset]!;
       expect(caret.rect.x, `emoji boundary ${emojiIndex}`).toBeCloseTo(expectedX, 0);
       return caret;
     });
@@ -346,6 +339,32 @@ describe("EditableLayoutIndex", () => {
     const fifthEnd = carets[5]!.rect.x;
     const hit = index.hitTest((fifthStart + fifthEnd) / 2, carets[4]!.rect.y + 1);
     expect([4 * emoji.length, 5 * emoji.length]).toContain(hit.offset);
+  });
+
+  it("keeps following inline fragments aligned after emoji Canvas advances", () => {
+    const emoji = "👨‍👩‍👧‍👦";
+    const markdown = `${emoji}[docs](https://example.com)\`code\``;
+    const { index } = createTestIndex(markdown);
+    const emojiFragment = index.fragments.find((candidate) => candidate.text === emoji);
+    const docsFragment = index.fragments.find((candidate) => candidate.text === "docs");
+    const codeFragment = index.fragments.find((candidate) => candidate.text === "code");
+    expect(emojiFragment).toBeDefined();
+    expect(docsFragment).toBeDefined();
+    expect(codeFragment).toBeDefined();
+
+    const emojiEnd = index.sourceOffsetToCaretRect(emoji.length, "before");
+    const docsStart = index.sourceOffsetToCaretRect(markdown.indexOf("docs"), "after");
+    const docsEnd = index.sourceOffsetToCaretRect(
+      markdown.indexOf("docs") + "docs".length,
+      "before",
+    );
+    const codeStart = index.sourceOffsetToCaretRect(markdown.indexOf("code"), "after");
+
+    expect(emojiEnd.rect.x).toBeCloseTo(docsFragment!.rect.x, 0);
+    expect(docsStart.rect.x).toBeCloseTo(docsFragment!.rect.x, 0);
+    expect(docsEnd.rect.x).toBeCloseTo(docsFragment!.rect.x + docsFragment!.rect.width, 0);
+    expect(codeFragment!.rect.x).toBeCloseTo(docsFragment!.rect.x + docsFragment!.rect.width, 0);
+    expect(codeStart.rect.x).toBeCloseTo(codeFragment!.rect.x + codeFragment!.textInsetX, 0);
   });
 
   it("keeps inline-code caret positions inside the code pill padding", () => {
@@ -898,9 +917,8 @@ describe("EditableLayoutIndex", () => {
     const selectionRects = index.sourceRangeToSelectionRects({ from: 1, to: 4 });
     const fragment = index.fragments[0]!;
     const boundaries = measureGraphemeBoundaryXs(fragment.text, fragment.font);
-    const scale = fragment.rect.width / boundaries.at(-1)!;
-    const expectedX = boundaries[1]! * scale;
-    const expectedWidth = (boundaries[4]! - boundaries[1]!) * scale;
+    const expectedX = boundaries[1]!;
+    const expectedWidth = boundaries[4]! - boundaries[1]!;
 
     expect(selectionRects).toHaveLength(1);
     expect(selectionRects[0]?.x).toBeCloseTo(expectedX, 5);
@@ -938,6 +956,21 @@ describe("EditableLayoutIndex", () => {
     expect(nextBlockStart.rect.y).toBe(first!.rect.y + first!.rect.height * 2);
   });
 
+  it("places caret at the content start for empty list items", () => {
+    const markdown = "- a\n- \n- b";
+    const { index } = createTestIndex(markdown);
+    const firstContent = index.fragments.find((fragment) => fragment.text === "a");
+    const emptyContent = index.fragments.find((fragment) => fragment.sourceRange.from === 6);
+    expect(firstContent).toBeDefined();
+    expect(emptyContent).toBeDefined();
+
+    const caret = index.sourceOffsetToCaretRect(markdown.indexOf("- \n") + "- ".length);
+    expect(caret.fragment).toBe(emptyContent);
+    expect(caret.rect.x).toBeCloseTo(firstContent!.rect.x, 0);
+    expect(caret.rect.y).toBeGreaterThan(firstContent!.rect.y);
+    expect(caret.rect.height).toBeGreaterThan(0);
+  });
+
   it("preserves every source newline as a visual line break in editor layout", () => {
     const markdown = "abc\ndef\n\nghi";
     const { index } = createTestIndex(markdown);
@@ -958,6 +991,165 @@ describe("EditableLayoutIndex", () => {
     expect(index.sourceOffsetToCaretRect(markdown.indexOf("def")).fragment).toBe(second);
     expect(index.sourceOffsetToCaretRect(8).fragment).toBe(blank);
     expect(index.sourceOffsetToCaretRect(markdown.indexOf("ghi")).fragment).toBe(third);
+  });
+
+  it("keeps carets addressable across runs of multiple blank source lines", () => {
+    const markdown = "a\n\nb\n\n\n\nc";
+    const { index } = createTestIndex(markdown);
+    const lineHeight = index.sourceOffsetToCaretRect(0).rect.height;
+    const expected = [
+      { offset: 0, y: 8 },
+      { offset: 2, y: 8 + lineHeight },
+      { offset: 3, y: 8 + lineHeight * 2 },
+      { offset: 5, y: 8 + lineHeight * 3 },
+      { offset: 6, y: 8 + lineHeight * 4 },
+      { offset: 7, y: 8 + lineHeight * 5 },
+      { offset: 8, y: 8 + lineHeight * 6 },
+    ];
+
+    for (const point of expected) {
+      const caret = index.sourceOffsetToCaretRect(point.offset);
+      expect(caret.rect.x, `offset ${point.offset} x`).toBeGreaterThanOrEqual(0);
+      expect(caret.rect.y, `offset ${point.offset} y`).toBeCloseTo(point.y, 5);
+      expect(caret.rect.height, `offset ${point.offset} height`).toBeGreaterThan(0);
+    }
+  });
+
+  it("keeps carets visible on leading and trailing blank source lines", () => {
+    const markdown = "\n\na\n\n";
+    const { index } = createTestIndex(markdown);
+    const textCaret = index.sourceOffsetToCaretRect(markdown.indexOf("a"));
+    const lineHeight = textCaret.rect.height;
+    const expected = [
+      { offset: 0, y: textCaret.rect.y - lineHeight * 2 },
+      { offset: 1, y: textCaret.rect.y - lineHeight },
+      { offset: 2, y: textCaret.rect.y },
+      { offset: 4, y: textCaret.rect.y + lineHeight },
+      { offset: 5, y: textCaret.rect.y + lineHeight * 2 },
+    ];
+
+    for (const point of expected) {
+      const caret = index.sourceOffsetToCaretRect(point.offset);
+      expect(caret.fragment, `offset ${point.offset} fragment`).not.toBeNull();
+      expect(caret.rect.x, `offset ${point.offset} x`).toBeGreaterThanOrEqual(0);
+      expect(caret.rect.y, `offset ${point.offset} y`).toBeCloseTo(point.y, 5);
+      expect(caret.rect.height, `offset ${point.offset} height`).toBeGreaterThan(0);
+    }
+  });
+
+  it("hit-tests inter-block whitespace to the blank source line", () => {
+    const markdown = "# Title\n\nParagraph";
+    const { index } = createTestIndex(markdown);
+    const heading = index.fragments.find((fragment) => fragment.text.includes("Title"));
+    const blank = index.fragments.find((fragment) => fragment.sourceRange.from === 8);
+    const paragraph = index.fragments.find((fragment) => fragment.text === "Paragraph");
+    expect(heading).toBeDefined();
+    expect(blank).toBeDefined();
+    expect(paragraph).toBeDefined();
+    expect(blank!.rect.y).toBeCloseTo(heading!.rect.y + heading!.rect.height, 5);
+    expect(paragraph!.rect.y).toBeGreaterThan(blank!.rect.y);
+
+    const marginY = (heading!.rect.y + heading!.rect.height + paragraph!.rect.y) / 2;
+    const hit = index.hitTest(heading!.rect.x + heading!.rect.width + 120, marginY);
+
+    expect(hit.fragment).toBe(blank);
+    expect(hit.offset).toBe(8);
+  });
+
+  it("keeps blank-only source documents editable line by line", () => {
+    const markdown = "\n\n";
+    const { layout, index } = createTestIndex(markdown);
+    const lineHeight = layout.sourceLineHeight ?? 0;
+    expect(lineHeight).toBeGreaterThan(0);
+    expect(layout.totalHeight).toBeCloseTo(lineHeight * 3, 5);
+    expect(index.fragments).toHaveLength(3);
+
+    const expected = [
+      { offset: 0, y: 0 },
+      { offset: 1, y: lineHeight },
+      { offset: 2, y: lineHeight * 2 },
+    ];
+    for (const point of expected) {
+      const caret = index.sourceOffsetToCaretRect(point.offset);
+      expect(caret.fragment, `offset ${point.offset}`).not.toBeNull();
+      expect(caret.rect.x, `offset ${point.offset}`).toBe(0);
+      expect(caret.rect.y, `offset ${point.offset}`).toBeCloseTo(point.y, 5);
+      expect(caret.rect.height, `offset ${point.offset}`).toBeCloseTo(lineHeight, 5);
+      const hit = index.hitTest(160, point.y + lineHeight / 2);
+      expect(hit.offset, `hit offset ${point.offset}`).toBe(point.offset);
+    }
+  });
+
+  it("keeps whitespace-only source line positions addressable", () => {
+    const markdown = "   \n\n";
+    const { index } = createTestIndex(markdown);
+    expect(index.fragments).toHaveLength(3);
+    expect(index.fragments[0]?.text).toBe("   ");
+
+    const lineStart = index.sourceOffsetToCaretRect(0);
+    const afterSpaces = index.sourceOffsetToCaretRect(3);
+    expect(afterSpaces.rect.x).toBeGreaterThan(lineStart.rect.x);
+    expect(afterSpaces.rect.y).toBe(lineStart.rect.y);
+
+    const secondLine = index.sourceOffsetToCaretRect(4);
+    const thirdLine = index.sourceOffsetToCaretRect(5);
+    expect(secondLine.rect.y).toBeGreaterThan(afterSpaces.rect.y);
+    expect(thirdLine.rect.y).toBeGreaterThan(secondLine.rect.y);
+  });
+
+  it("uses layout source lines as the authority for large blank-run caret geometry", () => {
+    const markdown = [
+      "# Canvas native editor",
+      "",
+      "",
+      "asdfsd",
+      "",
+      "",
+      "",
+      "",
+      "## adddfasdfdsf",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "Click text, drag across blocks, then type directly on the rendered canvas.",
+      "",
+      "- Selection is stored as source offsets.",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "- The hidden textarea mirrors only the active source slice.",
+      "- Cross-block replacement uses one source operation.",
+      "",
+      "Widths iiiii WWWW done.",
+      "",
+      "Try **bold text**, `inline code`, [docs](https://example.com), 中文输入, and emoji 👨‍👩‍👧‍👦.",
+    ].join("\n");
+    const { layout, index } = createTestIndex(markdown, 724);
+    const sourceLines = layout.sourceLines ?? [];
+    expect(sourceLines).toHaveLength(31);
+
+    for (const line of sourceLines) {
+      const caret = index.sourceOffsetToCaretRect(line.start);
+      expect(caret.rect.y, `line ${line.index}`).toBeCloseTo(line.y, 5);
+      expect(caret.rect.height, `line ${line.index}`).toBeCloseTo(line.height, 5);
+    }
+
+    const blankLineStarts = sourceLines
+      .filter((line) => markdown.slice(line.start, line.end) === "")
+      .map((line) => line.start);
+    expect(blankLineStarts.length).toBeGreaterThan(10);
+    for (const offset of blankLineStarts) {
+      const caret = index.sourceOffsetToCaretRect(offset);
+      const hit = index.hitTest(240, caret.rect.y + caret.rect.height / 2);
+      expect(hit.offset, `blank line ${offset}`).toBe(offset);
+    }
   });
 
   it("keeps styled softbreak content source-addressable across visual lines", () => {

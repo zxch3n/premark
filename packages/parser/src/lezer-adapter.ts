@@ -21,6 +21,8 @@ interface ReferenceDefinition {
 interface TopLevelBlockEntry {
   node: SyntaxNode;
   span: BlockSpan;
+  listItemFrom?: number;
+  listItemTo?: number;
 }
 
 interface InlineConversionOptions {
@@ -29,6 +31,13 @@ interface InlineConversionOptions {
 
 interface ConvertedInlineNode {
   readonly nodes: readonly MarkdownInline[];
+  readonly to: number;
+}
+
+interface ListItemSegment {
+  readonly itemFrom: number;
+  readonly itemTo: number;
+  readonly from: number;
   readonly to: number;
 }
 
@@ -87,27 +96,57 @@ export function extractTopLevelBlockEntries(
       return;
     }
 
-    if (blockIndex < startBlockIndex) {
+    for (const entry of createTopLevelEntries(child, markdown, blockType)) {
+      if (blockIndex >= startBlockIndex) {
+        entries.push(entry);
+      }
       blockIndex += 1;
-      return;
     }
-
-    entries.push({
-      node: child,
-      span: {
-        from: child.from,
-        to: child.to,
-        id: createBlockId(blockType, markdown, child.from, child.to),
-        type: blockType,
-        signature: hashTextRangeWithPrefix(markdown, child.from, child.to, blockType),
-      },
-    });
-    blockIndex += 1;
   });
 
   return {
     entries,
     definitions,
+  };
+}
+
+function createTopLevelEntries(
+  node: SyntaxNode,
+  markdown: string,
+  blockType: string,
+): TopLevelBlockEntry[] {
+  if (node.type.name !== "BulletList" && node.type.name !== "OrderedList") {
+    return [createTopLevelEntry(node, markdown, blockType, node.from, node.to)];
+  }
+
+  const segments = createListItemSegments(node, markdown);
+  if (segments.length === 1) {
+    return [createTopLevelEntry(node, markdown, blockType, node.from, node.to)];
+  }
+
+  return segments.map((segment) => ({
+    ...createTopLevelEntry(node, markdown, blockType, segment.from, segment.to),
+    listItemFrom: segment.itemFrom,
+    listItemTo: segment.itemTo,
+  }));
+}
+
+function createTopLevelEntry(
+  node: SyntaxNode,
+  markdown: string,
+  blockType: string,
+  from: number,
+  to: number,
+): TopLevelBlockEntry {
+  return {
+    node,
+    span: {
+      from,
+      to,
+      id: createBlockId(blockType, markdown, from, to),
+      type: blockType,
+      signature: hashTextRangeWithPrefix(markdown, from, to, blockType),
+    },
   };
 }
 
@@ -117,14 +156,25 @@ export function materializeBlocks(
   definitions: Map<string, ReferenceDefinition>,
 ): readonly MarkdownBlock[] {
   return freezeMarkdownBlocks(
-    entries.map((entry) => convertBlockNode(entry.node, markdown, definitions)),
+    entries.map((entry) =>
+      convertBlockNode(entry.node, markdown, definitions, {
+        listItemFrom: entry.listItemFrom,
+        listItemTo: entry.listItemTo,
+      }),
+    ),
   );
+}
+
+interface BlockConversionOptions {
+  readonly listItemFrom?: number;
+  readonly listItemTo?: number;
 }
 
 function convertBlockNode(
   node: SyntaxNode,
   markdown: string,
   definitions: Map<string, ReferenceDefinition>,
+  options: BlockConversionOptions = {},
 ): MarkdownBlock {
   const name = node.type.name;
 
@@ -151,7 +201,7 @@ function convertBlockNode(
       return convertCodeBlock(node, markdown);
     case "BulletList":
     case "OrderedList":
-      return convertList(node, markdown, definitions);
+      return convertList(node, markdown, definitions, options);
     case "Blockquote":
       return {
         type: "blockquote",
@@ -238,12 +288,15 @@ function convertList(
   node: SyntaxNode,
   markdown: string,
   definitions: Map<string, ReferenceDefinition>,
+  options: BlockConversionOptions,
 ): MarkdownBlock {
-  const children = getChildren(node);
-  const items = children
-    .filter((child) => child.type.name === "ListItem")
-    .map((child) => convertListItem(child, markdown, definitions));
-  const firstMark = findFirstChildByName(children[0], "ListMark");
+  const children = getListItemChildren(node);
+  const itemNodes = children.slice(
+    options.listItemFrom ?? 0,
+    options.listItemTo ?? children.length,
+  );
+  const items = itemNodes.map((child) => convertListItem(child, markdown, definitions));
+  const firstMark = findFirstChildByName(itemNodes[0], "ListMark");
   const markText =
     firstMark === null ? "-" : markdown.slice(firstMark.from, firstMark.to).replace(/\d+/gu, "");
 
@@ -288,7 +341,7 @@ function convertListItem(
         break;
       }
       default:
-        blocks.push(convertBlockNode(child, markdown, definitions));
+        blocks.push(...convertBlockNodes(child, markdown, definitions));
         break;
     }
   }
@@ -363,10 +416,27 @@ function convertContainerChildren(
     if (skipTypes.has(child.type.name)) {
       return;
     }
-    blocks.push(convertBlockNode(child, markdown, definitions));
+    blocks.push(...convertBlockNodes(child, markdown, definitions));
   });
 
   return blocks;
+}
+
+function convertBlockNodes(
+  node: SyntaxNode,
+  markdown: string,
+  definitions: Map<string, ReferenceDefinition>,
+): MarkdownBlock[] {
+  if (node.type.name !== "BulletList" && node.type.name !== "OrderedList") {
+    return [convertBlockNode(node, markdown, definitions)];
+  }
+
+  return createListItemSegments(node, markdown).map((segment) =>
+    convertBlockNode(node, markdown, definitions, {
+      listItemFrom: segment.itemFrom,
+      listItemTo: segment.itemTo,
+    }),
+  );
 }
 
 function convertInlineRange(
@@ -827,6 +897,60 @@ function findFirstChildByName(node: SyntaxNode | undefined, name: string): Synta
   }
 
   return null;
+}
+
+function createListItemSegments(node: SyntaxNode, markdown: string): ListItemSegment[] {
+  const items = getListItemChildren(node);
+  if (items.length === 0) {
+    return [
+      {
+        itemFrom: 0,
+        itemTo: 0,
+        from: node.from,
+        to: node.to,
+      },
+    ];
+  }
+
+  const segments: ListItemSegment[] = [];
+  let segmentItemFrom = 0;
+  for (let index = 1; index < items.length; index += 1) {
+    const previous = items[index - 1]!;
+    const current = items[index]!;
+    if (!isBlankListItemSeparator(markdown, previous.to, current.from)) {
+      continue;
+    }
+
+    segments.push({
+      itemFrom: segmentItemFrom,
+      itemTo: index,
+      from: items[segmentItemFrom]!.from,
+      to: previous.to,
+    });
+    segmentItemFrom = index;
+  }
+
+  const lastItem = items.at(-1)!;
+  segments.push({
+    itemFrom: segmentItemFrom,
+    itemTo: items.length,
+    from: items[segmentItemFrom]!.from,
+    to: lastItem.to,
+  });
+  return segments;
+}
+
+function isBlankListItemSeparator(markdown: string, from: number, to: number): boolean {
+  const separator = markdown.slice(from, to);
+  if (/[^ \t\r\n]/u.test(separator)) {
+    return false;
+  }
+
+  return (separator.match(/\n/gu)?.length ?? 0) >= 2;
+}
+
+function getListItemChildren(node: SyntaxNode): SyntaxNode[] {
+  return getChildren(node).filter((child) => child.type.name === "ListItem");
 }
 
 function getChildren(node: SyntaxNode): SyntaxNode[] {

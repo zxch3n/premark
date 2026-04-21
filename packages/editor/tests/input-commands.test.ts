@@ -133,6 +133,24 @@ describe("applyInputIntent", () => {
     expect(quote.selectionSourceRange).toEqual({ from: 0, to: 0 });
   });
 
+  it("splits a list into two rendered list blocks when exiting an empty middle item", () => {
+    const editor = createInMemoryEditorDocumentState("- a\n- b\n- c", 600);
+    const afterA = editor.markdown.indexOf("a") + 1;
+    editor.setSelection(afterA, afterA);
+
+    applyInputIntent(editor, { type: "insert-paragraph" });
+    expect(editor.markdown).toBe("- a\n- \n- b\n- c");
+
+    applyInputIntent(editor, { type: "insert-paragraph" });
+
+    expect(editor.markdown).toBe("- a\n\n- b\n- c");
+    expect(editor.selectionSourceRange).toEqual({ from: "- a\n".length, to: "- a\n".length });
+    expect(editor.layout.blocks.filter((block) => block.type === "list_item")).toHaveLength(3);
+    expect(editor.layout.blocks[0]?.sourceBlockIndex).not.toBe(
+      editor.layout.blocks[1]?.sourceBlockIndex,
+    );
+  });
+
   it("continues blockquotes and blockquote list items on Enter", () => {
     const quote = createInMemoryEditorDocumentState("> quoted", 600);
     quote.setSelection(quote.markdown.length, quote.markdown.length);

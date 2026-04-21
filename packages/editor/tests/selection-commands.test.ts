@@ -271,6 +271,35 @@ describe("selection commands", () => {
     expect(editor.selectionSourceRange.from).toBeGreaterThan(0);
   });
 
+  it("moves vertically to short and blank adjacent lines by clamping the target x", () => {
+    const markdown = "short\n\nThis is a much much longer line";
+    const editor = createInMemoryEditorDocumentState(markdown, 600);
+    const longLineEnd = markdown.length;
+    editor.setSelection(longLineEnd, longLineEnd);
+
+    applyKeyboardSelectionIntent(editor, {
+      type: "keyboard-selection",
+      key: "ArrowUp",
+      by: "line",
+      extend: false,
+    });
+
+    expect(editor.selectionSourceRange).toEqual({
+      from: markdown.indexOf("\n\n") + 1,
+      to: markdown.indexOf("\n\n") + 1,
+    });
+
+    applyKeyboardSelectionIntent(editor, {
+      type: "keyboard-selection",
+      key: "ArrowUp",
+      by: "line",
+      extend: false,
+    });
+
+    expect(editor.selectionSourceRange.from).toBeGreaterThanOrEqual(0);
+    expect(editor.selectionSourceRange.from).toBeLessThanOrEqual("short".length);
+  });
+
   it("moves by page granularity", () => {
     const editor = createInMemoryEditorDocumentState(
       Array.from({ length: 18 }, (_, index) => `Line ${index + 1} with text`).join("\n\n"),

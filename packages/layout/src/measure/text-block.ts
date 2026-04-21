@@ -4,6 +4,7 @@ import {
   type PreparedTextWithSegments,
 } from "@chenglou/pretext";
 
+import { measureTextWidth } from "../measurement-context.ts";
 import type { FragmentMeta, FragmentType, TextLine } from "../types.ts";
 
 export interface PreparedTextBlock {
@@ -63,26 +64,29 @@ export function layoutTextBlock(
           },
         ];
 
-  const mapped = lines.map<TextLine>((line, lineIndex) => ({
-    kind: "text",
-    index: options.startLineIndex + lineIndex,
-    blockIndex: options.blockIndex,
-    lineIndexInBlock: lineIndex,
-    x: options.x,
-    y: options.y + lineIndex * preparedBlock.lineHeight,
-    height: preparedBlock.lineHeight,
-    width: line.width,
-    fragments: [
-      {
-        text: line.text,
-        x: 0,
-        width: line.width,
-        font: preparedBlock.font,
-        type: preparedBlock.fragmentType,
-        meta: preparedBlock.fragmentMeta,
-      },
-    ],
-  }));
+  const mapped = lines.map<TextLine>((line, lineIndex) => {
+    const width = measureTextWidth(line.text, preparedBlock.font);
+    return {
+      kind: "text",
+      index: options.startLineIndex + lineIndex,
+      blockIndex: options.blockIndex,
+      lineIndexInBlock: lineIndex,
+      x: options.x,
+      y: options.y + lineIndex * preparedBlock.lineHeight,
+      height: preparedBlock.lineHeight,
+      width,
+      fragments: [
+        {
+          text: line.text,
+          x: 0,
+          width,
+          font: preparedBlock.font,
+          type: preparedBlock.fragmentType,
+          meta: preparedBlock.fragmentMeta,
+        },
+      ],
+    };
+  });
 
   return {
     lines: mapped,

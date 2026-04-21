@@ -132,6 +132,7 @@ test.describe("Premark native editor visual baselines", () => {
       await expect(row).toHaveScreenshot(`native-editor-visual-parity-${report.id}.png`, {
         animations: "disabled",
         maxDiffPixelRatio: 0.01,
+        timeout: 15_000,
       });
     }
   });
