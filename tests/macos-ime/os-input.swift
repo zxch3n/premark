@@ -2,7 +2,7 @@ import ApplicationServices
 import Foundation
 
 func usage() -> Never {
-  fputs("usage: os-input.swift check | keycodes <pid> <key-code>... | hid-keycodes <key-code>... | hid-shortcut <modifiers> <key-code>\n", stderr)
+  fputs("usage: os-input.swift check | keycodes <pid> <key-code>... | hid-keycodes <key-code>... | hid-shortcut <modifiers> <key-code> | hid-click <x> <y> [click-count] | hid-drag <from-x> <from-y> <to-x> <to-y> [steps]\n", stderr)
   exit(2)
 }
 
@@ -50,6 +50,66 @@ func postKey(code: CGKeyCode, flags: CGEventFlags = [], pid: Int32? = nil) {
   }
 }
 
+func parseDouble(_ raw: String, name: String) -> Double {
+  guard let value = Double(raw) else {
+    fputs("invalid \(name): \(raw)\n", stderr)
+    exit(3)
+  }
+  return value
+}
+
+func parseInt(_ raw: String, name: String) -> Int {
+  guard let value = Int(raw) else {
+    fputs("invalid \(name): \(raw)\n", stderr)
+    exit(3)
+  }
+  return value
+}
+
+func postMouse(type: CGEventType, x: Double, y: Double, clickState: Int = 1) {
+  let source = CGEventSource(stateID: .hidSystemState)
+  guard
+    let event = CGEvent(
+      mouseEventSource: source,
+      mouseType: type,
+      mouseCursorPosition: CGPoint(x: x, y: y),
+      mouseButton: .left
+    )
+  else {
+    fputs("failed to create mouse event\n", stderr)
+    exit(4)
+  }
+  event.setIntegerValueField(.mouseEventClickState, value: Int64(clickState))
+  event.post(tap: .cghidEventTap)
+}
+
+func hidClick(x: Double, y: Double, clickCount: Int) {
+  postMouse(type: .mouseMoved, x: x, y: y)
+  usleep(80_000)
+  for clickIndex in 1...max(1, clickCount) {
+    postMouse(type: .leftMouseDown, x: x, y: y, clickState: clickIndex)
+    usleep(35_000)
+    postMouse(type: .leftMouseUp, x: x, y: y, clickState: clickIndex)
+    usleep(80_000)
+  }
+}
+
+func hidDrag(fromX: Double, fromY: Double, toX: Double, toY: Double, steps: Int) {
+  let clampedSteps = max(2, steps)
+  postMouse(type: .mouseMoved, x: fromX, y: fromY)
+  usleep(80_000)
+  postMouse(type: .leftMouseDown, x: fromX, y: fromY)
+  usleep(80_000)
+  for step in 1...clampedSteps {
+    let ratio = Double(step) / Double(clampedSteps)
+    let x = fromX + (toX - fromX) * ratio
+    let y = fromY + (toY - fromY) * ratio
+    postMouse(type: .leftMouseDragged, x: x, y: y)
+    usleep(35_000)
+  }
+  postMouse(type: .leftMouseUp, x: toX, y: toY)
+}
+
 let args = CommandLine.arguments
 guard args.count >= 2 else {
   usage()
@@ -87,6 +147,24 @@ case "hid-shortcut":
     usage()
   }
   postKey(code: code, flags: modifierFlags(args[2]))
+case "hid-click":
+  guard args.count == 4 || args.count == 5 else {
+    usage()
+  }
+  let x = parseDouble(args[2], name: "x")
+  let y = parseDouble(args[3], name: "y")
+  let clickCount = args.count == 5 ? parseInt(args[4], name: "click-count") : 1
+  hidClick(x: x, y: y, clickCount: clickCount)
+case "hid-drag":
+  guard args.count == 6 || args.count == 7 else {
+    usage()
+  }
+  let fromX = parseDouble(args[2], name: "from-x")
+  let fromY = parseDouble(args[3], name: "from-y")
+  let toX = parseDouble(args[4], name: "to-x")
+  let toY = parseDouble(args[5], name: "to-y")
+  let steps = args.count == 7 ? parseInt(args[6], name: "steps") : 10
+  hidDrag(fromX: fromX, fromY: fromY, toX: toX, toY: toY, steps: steps)
 default:
   usage()
 }

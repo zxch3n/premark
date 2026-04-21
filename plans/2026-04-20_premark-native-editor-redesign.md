@@ -1,16 +1,17 @@
 # Premark Native Editor Redesign Plan
 
-Status: Phase 17 complete with a documented screen-capture limitation
+Status: Phase 18 in progress; WebKit proxy, Safari preflight, and real foreground interaction runners are in place
 Owner: Codex / Zixuan
 Last Updated: 2026-04-21
 Compaction Rule: after memory reload or compaction, reread this whole file before continuing.
 
 ## Current Objective
 
-- Keep macOS IME real-run defaults on isolated Chrome for Testing plus System Events key codes.
+- Add Safari/WebKit acceptance without weakening the current Chrome/macOS IME gate.
 - Keep the native Premark-rendered editor as the product path; CodeMirror overlay remains removed.
-- Real Pinyin/Japanese/Korean scenario code is ready, and all three target input sources are now enabled.
-- Full-screen `screencapture` currently captures wallpaper/menu bar but not browser/candidate-window contents; use it as an environment limitation until Screen Recording/window capture is available.
+- Treat Playwright WebKit as a fast browser-engine proxy, not as real Safari or real IME proof.
+- Use Safari WebDriver for isolated desktop Safari behavior, but keep real OS IME in a separate foreground Safari gate because WebDriver automation windows install a glass pane.
+- Add iOS/iPadOS Safari as its own acceptance surface for soft keyboard, visual viewport, touch selection, and mobile IME behavior.
 
 ## New Learnings
 
@@ -43,6 +44,14 @@ Compaction Rule: after memory reload or compaction, reread this whole file befor
 - System Events key codes are the reliable real-IME sender in this environment. Swift `CGEvent` HID can reach Chrome for US key input, but can bypass Text Services composition for Pinyin; targeted `CGEventPostToPid` remains useful only for plumbing checks.
 - Korean 2-set exposed two native-input requirements: do not rewrite the hidden textarea value/selection during active native input, and suppress an `insertLineBreak` that immediately follows an Enter-key composition commit.
 - Hidden textarea write suppression must be narrow. Real Korean native input needs value/selection preservation while composing Hangul, but normal browser typing and synthetic composition tests still need bridge value resync after each input event.
+- Safari/WebKit needs first-class acceptance. Hidden textarea focus, `beforeinput`/`input` ordering, `compositionend` timing, visual viewport, Canvas text measurement, and touch selection are all areas where WebKit can differ from Chromium.
+- Safari WebDriver is useful for isolated browser behavior, but it is not the right transport for foreground OS IME key injection because Safari automation sessions are guarded from stray keyboard/mouse input.
+- iOS Safari is not a smaller version of desktop Safari for this editor. Soft keyboard focus, visual viewport resize, touch handles, autocorrect, and mobile IME need their own smoke gate.
+- The first Playwright WebKit proxy suite passes in Chromium reference, WebKit, and mobile WebKit emulation. It validates the bridge/event trace, rendered DOM editing, Canvas geometry/input, and a mobile hidden-textarea smoke path, but it still is not real Safari or real mobile IME proof.
+- Local Safari preflight found `/usr/bin/safaridriver` included with Safari 18.5. This confirms the machine can host a Safari WebDriver runner after enabling remote automation, but does not prove the real foreground Safari IME path.
+- Desktop Safari WebDriver runner is implemented, but local execution is currently blocked by Safari Remote Automation being disabled. `safaridriver --enable` asks for a password in this environment, so Zixuan must enable it once.
+- Playwright remains a weak oracle for real OS input timing. Real double/triple click, cross-block HID drag, macOS keyboard shortcuts, and system clipboard cut/copy/paste now have a separate foreground `real-interactions` runner for Chrome-based browsers and Safari.
+- Regular Safari foreground interaction tests should use Safari AppleScript `do JavaScript` only for state inspection and System Events / Swift HID for input. Safari WebDriver stays separate because automation windows are not a valid proof for foreground OS input.
 
 ## Architecture Direction
 
@@ -324,6 +333,33 @@ Acceptance:
 - [x] Japanese/Korean pass the prepared scenario sets.
 - [x] Failure artifacts are sufficient to debug regressions.
 
+## Phase 18: Safari And WebKit Acceptance
+
+Goal: prove the native Premark editor works on Safari/WebKit surfaces before relying on it as a product path.
+
+- [x] Add a Playwright WebKit core suite or project for the existing browser editor tests.
+- [x] Classify every Playwright WebKit failure as implementation bug, WebKit event-order difference, unsupported synthetic limitation, or expected visual difference.
+- [x] Add an event trace fixture that compares Chromium and WebKit for `keydown`, `beforeinput`, `input`, `compositionstart/update/end`, `isComposing`, selection, and textarea value/selection.
+- [x] Add a Safari WebDriver preflight/runbook for `safaridriver --enable`, Safari Technology Preview when available, one-session-only constraints, and artifact output.
+- [x] Add a desktop Safari behavior runner that opens the Storybook editor and validates focus bridge, typing, delete/Enter, keyboard selection, pointer selection, paste/cut, visual crops, and Canvas geometry.
+- [x] Add a foreground real-interaction runner for Chrome-based browsers covering real text input, shortcut selection, system clipboard cut/copy/paste, Return, double/triple click, cross-block drag, and Canvas click/drag.
+- [x] Add the same foreground real-interaction scenario set for regular Safari, using Apple Events only for state inspection.
+- [ ] Add a real foreground Safari IME runner separate from WebDriver automation windows, with the same session/foreground/input-source gates as the Chrome for Testing macOS IME runner.
+- [ ] Run real Safari Pinyin commit/cancel/replacement, then Japanese/Korean if the foreground runner is stable.
+- [ ] Add an iOS/iPadOS Safari runbook and smoke gate for connected-device WebDriver Remote Automation.
+- [ ] Cover iOS soft keyboard focus, visualViewport resize/scroll, touch selection start/end/drag, autocorrect/predictive text smoke, and at least one mobile IME path.
+- [ ] Add small Safari/WebKit screenshot artifacts and a review checklist for visual differences.
+
+Acceptance:
+
+- [x] Playwright WebKit passes the core native editor suite or has documented expected differences with owners.
+- [ ] Chrome-based real-interaction runner validates OS keyboard, clipboard, pointer, and Canvas interaction scenarios in foreground mode.
+- [ ] Regular Safari real-interaction runner validates OS keyboard, clipboard, pointer, and Canvas interaction scenarios in foreground mode, or records exact setup gaps.
+- [ ] Desktop Safari or Safari Technology Preview validates hidden textarea focus, source updates, selection, clipboard, event traces, and Canvas caret/paint geometry.
+- [ ] Real Safari macOS IME passes Pinyin at minimum, and Japanese/Korean either pass or have precise environment/product gaps recorded.
+- [ ] iOS/iPadOS Safari smoke validates soft keyboard anchoring, visual viewport behavior, touch selection, and mobile IME/autocorrect behavior.
+- [ ] Safari failures are classified by root cause; no issue is left as a generic "Safari bug".
+
 ## Iteration Log
 
 ### 2026-04-20
@@ -398,3 +434,10 @@ Acceptance:
 - Candidate-window screen artifact was reviewed. The scenario itself passes and writes `pinyin-candidate-anchor-screen.png`, but current full-screen capture only shows wallpaper/menu bar, not browser/candidate-window contents. This is recorded as a Screen Recording/window-capture limitation rather than an editor failure.
 - Final regression after tightening the IME bridge: suppress textarea value writes only for `InputEvent.isComposing` or Korean jamo/syllable `insertText`; normal input now resyncs the bridge. This fixed a Canvas browser regression where cross-block replacement followed by multi-character typing collapsed the markdown before synthetic composition.
 - Final verification on 2026-04-21: `vp check --fix`, `vp test` (207 tests), `vp run build`, and `vp run test:browser` (31 Playwright tests) pass. Strict real macOS IME runs also pass for default Pinyin, `PREMARK_MACOS_IME_SCENARIO_SET=japanese`, and `PREMARK_MACOS_IME_SCENARIO_SET=korean` using bundled Chrome for Testing plus System Events.
+- Phase 18 planned after Safari/WebKit research. Playwright WebKit should be the fast signal, Safari WebDriver should cover isolated desktop Safari behavior, real Safari foreground automation should cover OS IME, and iOS/iPadOS Safari needs a separate soft-keyboard/touch/viewport gate. Assumption: Safari support is product-critical for this editor architecture, not a nice-to-have compatibility pass.
+- Phase 18 started. Added `playwright.webkit.config.ts`, `vp run test:browser:webkit`, `tests/browser/native-editor-webkit.spec.ts`, and Safari preflight/runbook files under `tests/safari`. First run passed: `vp run test:safari:preflight` found Safari 18.5 `safaridriver`; `vp run test:browser:webkit` passed 7 tests with 5 expected project skips across Chromium reference, WebKit, and mobile WebKit proxy. No WebKit mismatch was found in the initial proxy matrix.
+- Added `vp run test:safari` as a no-dependency Safari WebDriver runner that talks directly to `safaridriver`. Local run reached session creation and skipped with a precise artifact because Safari Remote Automation is disabled. Attempting `safaridriver --enable` requested a password and failed non-interactively, so desktop Safari behavior acceptance remains blocked on one-time local setup rather than editor code.
+- Corrected the browser-test ownership boundary: `playwright.config.ts` now ignores the WebKit acceptance spec so `vp run test:browser` remains the existing Chromium gate. Verification after the correction: `vp check --fix` passes with no warnings and `vp run test:browser` is back to 31 passing tests.
+- Added `tests/real-interactions/run-real-interactions.mjs` and `tests/real-interactions/README.md`. The runner uses real foreground System Events / Swift HID input for Chrome-based browsers and regular Safari, while using Playwright or Safari Apple Events only to inspect editor state. The scenario set now covers real text input, Shift+Option word selection, Shift+Command document selection, Command+C/X/V with the system clipboard, Return, double/triple click, cross-block drag, and Canvas click/drag editing.
+- Extended the Swift OS input helper with HID mouse click and drag commands so pointer gestures no longer depend on Playwright pointer synthesis. Planned experiment: run `vp run test:real-interactions:chrome` first because it has Playwright state inspection, then run `vp run test:real-interactions:safari` after confirming Safari allows JavaScript from Apple Events.
+- Verification after adding real-interaction runners: `node --check tests/real-interactions/run-real-interactions.mjs`, `swift tests/macos-ime/os-input.swift check`, `vp check --fix`, `vp test` (207 tests), `vp run test:safari:preflight`, and `vp run test:browser:webkit` (7 passed, 5 skipped) all pass. `PREMARK_REAL_INTERACTIONS_TARGET=all node tests/real-interactions/run-real-interactions.mjs` safely skipped both Chrome and Safari because `CGSessionCopyCurrentDictionary` reports the macOS screen is locked, so no HID events were posted.
