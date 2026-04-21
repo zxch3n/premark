@@ -360,7 +360,7 @@ function wordRangeAtPoint(
 ): SourceRange {
   return (
     wordLikeRangeAtOffset(markdown, offset, affinity) ??
-    nonWhitespaceGraphemeRangeAtPoint(markdown, fragment, x) ??
+    nonWhitespaceGraphemeRangeAtPoint(fragment, x) ??
     collapsedRange(clampOffset(offset, markdown.length))
   );
 }
@@ -413,7 +413,6 @@ function nonWhitespaceGraphemeRangeAtOffset(
 }
 
 function nonWhitespaceGraphemeRangeAtPoint(
-  markdown: string,
   fragment: EditableFragment,
   x: number,
 ): SourceRange | null {

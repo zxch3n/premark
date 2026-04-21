@@ -16,6 +16,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@pretext-md/editor": "workspace:*",
     "@pretext-md/highlight": "workspace:*",
     "@pretext-md/layout": "workspace:*",
     "pixi.js": "^8.6.0"
