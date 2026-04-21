@@ -1,19 +1,11 @@
 import { createHighlighter } from "../packages/highlight/src/index.ts";
 import {
-  applyInputIntent,
-  applyTextareaBridgeChange,
-  beginPointerSelection,
   createInMemoryEditorDocumentState,
+  createPremarkBrowserInputHost,
   createPremarkEditorController,
   createSelectionGeometry,
-  createTextareaBridgeSnapshot,
   LocalUndoManager,
-  normalizeInputTrace,
-  selectPointerRange,
-  updatePointerSelection,
   type EditableLayoutIndex,
-  type PointerSelectionSession,
-  type TextareaBridgeSnapshot,
 } from "../packages/editor/src/index.ts";
 import { darkTilePalette, drawTile } from "../packages/wiki-canvas/src/index.ts";
 import { waitForPremarkStoryFonts } from "./font-loading.ts";
@@ -226,20 +218,10 @@ export const InteractiveCanvasNativeEditor = () => {
     });
     const undoManager = new LocalUndoManager();
     const controller = createPremarkEditorController({ state: editor, undoManager });
-    let bridgeSnapshot: TextareaBridgeSnapshot = createTextareaBridgeSnapshot(editor);
-    let pointerSession: PointerSelectionSession | null = null;
-    let composing = false;
-    let compositionCommitKeyWasEnter = false;
-    let suppressLineBreakUntil = 0;
     let activeEditableIndex: EditableLayoutIndex = editor.editableIndex;
-    let pointerClickCount = 0;
-    let lastPointerClick: {
-      readonly time: number;
-      readonly x: number;
-      readonly y: number;
-    } | null = null;
     let hasRendered = false;
     let lastRenderedVersion = -1;
+    let inputHost: ReturnType<typeof createPremarkBrowserInputHost>;
 
     controller.setViewport({
       scrollTop: 0,
@@ -353,26 +335,13 @@ export const InteractiveCanvasNativeEditor = () => {
       scrollTop: number,
       options: { readonly writeValue?: boolean } = {},
     ) {
-      bridgeSnapshot = createTextareaBridgeSnapshot(editor);
-      if (options.writeValue !== false) {
-        textarea.value = bridgeSnapshot.value;
-        textarea.setSelectionRange(bridgeSnapshot.selectionStart, bridgeSnapshot.selectionEnd);
-      }
-      textarea.style.left = `${contentPadding + Math.max(0, caretRect.x)}px`;
-      textarea.style.top = `${contentPadding + Math.max(0, caretRect.y - scrollTop)}px`;
-      textarea.style.height = `${Math.max(16, caretRect.height)}px`;
-    }
-
-    function shouldPreserveNativeInputContext(event: Event): boolean {
-      if (!(event instanceof InputEvent)) {
-        return false;
-      }
-      if (event.isComposing) {
-        return true;
-      }
-      const data = event.data ?? "";
-      return (
-        event.inputType === "insertText" && /[\u1100-\u11ff\u3130-\u318f\uac00-\ud7af]/u.test(data)
+      inputHost.syncBridge(
+        {
+          ...caretRect,
+          y: caretRect.y - scrollTop,
+          width: 1,
+        },
+        { writeValue: options.writeValue },
       );
     }
 
@@ -385,76 +354,21 @@ export const InteractiveCanvasNativeEditor = () => {
       };
     }
 
-    function clickCountFromPointer(event: PointerEvent, point: { x: number; y: number }): number {
-      if (
-        lastPointerClick !== null &&
-        event.timeStamp - lastPointerClick.time < 500 &&
-        Math.hypot(point.x - lastPointerClick.x, point.y - lastPointerClick.y) < 6
-      ) {
-        pointerClickCount += 1;
-      } else {
-        pointerClickCount = 1;
-      }
-      lastPointerClick = {
-        time: event.timeStamp,
-        x: point.x,
-        y: point.y,
-      };
-      return Math.max(event.detail, pointerClickCount);
-    }
-
-    canvas.addEventListener("pointerdown", (event) => {
-      event.preventDefault();
-      const point = canvasPointFromEvent(event);
-      const clickCount = clickCountFromPointer(event, point);
-      if (clickCount >= 3) {
-        selectPointerRange(editor, point.x, point.y, "block", activeEditableIndex);
-        pointerSession = null;
-        textarea.focus();
-        render();
-        return;
-      }
-      if (clickCount === 2) {
-        selectPointerRange(editor, point.x, point.y, "word", activeEditableIndex);
-        pointerSession = null;
-        textarea.focus();
-        render();
-        return;
-      }
-      pointerSession = beginPointerSelection(editor, point.x, point.y, activeEditableIndex);
-      textarea.focus();
-      render();
+    inputHost = createPremarkBrowserInputHost({
+      editor,
+      undoManager,
+      surface: canvas,
+      textarea,
+      editableIndex: () => activeEditableIndex,
+      pointFromEvent: canvasPointFromEvent,
+      render,
+      positionBridge(caretRect) {
+        textarea.style.left = `${contentPadding + Math.max(0, caretRect.x)}px`;
+        textarea.style.top = `${contentPadding + Math.max(0, caretRect.y)}px`;
+        textarea.style.height = `${Math.max(16, caretRect.height)}px`;
+      },
     });
-
-    canvas.addEventListener("click", (event) => {
-      if (event.detail < 2) {
-        return;
-      }
-      const point = canvasPointFromEvent(event);
-      selectPointerRange(
-        editor,
-        point.x,
-        point.y,
-        event.detail >= 3 ? "block" : "word",
-        activeEditableIndex,
-      );
-      pointerSession = null;
-      textarea.focus();
-      render();
-    });
-
-    window.addEventListener("pointermove", (event) => {
-      if (pointerSession === null) {
-        return;
-      }
-      const point = canvasPointFromEvent(event);
-      updatePointerSelection(editor, pointerSession, point.x, point.y, activeEditableIndex);
-      render();
-    });
-
-    window.addEventListener("pointerup", () => {
-      pointerSession = null;
-    });
+    inputHost.install();
 
     canvas.addEventListener(
       "wheel",
@@ -474,124 +388,6 @@ export const InteractiveCanvasNativeEditor = () => {
       },
       { passive: false },
     );
-
-    textarea.addEventListener("keydown", (event) => {
-      if (composing && event.key === "Enter") {
-        compositionCommitKeyWasEnter = true;
-      }
-      const intent = normalizeInputTrace([
-        {
-          type: "keydown",
-          key: event.key,
-          shiftKey: event.shiftKey,
-          metaKey: event.metaKey,
-          altKey: event.altKey,
-          ctrlKey: event.ctrlKey,
-        },
-      ])[0];
-      if (
-        intent?.type !== "keyboard-selection" &&
-        intent?.type !== "select-all" &&
-        intent?.type !== "line-indent"
-      ) {
-        return;
-      }
-      event.preventDefault();
-      applyInputIntent(editor, intent, { undoManager });
-      render();
-    });
-
-    textarea.addEventListener("beforeinput", (event) => {
-      if (
-        (event.inputType === "insertParagraph" || event.inputType === "insertLineBreak") &&
-        performance.now() <= suppressLineBreakUntil
-      ) {
-        suppressLineBreakUntil = 0;
-        event.preventDefault();
-        return;
-      }
-      const intent = normalizeInputTrace([
-        {
-          type: "beforeinput",
-          inputType: event.inputType,
-          data: event.data,
-          isComposing: event.isComposing,
-          cancelable: event.cancelable,
-        },
-      ])[0];
-      if (
-        intent?.type !== "insert-paragraph" &&
-        intent?.type !== "delete" &&
-        intent?.type !== "history"
-      ) {
-        return;
-      }
-      event.preventDefault();
-      applyInputIntent(editor, intent, { undoManager });
-      render();
-    });
-
-    textarea.addEventListener("compositionstart", (event) => {
-      composing = true;
-      compositionCommitKeyWasEnter = false;
-      applyInputIntent(editor, { type: "composition-start" }, { undoManager });
-      render({ syncBridgeValue: false });
-      event.preventDefault();
-    });
-
-    textarea.addEventListener("compositionupdate", (event) => {
-      if (!composing) {
-        return;
-      }
-      applyInputIntent(editor, { type: "composition-update", text: event.data }, { undoManager });
-      render({ syncBridgeValue: false });
-    });
-
-    textarea.addEventListener("compositionend", (event) => {
-      composing = false;
-      if (compositionCommitKeyWasEnter && event.data.length > 0) {
-        suppressLineBreakUntil = performance.now() + 500;
-      }
-      compositionCommitKeyWasEnter = false;
-      applyInputIntent(editor, { type: "composition-commit", text: event.data }, { undoManager });
-      render();
-    });
-
-    textarea.addEventListener("paste", (event) => {
-      event.preventDefault();
-      applyInputIntent(
-        editor,
-        {
-          type: "clipboard",
-          action: "paste",
-          markdown: event.clipboardData?.getData("text/markdown") || undefined,
-          plainText: event.clipboardData?.getData("text/plain") || undefined,
-          html: event.clipboardData?.getData("text/html") || undefined,
-        },
-        { undoManager },
-      );
-      render();
-    });
-
-    textarea.addEventListener("cut", (event) => {
-      event.preventDefault();
-      applyInputIntent(editor, { type: "clipboard", action: "cut" }, { undoManager });
-      render();
-    });
-
-    textarea.addEventListener("input", (event) => {
-      if (composing) {
-        return;
-      }
-      const applied = applyTextareaBridgeChange(editor, bridgeSnapshot, textarea.value, {
-        nextSelectionStart: textarea.selectionStart,
-        nextSelectionEnd: textarea.selectionEnd,
-      });
-      if (applied !== null) {
-        undoManager.recordApplied(editor.adapter, applied);
-      }
-      render({ syncBridgeValue: !shouldPreserveNativeInputContext(event) });
-    });
 
     if (searchParams.get("autostream") === "1") {
       let chunkIndex = 0;
