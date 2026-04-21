@@ -228,7 +228,6 @@ export const InteractiveCanvasNativeEditor = () => {
         selectionColor: "rgba(52, 139, 99, 0.34)",
         caretColor: "#7dd3ae",
         compositionColor: "#7dd3ae",
-        showDirtyOverlay: true,
       },
       onRender(state) {
         debugSelection.textContent = JSON.stringify(state.geometry, null, 2);
@@ -237,7 +236,6 @@ export const InteractiveCanvasNativeEditor = () => {
             viewport: state.snapshot.viewport,
             editableIndex: state.snapshot.renderUpdate.editableIndex,
             dirtyRects: state.snapshot.renderUpdate.dirtyRects,
-            clipRect: state.clipRect,
           },
           null,
           2,
@@ -289,6 +287,7 @@ export const InteractiveCanvasNativeEditor = () => {
         __premarkCanvasNativeEditor?: {
           markdown(): string;
           selection(): { anchorOffset: number; headOffset: number; isCollapsed: boolean };
+          setMarkdown(markdown: string): void;
           pointForText(text: string, edge?: "start" | "end"): { x: number; y: number };
           fragmentForText(text: string): {
             text: string;
@@ -313,6 +312,13 @@ export const InteractiveCanvasNativeEditor = () => {
           headOffset: selection.headOffset,
           isCollapsed: selection.isCollapsed,
         };
+      },
+      setMarkdown(markdown) {
+        controller.setMarkdown(markdown, {
+          recordUndo: false,
+          selection: { anchor: 0, head: 0 },
+        });
+        render();
       },
       pointForText(text, edge = "start") {
         return host.pointForText(text, edge);

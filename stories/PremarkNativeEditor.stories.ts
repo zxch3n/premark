@@ -99,6 +99,7 @@ export const InteractiveNativePrototype = () => {
       window as typeof window & {
         __premarkNativeEditor?: {
           markdown(): string;
+          setMarkdown(markdown: string): void;
           insertRemote(offset: number, text: string): void;
           resize(width: number): void;
           pointForSourceRange(from: number, to: number): { x: number; y: number };
@@ -108,6 +109,13 @@ export const InteractiveNativePrototype = () => {
       }
     ).__premarkNativeEditor = {
       markdown: () => controller.markdown(),
+      setMarkdown(markdown) {
+        controller.setMarkdown(markdown, {
+          recordUndo: false,
+          selection: { anchor: 0, head: 0 },
+        });
+        render();
+      },
       insertRemote(offset, text) {
         controller.applyEdit({ type: "insert", offset, text }, { recordUndo: false });
         render();

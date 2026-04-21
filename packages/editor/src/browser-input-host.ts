@@ -184,6 +184,18 @@ export class PremarkBrowserInputHost {
     if (this.composing && event.key === "Enter") {
       this.compositionCommitKeyWasEnter = true;
     }
+    if (!this.composing && isPlainEnterKey(event)) {
+      event.preventDefault();
+      this.suppressLineBreakUntil = performance.now() + 500;
+      applyInputIntent(
+        this.options.editor,
+        { type: "insert-paragraph" },
+        { undoManager: this.options.undoManager },
+      );
+      this.options.render();
+      return;
+    }
+
     const intent = normalizeInputTrace([
       {
         type: "keydown",
@@ -349,6 +361,10 @@ export function shouldPreserveNativeInputContext(event: InputEvent): boolean {
   return (
     event.inputType === "insertText" && /[\u1100-\u11ff\u3130-\u318f\uac00-\ud7af]/u.test(data)
   );
+}
+
+function isPlainEnterKey(event: KeyboardEvent): boolean {
+  return event.key === "Enter" && !event.altKey && !event.ctrlKey && !event.metaKey;
 }
 
 export function createPremarkBrowserInputHost(

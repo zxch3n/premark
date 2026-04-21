@@ -29,6 +29,36 @@ describe("renderToHtml", () => {
     expect(rendered.html).toContain(">https://example.com</a>");
   });
 
+  it("keeps source blank-line runs as rendered block vertical gaps", () => {
+    const engine = createLayoutEngine({
+      fontTheme: "github",
+      lineBreakMode: "source",
+    });
+    const layout = engine.layout("a\n\nb\n\n\n\nc", 420);
+    const rendered = renderToHtml(layout);
+    const tops = Array.from(
+      rendered.html.matchAll(/class="pmd-block[^"]*" style="top:([^;]+)px/gu),
+    ).map((match) => Number(match[1]));
+    const lineHeight = layout.lines.find((line) => line.kind === "text")?.height ?? Number.NaN;
+
+    expect(tops).toHaveLength(3);
+    expect(tops[1]! - tops[0]!).toBeCloseTo(lineHeight * 2, 5);
+    expect(tops[2]! - tops[1]!).toBeCloseTo(lineHeight * 4, 5);
+  });
+
+  it("keeps blank-only source documents as rendered surface height", () => {
+    const engine = createLayoutEngine({
+      fontTheme: "github",
+      lineBreakMode: "source",
+    });
+    const layout = engine.layout("\n\n", 420);
+    const rendered = renderToHtml(layout);
+
+    expect(layout.totalHeight).toBeGreaterThan(0);
+    expect(rendered.html).toContain(`height:${layout.totalHeight}px`);
+    expect(rendered.html).not.toContain("pmd-block");
+  });
+
   it("escapes quoted font families in style attributes", () => {
     const engine = createLayoutEngine({
       fontTheme: "modern",

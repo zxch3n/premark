@@ -94,10 +94,24 @@ export interface BlockContext {
 export interface DocumentLayout {
   lines: LayoutLine[];
   blocks: BlockLayout[];
+  sourceLines?: SourceLineLayout[];
   totalHeight: number;
   containerWidth: number;
+  sourceFont?: string;
+  sourceLineHeight?: number;
   version: number;
   update?: LayoutUpdateMetadata;
+}
+
+export interface SourceLineLayout {
+  readonly index: number;
+  readonly start: number;
+  readonly end: number;
+  readonly y: number;
+  readonly height: number;
+  readonly kind: "rendered" | "source-only";
+  readonly blockIndex?: number;
+  readonly lineIndex?: number;
 }
 
 export interface LayoutUpdateMetadata {

@@ -12,6 +12,39 @@ const canvasNativeRepeatedEmojiStoryUrl = `${canvasNativeStoryUrl}&fixture=repea
 const canvasNativeLargeStoryUrl = `${canvasNativeStoryUrl}&fixture=large`;
 const canvasNativeStreamingStoryUrl = `${canvasNativeStoryUrl}&fixture=streaming`;
 const canvasNativeContentPadding = 28;
+const blankRunMarkdownFixture = [
+  "# Canvas native editor",
+  "",
+  "",
+  "asdfsd",
+  "",
+  "",
+  "",
+  "",
+  "## adddfasdfdsf",
+  "",
+  "",
+  "",
+  "",
+  "",
+  "",
+  "",
+  "",
+  "Click text, drag across blocks, then type directly on the rendered canvas.",
+  "",
+  "- Selection is stored as source offsets.",
+  "",
+  "",
+  "",
+  "",
+  "",
+  "- The hidden textarea mirrors only the active source slice.",
+  "- Cross-block replacement uses one source operation.",
+  "",
+  "Widths iiiii WWWW done.",
+  "",
+  "Try **bold text**, `inline code`, [docs](https://example.com), 中文输入, and emoji 👨‍👩‍👧‍👦.",
+].join("\n");
 
 async function readSelection(page: Page) {
   return JSON.parse((await page.locator("[data-debug-selection]").textContent()) ?? "{}") as {
@@ -43,6 +76,30 @@ async function canvasEditorMarkdown(page: Page) {
           __premarkCanvasNativeEditor?: { markdown(): string };
         }
       ).__premarkCanvasNativeEditor?.markdown() ?? "",
+  );
+}
+
+async function setEditorMarkdown(page: Page, markdown: string) {
+  await page.evaluate(
+    (nextMarkdown) =>
+      (
+        window as typeof window & {
+          __premarkNativeEditor?: { setMarkdown(markdown: string): void };
+        }
+      ).__premarkNativeEditor!.setMarkdown(nextMarkdown),
+    markdown,
+  );
+}
+
+async function setCanvasEditorMarkdown(page: Page, markdown: string) {
+  await page.evaluate(
+    (nextMarkdown) =>
+      (
+        window as typeof window & {
+          __premarkCanvasNativeEditor?: { setMarkdown(markdown: string): void };
+        }
+      ).__premarkCanvasNativeEditor!.setMarkdown(nextMarkdown),
+    markdown,
   );
 }
 
@@ -81,6 +138,55 @@ async function readCanvasGeometry(page: Page) {
   };
 }
 
+async function countCanvasCaretPixels(page: Page) {
+  return page.evaluate((contentPadding) => {
+    const canvas = document.querySelector<HTMLCanvasElement>("[data-canvas-native-editor]");
+    const geometry = JSON.parse(
+      document.querySelector("[data-canvas-debug-selection]")?.textContent ?? "{}",
+    ) as {
+      headCaret: { rect: { x: number; y: number; width: number; height: number } };
+    };
+    const render = JSON.parse(
+      document.querySelector("[data-canvas-debug-render]")?.textContent ?? "{}",
+    ) as {
+      viewport?: { scrollTop: number };
+    };
+    if (canvas === null) {
+      return 0;
+    }
+    const context = canvas.getContext("2d");
+    if (context === null) {
+      return 0;
+    }
+    const ratio = window.devicePixelRatio || 1;
+    const caret = geometry.headCaret.rect;
+    const x = Math.round((contentPadding + caret.x) * ratio);
+    const y = Math.round((contentPadding + caret.y - (render.viewport?.scrollTop ?? 0)) * ratio);
+    const width = Math.max(4, Math.ceil((caret.width + 4) * ratio));
+    const height = Math.max(8, Math.ceil((caret.height + 2) * ratio));
+    const image = context.getImageData(Math.max(0, x - 2), Math.max(0, y - 1), width, height);
+    let pixels = 0;
+    for (let index = 0; index < image.data.length; index += 4) {
+      const red = image.data[index] ?? 0;
+      const green = image.data[index + 1] ?? 0;
+      const blue = image.data[index + 2] ?? 0;
+      const alpha = image.data[index + 3] ?? 0;
+      if (
+        red > 90 &&
+        red < 160 &&
+        green > 170 &&
+        green < 235 &&
+        blue > 130 &&
+        blue < 210 &&
+        alpha > 100
+      ) {
+        pixels += 1;
+      }
+    }
+    return pixels;
+  }, canvasNativeContentPadding);
+}
+
 async function readCanvasRenderDebug(page: Page) {
   return JSON.parse((await page.locator("[data-canvas-debug-render]").textContent()) ?? "{}") as {
     viewport: { scrollTop: number; height: number; overscanY: number };
@@ -91,7 +197,6 @@ async function readCanvasRenderDebug(page: Page) {
       rebuiltFragmentCount: number;
     };
     dirtyRects: Array<{ x: number; y: number; width: number; height: number }>;
-    clipRect?: { x: number; y: number; width: number; height: number };
   };
 }
 
@@ -130,6 +235,18 @@ function caretIsVisuallyAfter(
     Math.abs(next.headCaret.rect.y - previous.headCaret.rect.y) <= 0.5 &&
     next.headCaret.rect.x > previous.headCaret.rect.x
   );
+}
+
+function sourceLines(markdown: string): Array<{ start: number; end: number; text: string }> {
+  const lines: Array<{ start: number; end: number; text: string }> = [];
+  let start = 0;
+  for (let offset = 0; offset < markdown.length; offset += 1) {
+    if (markdown.charCodeAt(offset) !== 10) continue;
+    lines.push({ start, end: offset, text: markdown.slice(start, offset) });
+    start = offset + 1;
+  }
+  lines.push({ start, end: markdown.length, text: markdown.slice(start) });
+  return lines;
 }
 
 async function setCanvasCaret(page: Page, offset: number) {
@@ -173,8 +290,7 @@ async function measuredCanvasPointForText(page: Page, text: string) {
       const fullWidth = context.measureText(fragment.text).width;
       const prefixWidth = context.measureText(fragment.text.slice(0, localOffset)).width;
       const visibleTextWidth = Math.max(0, fragment.rect.width - fragment.textInsetX * 2);
-      const measuredLocalX =
-        fragment.textInsetX + (fullWidth > 0 ? (prefixWidth / fullWidth) * visibleTextWidth : 0);
+      const measuredLocalX = fragment.textInsetX + prefixWidth;
       const expectedContentX = fragment.rect.x + measuredLocalX;
       const proportionalContentX =
         fragment.rect.x + (fragment.rect.width * localOffset) / fragment.text.length;
@@ -190,6 +306,25 @@ async function measuredCanvasPointForText(page: Page, text: string) {
     },
     { text, contentPadding: canvasNativeContentPadding },
   );
+}
+
+async function canvasFragmentForText(page: Page, text: string) {
+  return page.evaluate((needle) => {
+    const editor = (
+      window as typeof window & {
+        __premarkCanvasNativeEditor?: {
+          fragmentForText(text: string): {
+            text: string;
+            font: string;
+            textInsetX: number;
+            sourceRange: { from: number; to: number };
+            rect: { x: number; y: number; width: number; height: number };
+          };
+        };
+      }
+    ).__premarkCanvasNativeEditor!;
+    return editor.fragmentForText(needle);
+  }, text);
 }
 
 async function canvasSourceOffset(page: Page, text: string, edge: "start" | "end" = "start") {
@@ -732,9 +867,73 @@ test.describe("Premark native editor story", () => {
     await expect(source).toContainText("链docs");
   });
 
-  test("keeps Canvas native large documents on viewport and dirty-render paths", async ({
-    page,
-  }) => {
+  test("moves Canvas caret to the next visual line on Enter in normal text", async ({ page }) => {
+    await page.goto(canvasNativeStoryUrl);
+
+    const canvas = page.locator("[data-canvas-native-editor]");
+    const root = page.locator(".pcne-root");
+    await expect(canvas).toBeVisible();
+    await expect(root).toHaveAttribute("data-fonts-ready", "1");
+
+    const widthsPoint = await canvasPointForText(page, "Widths");
+    await canvas.click({ position: widthsPoint });
+    const before = await readCanvasGeometry(page);
+    const beforeSelection = await readCanvasSelection(page);
+    await page.keyboard.press("Enter");
+    const after = await readCanvasGeometry(page);
+    const afterSelection = await readCanvasSelection(page);
+    const markdown = await canvasEditorMarkdown(page);
+
+    expect(markdown).toContain("source operation.\n\n\nWidths iiiii");
+    expect(afterSelection.headOffset).toBe(beforeSelection.headOffset + 1);
+    expect(after.headCaret.rect.y).toBeGreaterThan(before.headCaret.rect.y);
+    expect(after.headCaret.rect.x).toBeLessThanOrEqual(before.headCaret.rect.x + 1);
+  });
+
+  test("does not over-render Canvas source gaps for three newline characters", async ({ page }) => {
+    await page.goto(canvasNativeStoryUrl);
+
+    const canvas = page.locator("[data-canvas-native-editor]");
+    const root = page.locator(".pcne-root");
+    await expect(canvas).toBeVisible();
+    await expect(root).toHaveAttribute("data-fonts-ready", "1");
+    await setCanvasEditorMarkdown(page, "a\n\n\nb");
+
+    await setCanvasCaret(page, 0);
+    const geometry = await readCanvasGeometry(page);
+    const a = await canvasPointForText(page, "a");
+    const b = await canvasPointForText(page, "b");
+    const lineHeight = geometry.headCaret.rect.height;
+
+    expect(lineHeight).toBeGreaterThan(10);
+    expect(b.y - a.y).toBeCloseTo(lineHeight * 3, 0);
+  });
+
+  test("keeps Canvas Enter input to one source visual line per newline", async ({ page }) => {
+    await page.goto(canvasNativeStoryUrl);
+
+    const canvas = page.locator("[data-canvas-native-editor]");
+    const root = page.locator(".pcne-root");
+    await expect(canvas).toBeVisible();
+    await expect(root).toHaveAttribute("data-fonts-ready", "1");
+    await setCanvasEditorMarkdown(page, "a");
+
+    const end = await canvasPointForText(page, "a", "end");
+    await canvas.click({ position: end });
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("b");
+
+    expect(await canvasEditorMarkdown(page)).toBe("a\n\n\nb");
+    await setCanvasCaret(page, 0);
+    const geometry = await readCanvasGeometry(page);
+    const a = await canvasPointForText(page, "a");
+    const b = await canvasPointForText(page, "b");
+    expect(b.y - a.y).toBeCloseTo(geometry.headCaret.rect.height * 3, 0);
+  });
+
+  test("keeps Canvas native large documents on viewport incremental paths", async ({ page }) => {
     await page.goto(canvasNativeLargeStoryUrl);
 
     const canvas = page.locator("[data-canvas-native-editor]");
@@ -827,6 +1026,34 @@ test.describe("Premark native editor story", () => {
     }
     const deltas = carets.slice(1).map((caret, index) => caret.x - carets[index]!.x);
     expect(Math.max(...deltas) - Math.min(...deltas)).toBeLessThan(2);
+  });
+
+  test("keeps Canvas native emoji boundaries aligned before link and code fragments", async ({
+    page,
+  }) => {
+    await page.goto(canvasNativeStoryUrl);
+
+    const canvas = page.locator("[data-canvas-native-editor]");
+    const root = page.locator(".pcne-root");
+    await expect(canvas).toBeVisible();
+    await expect(root).toHaveAttribute("data-fonts-ready", "1");
+
+    const emoji = "👨‍👩‍👧‍👦";
+    await setCanvasEditorMarkdown(page, `${emoji}[docs](https://example.com)\`code\``);
+    const markdown = await canvasEditorMarkdown(page);
+    const emojiFragment = await canvasFragmentForText(page, emoji);
+    const docsFragment = await canvasFragmentForText(page, "docs");
+    const codeFragment = await canvasFragmentForText(page, "code");
+
+    expect(docsFragment.rect.x).toBeCloseTo(emojiFragment.rect.x + emojiFragment.rect.width, 0);
+    expect(codeFragment.rect.x).toBeCloseTo(docsFragment.rect.x + docsFragment.rect.width, 0);
+
+    await setCanvasCaret(page, markdown.indexOf("[docs]"));
+    const linkOpen = await readCanvasGeometry(page);
+    await setCanvasCaret(page, markdown.indexOf("docs"));
+    const docsStart = await readCanvasGeometry(page);
+    expect(docsStart.headCaret.rect.x - linkOpen.headCaret.rect.x).toBeGreaterThan(4);
+    expect(docsStart.headCaret.rect.x - linkOpen.headCaret.rect.x).toBeLessThan(8);
   });
 
   test("supports double-click word and triple-click block selection", async ({ page }) => {
@@ -1394,6 +1621,31 @@ test.describe("Premark native editor story", () => {
     expect(allSelection.range.to).toBeGreaterThan(100);
   });
 
+  test("moves keyboard caret vertically onto short and blank adjacent lines", async ({ page }) => {
+    await page.goto(storyUrl);
+
+    const surface = page.locator("[data-editor-surface]");
+    const bridge = page.locator("[data-input-bridge]");
+    await expect(surface).toContainText("Native rendered Markdown");
+
+    const fixture = "short\n\nThis is a much much longer line\n\n";
+    await insertRemoteText(page, 0, fixture);
+    await setSourceCaret(page, fixture.indexOf("line") + "line".length);
+    await bridge.focus();
+
+    const before = await readSelection(page);
+    await page.keyboard.press("ArrowUp");
+    const blankLine = await readSelection(page);
+    expect(blankLine.headOffset).toBe(fixture.indexOf("\n\n") + 1);
+    expect(blankLine.headCaret.rect.y).toBeLessThan(before.headCaret.rect.y);
+
+    await page.keyboard.press("ArrowUp");
+    const shortLine = await readSelection(page);
+    expect(shortLine.headOffset).toBeGreaterThanOrEqual(0);
+    expect(shortLine.headOffset).toBeLessThanOrEqual("short".length);
+    expect(shortLine.headCaret.rect.y).toBeLessThan(blankLine.headCaret.rect.y);
+  });
+
   test("applies Markdown list and blockquote editing behavior through browser input", async ({
     page,
   }) => {
@@ -1470,6 +1722,336 @@ test.describe("Premark native editor story", () => {
     await bridge.focus();
     await page.keyboard.type("caption");
     expect(await editorMarkdown(page)).toContain("![caption](data:image/gif");
+  });
+
+  test("splits a rendered list when Enter exits an empty middle list item", async ({ page }) => {
+    await page.goto(storyUrl);
+
+    const surface = page.locator("[data-editor-surface]");
+    const bridge = page.locator("[data-input-bridge]");
+    await expect(surface).toContainText("Native rendered Markdown");
+
+    const firstPointBefore = await editorPointForSourceText(page, "Selection is stored");
+    const secondPointBefore = await editorPointForSourceText(page, "The hidden textarea");
+    const normalLineGap = secondPointBefore.y - firstPointBefore.y;
+    await setSourceCaret(page, await sourceOffset(page, "Selection is stored"));
+    const firstContentCaret = await readSelection(page);
+
+    await setSourceCaret(page, await sourceOffset(page, "source offsets.", "end"));
+    await bridge.focus();
+    await page.keyboard.press("Enter");
+    const emptyListItemSelection = await readSelection(page);
+    const emptyListItemCaret = await page.locator(".pne-caret").boundingBox();
+    expect(emptyListItemCaret).not.toBeNull();
+    expect(emptyListItemCaret!.height).toBeGreaterThan(10);
+    expect(emptyListItemSelection.headCaret.rect.x).toBeCloseTo(
+      firstContentCaret.headCaret.rect.x,
+      0,
+    );
+
+    await page.keyboard.press("Enter");
+
+    const markdown = await editorMarkdown(page);
+    expect(markdown).toContain("- Selection is stored as source offsets.\n\n- The hidden textarea");
+
+    const firstPointAfter = await editorPointForSourceText(page, "Selection is stored");
+    const secondPointAfter = await editorPointForSourceText(page, "The hidden textarea");
+    const selection = await readSelection(page);
+    const blankLineCaret = await page.locator(".pne-caret").boundingBox();
+    expect(blankLineCaret).not.toBeNull();
+    expect(blankLineCaret!.height).toBeGreaterThan(10);
+    expect(secondPointAfter.y - firstPointAfter.y).toBeGreaterThan(normalLineGap + 12);
+    expect(selection.headCaret.rect.y).toBeGreaterThan(firstPointAfter.y);
+    expect(selection.headCaret.rect.y).toBeLessThan(secondPointAfter.y);
+  });
+
+  test("keeps visible carets on every blank line in a multi-newline run", async ({ page }) => {
+    await page.goto(storyUrl);
+
+    const surface = page.locator("[data-editor-surface]");
+    await expect(surface).toContainText("Native rendered Markdown");
+
+    const fixture = "a\n\nb\n\n\n\nc\n\n";
+    await page.evaluate(
+      (markdown) =>
+        (
+          window as typeof window & {
+            __premarkNativeEditor?: { insertRemote(offset: number, text: string): void };
+          }
+        ).__premarkNativeEditor?.insertRemote(0, markdown),
+      fixture,
+    );
+
+    const renderedGaps = await page.evaluate(() => {
+      const blocks = Array.from(
+        document.querySelectorAll<HTMLElement>("[data-editor-surface] .pmd-block"),
+      ).slice(0, 3);
+      const firstLine = blocks[0]?.querySelector<HTMLElement>(".pmd-line");
+      return {
+        lineHeight:
+          firstLine === null || firstLine === undefined
+            ? Number.NaN
+            : Number.parseFloat(firstLine.style.height),
+        tops: blocks.map((block) => Number.parseFloat(block.style.top)),
+      };
+    });
+    expect(renderedGaps.tops).toHaveLength(3);
+    expect(renderedGaps.tops[1]! - renderedGaps.tops[0]!).toBeCloseTo(
+      renderedGaps.lineHeight * 2,
+      0,
+    );
+    expect(renderedGaps.tops[2]! - renderedGaps.tops[1]!).toBeCloseTo(
+      renderedGaps.lineHeight * 4,
+      0,
+    );
+
+    const offsets = [fixture.indexOf("b") + 1, 5, 6, 7, fixture.indexOf("c")];
+    const carets: Array<{ x: number; y: number; height: number }> = [];
+    for (const offset of offsets) {
+      await setSourceCaret(page, offset);
+      const selection = await readSelection(page);
+      const caretBox = await page.locator(".pne-caret").boundingBox();
+      expect(caretBox, `visible caret at source offset ${offset}`).not.toBeNull();
+      expect(caretBox!.height).toBeGreaterThan(10);
+      carets.push(selection.headCaret.rect);
+    }
+
+    const lineHeight = carets[0]!.height;
+    for (let index = 1; index < carets.length; index += 1) {
+      expect(carets[index]!.y, `caret y at step ${index}`).toBeCloseTo(
+        carets[0]!.y + lineHeight * index,
+        0,
+      );
+    }
+  });
+
+  test("does not over-render DOM source gaps for three newline characters", async ({ page }) => {
+    await page.goto(storyUrl);
+
+    const surface = page.locator("[data-editor-surface]");
+    await expect(surface).toContainText("Native rendered Markdown");
+    await setEditorMarkdown(page, "a\n\n\nb");
+
+    const renderedGaps = await page.evaluate(() => {
+      const blocks = Array.from(
+        document.querySelectorAll<HTMLElement>("[data-editor-surface] .pmd-block"),
+      );
+      const firstLine = blocks[0]?.querySelector<HTMLElement>(".pmd-line");
+      return {
+        lineHeight:
+          firstLine === null || firstLine === undefined
+            ? Number.NaN
+            : Number.parseFloat(firstLine.style.height),
+        tops: blocks.map((block) => Number.parseFloat(block.style.top)),
+      };
+    });
+
+    expect(renderedGaps.tops).toHaveLength(2);
+    expect(renderedGaps.lineHeight).toBeGreaterThan(10);
+    expect(renderedGaps.tops[1]! - renderedGaps.tops[0]!).toBeCloseTo(
+      renderedGaps.lineHeight * 3,
+      0,
+    );
+  });
+
+  test("keeps visible carets on leading and trailing blank source lines", async ({ page }) => {
+    await page.goto(storyUrl);
+
+    const surface = page.locator("[data-editor-surface]");
+    await expect(surface).toContainText("Native rendered Markdown");
+
+    const originalLength = (await editorMarkdown(page)).length;
+    const fixture = "\n\ntrail\n\n";
+    await insertRemoteText(page, originalLength, fixture);
+
+    const offsets = [
+      originalLength + 1,
+      originalLength + 2,
+      originalLength + fixture.length - 1,
+      originalLength + fixture.length,
+    ];
+    const carets: Array<{ x: number; y: number; height: number }> = [];
+    for (const offset of offsets) {
+      await setSourceCaret(page, offset);
+      const selection = await readSelection(page);
+      const caretBox = await page.locator(".pne-caret").boundingBox();
+      expect(caretBox, `visible caret at source offset ${offset}`).not.toBeNull();
+      expect(caretBox!.height).toBeGreaterThan(10);
+      carets.push(selection.headCaret.rect);
+    }
+
+    const lineHeight = carets[0]!.height;
+    for (let index = 1; index < carets.length; index += 1) {
+      expect(carets[index]!.y, `caret y at step ${index}`).toBeCloseTo(
+        carets[0]!.y + lineHeight * index,
+        0,
+      );
+    }
+  });
+
+  test("keeps blank-only DOM documents as visible editable lines", async ({ page }) => {
+    await page.goto(storyUrl);
+
+    const surface = page.locator("[data-editor-surface]");
+    await expect(surface).toContainText("Native rendered Markdown");
+    await setEditorMarkdown(page, "\n\n");
+
+    const carets: Array<{ y: number; height: number }> = [];
+    for (const offset of [0, 1, 2]) {
+      await setSourceCaret(page, offset);
+      const selection = await readSelection(page);
+      const caretBox = await page.locator(".pne-caret").boundingBox();
+      expect(selection.headOffset).toBe(offset);
+      expect(caretBox, `visible caret at source offset ${offset}`).not.toBeNull();
+      expect(caretBox!.height).toBeGreaterThan(10);
+      carets.push(selection.headCaret.rect);
+    }
+
+    const lineHeight = carets[0]!.height;
+    expect(carets[1]!.y).toBeCloseTo(carets[0]!.y + lineHeight, 0);
+    expect(carets[2]!.y).toBeCloseTo(carets[0]!.y + lineHeight * 2, 0);
+  });
+
+  test("keeps Canvas geometry gaps for every source newline in a multi-newline run", async ({
+    page,
+  }) => {
+    await page.goto(canvasNativeStoryUrl);
+
+    const canvas = page.locator("[data-canvas-native-editor]");
+    const root = page.locator(".pcne-root");
+    await expect(canvas).toBeVisible();
+    await expect(root).toHaveAttribute("data-fonts-ready", "1");
+
+    await insertCanvasTextAt(page, 0, "canvas-alpha\n\ncanvas-beta\n\n\n\ncanvas-charlie\n\n");
+
+    const alpha = await canvasPointForText(page, "canvas-alpha");
+    const beta = await canvasPointForText(page, "canvas-beta");
+    const charlie = await canvasPointForText(page, "canvas-charlie");
+    const lineHeight = (beta.y - alpha.y) / 2;
+
+    expect(lineHeight).toBeGreaterThan(10);
+    expect(beta.y - alpha.y).toBeCloseTo(lineHeight * 2, 0);
+    expect(charlie.y - beta.y).toBeCloseTo(lineHeight * 4, 0);
+  });
+
+  test("places Canvas caret on blank source lines when clicking inter-block whitespace", async ({
+    page,
+  }) => {
+    await page.goto(canvasNativeStoryUrl);
+
+    const canvas = page.locator("[data-canvas-native-editor]");
+    const root = page.locator(".pcne-root");
+    await expect(canvas).toBeVisible();
+    await expect(root).toHaveAttribute("data-fonts-ready", "1");
+
+    const headingEnd = await canvasPointForText(page, "Canvas native editor", "end");
+    const paragraphStart = await canvasPointForText(page, "Click text", "start");
+    const markdown = await canvasEditorMarkdown(page);
+    const blankOffset = markdown.indexOf("\n\n") + 1;
+    await setCanvasCaret(page, blankOffset);
+    const blankGeometry = await readCanvasGeometry(page);
+    await canvas.click({
+      position: {
+        x: headingEnd.x,
+        y:
+          canvasNativeContentPadding +
+          blankGeometry.headCaret.rect.y +
+          blankGeometry.headCaret.rect.height / 2,
+      },
+    });
+
+    const selection = await readCanvasSelection(page);
+    const paragraphOffset = markdown.indexOf("Click text");
+    expect(selection.headOffset).toBeGreaterThanOrEqual(blankOffset);
+    expect(selection.headOffset).toBeLessThan(paragraphOffset);
+
+    const geometry = await readCanvasGeometry(page);
+    const caretViewportY = canvasNativeContentPadding + geometry.headCaret.rect.y;
+    expect(geometry.headCaret.rect.x).toBeCloseTo(0, 0);
+    expect(caretViewportY).toBeGreaterThan(headingEnd.y);
+    expect(caretViewportY).toBeLessThan(paragraphStart.y);
+    expect(await countCanvasCaretPixels(page)).toBeGreaterThan(10);
+  });
+
+  test("keeps blank-only Canvas documents clickable and visibly editable", async ({ page }) => {
+    await page.goto(canvasNativeStoryUrl);
+
+    const canvas = page.locator("[data-canvas-native-editor]");
+    const root = page.locator(".pcne-root");
+    await expect(canvas).toBeVisible();
+    await expect(root).toHaveAttribute("data-fonts-ready", "1");
+    await setCanvasEditorMarkdown(page, "\n\n");
+
+    await setCanvasCaret(page, 0);
+    const initial = await readCanvasGeometry(page);
+    const lineHeight = initial.headCaret.rect.height;
+    expect(lineHeight).toBeGreaterThan(10);
+
+    for (const offset of [0, 1, 2]) {
+      await canvas.click({
+        position: {
+          x: canvasNativeContentPadding + 160,
+          y: canvasNativeContentPadding + lineHeight * (offset + 0.5),
+        },
+      });
+      const selection = await readCanvasSelection(page);
+      const geometry = await readCanvasGeometry(page);
+      expect(selection.headOffset).toBe(offset);
+      expect(geometry.headCaret.rect.x).toBe(0);
+      expect(geometry.headCaret.rect.y).toBeCloseTo(lineHeight * offset, 0);
+      expect(await countCanvasCaretPixels(page)).toBeGreaterThan(10);
+    }
+  });
+
+  test("keeps Canvas caret visible and clickable across long blank runs", async ({ page }) => {
+    await page.goto(canvasNativeStoryUrl);
+
+    const canvas = page.locator("[data-canvas-native-editor]");
+    const root = page.locator(".pcne-root");
+    await expect(canvas).toBeVisible();
+    await expect(root).toHaveAttribute("data-fonts-ready", "1");
+    await setCanvasEditorMarkdown(page, blankRunMarkdownFixture);
+
+    const blankLines = sourceLines(blankRunMarkdownFixture)
+      .filter((line) => line.text === "")
+      .map((line) => line.start);
+    expect(blankLines.length).toBeGreaterThan(10);
+
+    for (const offset of blankLines) {
+      await setCanvasCaret(page, offset);
+      let geometry = await readCanvasGeometry(page);
+      await page.evaluate(
+        (scrollTop) => {
+          (
+            window as typeof window & {
+              __premarkCanvasNativeEditor?: { scrollTo(y: number): void };
+            }
+          ).__premarkCanvasNativeEditor!.scrollTo(scrollTop);
+        },
+        Math.max(0, geometry.headCaret.rect.y - 120),
+      );
+      geometry = await readCanvasGeometry(page);
+      const render = await readCanvasRenderDebug(page);
+      await canvas.click({
+        position: {
+          x: canvasNativeContentPadding + 260,
+          y:
+            canvasNativeContentPadding +
+            geometry.headCaret.rect.y +
+            -render.viewport.scrollTop +
+            geometry.headCaret.rect.height / 2,
+        },
+      });
+
+      const selection = await readCanvasSelection(page);
+      const afterClickGeometry = await readCanvasGeometry(page);
+      expect(selection.headOffset, `blank source offset ${offset}`).toBe(offset);
+      expect(afterClickGeometry.headCaret.rect.y, `blank source offset ${offset}`).toBeCloseTo(
+        geometry.headCaret.rect.y,
+        0,
+      );
+      expect(await countCanvasCaretPixels(page)).toBeGreaterThan(10);
+    }
   });
 
   test("supports browser paste and cut events through clipboard intents", async ({ page }) => {

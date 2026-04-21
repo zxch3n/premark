@@ -104,9 +104,7 @@ function boundaryXs(fragment: EditableFragment): readonly number[] {
       ? { whiteSpace: "pre-wrap" }
       : undefined,
   );
-  const measuredWidth = measured.at(-1) ?? 0;
-  const scale = measuredWidth > 0 ? visibleTextWidth(fragment) / measuredWidth : 1;
-  return measured.map((x) => fragment.rect.x + fragment.textInsetX + x * scale);
+  return measured.map((x) => fragment.rect.x + fragment.textInsetX + x);
 }
 
 function closeToSameLine(a: number, b: number): boolean {
@@ -164,6 +162,17 @@ function assertFragmentGeometry(index: EditableLayoutIndex, fragment: EditableFr
   expect(fragment.sourceOffsets, fragment.text).toHaveLength(fragment.text.length + 1);
 
   const xs = boundaryXs(fragment);
+  const measuredWidth = measureGraphemeBoundaryXs(
+    fragment.text,
+    fragment.font,
+    fragment.type === "inline_code" || fragment.type === "code_block"
+      ? { whiteSpace: "pre-wrap" }
+      : undefined,
+  ).at(-1);
+  expect(visibleTextWidth(fragment), `${fragment.text} visible width`).toBeCloseTo(
+    measuredWidth ?? 0,
+    5,
+  );
   for (const segment of createGraphemeSegments(fragment.text)) {
     const fromSource = sourceOffsetAtTextOffset(fragment, segment.from);
     const toSource = sourceOffsetAtTextOffset(fragment, segment.to);

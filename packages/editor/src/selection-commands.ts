@@ -1,5 +1,5 @@
 import type { EditorDocumentState } from "./editor-state.ts";
-import type { EditableLayoutIndex } from "./editable-layout.ts";
+import type { EditableFragment, EditableLayoutIndex } from "./editable-layout.ts";
 import { createGraphemeSegments, snapOffsetToGraphemeBoundary } from "./grapheme.ts";
 import type { NormalizedInputIntent } from "./input-trace.ts";
 import { createWordSegments } from "./text-segments.ts";
@@ -136,11 +136,69 @@ function moveByLine(editor: EditorDocumentState, offset: number, key: string): n
   }
 
   const caret = editor.editableIndex.sourceOffsetToCaretRect(offset);
+  const targetLine = adjacentEditableLine(editor.editableIndex.fragments, caret.fragment, key);
+  if (targetLine !== null) {
+    const hit = editor.editableIndex.hitTest(caret.rect.x, targetLine.y + targetLine.height / 2);
+    return hit.offset;
+  }
+
   const direction = key === "ArrowUp" ? -1 : 1;
   const lineHeight = Math.max(caret.rect.height, 1);
   const targetY = caret.rect.y + direction * lineHeight + lineHeight / 2;
   const hit = editor.editableIndex.hitTest(caret.rect.x, targetY);
   return hit.offset;
+}
+
+interface EditableVisualLine {
+  readonly y: number;
+  readonly height: number;
+  readonly fragments: readonly EditableFragment[];
+}
+
+function adjacentEditableLine(
+  fragments: readonly EditableFragment[],
+  current: EditableFragment | null,
+  key: string,
+): EditableVisualLine | null {
+  if (current === null) {
+    return null;
+  }
+
+  const lines = editableVisualLines(fragments);
+  const currentIndex = lines.findIndex((line) => line.fragments.includes(current));
+  if (currentIndex < 0) {
+    return null;
+  }
+
+  const targetIndex = currentIndex + (key === "ArrowUp" ? -1 : 1);
+  return lines[targetIndex] ?? null;
+}
+
+function editableVisualLines(fragments: readonly EditableFragment[]): EditableVisualLine[] {
+  const sorted = [...fragments].sort(
+    (a, b) => a.rect.y - b.rect.y || a.rect.x - b.rect.x || a.sourceRange.from - b.sourceRange.from,
+  );
+  const lines: Array<{ y: number; height: number; fragments: EditableFragment[] }> = [];
+
+  for (const fragment of sorted) {
+    const previous = lines.at(-1);
+    if (
+      previous !== undefined &&
+      Math.abs(previous.y - fragment.rect.y) < 0.5 &&
+      Math.abs(previous.height - fragment.rect.height) < 0.5
+    ) {
+      previous.fragments.push(fragment);
+      continue;
+    }
+
+    lines.push({
+      y: fragment.rect.y,
+      height: fragment.rect.height,
+      fragments: [fragment],
+    });
+  }
+
+  return lines;
 }
 
 function moveToLineBoundary(

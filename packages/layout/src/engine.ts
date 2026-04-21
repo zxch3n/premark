@@ -34,6 +34,7 @@ import type {
   OpaqueLine,
   ResolvedFonts,
   SpacingConfig,
+  SourceLineLayout,
   StyleConfig,
   TextLine,
 } from "./types.ts";
@@ -61,12 +62,75 @@ interface InternalBlockCache extends BlockCache {
   preparedBlock: PreparedBlock;
 }
 
-function emptyLayout(version: number, containerWidth: number): DocumentLayout {
+function sourceLineCount(markdown: string): number {
+  let count = 1;
+  for (let offset = 0; offset < markdown.length; offset += 1) {
+    if (markdown.charCodeAt(offset) === 10) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+interface SourceTextLine {
+  readonly index: number;
+  readonly start: number;
+  readonly end: number;
+}
+
+function splitSourceLines(markdown: string): SourceTextLine[] {
+  const lines: SourceTextLine[] = [];
+  let start = 0;
+  for (let offset = 0; offset < markdown.length; offset += 1) {
+    if (markdown.charCodeAt(offset) !== 10) continue;
+    lines.push({
+      index: lines.length,
+      start,
+      end: offset,
+    });
+    start = offset + 1;
+  }
+  lines.push({
+    index: lines.length,
+    start,
+    end: markdown.length,
+  });
+  return lines;
+}
+
+function emptyLayout(
+  version: number,
+  containerWidth: number,
+  options?: {
+    readonly markdown?: string;
+    readonly sourceFont?: string;
+    readonly sourceLineHeight?: number;
+  },
+): DocumentLayout {
+  const sourceLineHeight = options?.sourceLineHeight ?? 0;
+  const sourceLines =
+    options?.markdown === undefined
+      ? []
+      : splitSourceLines(options.markdown).map(
+          (line): SourceLineLayout => ({
+            index: line.index,
+            start: line.start,
+            end: line.end,
+            y: line.index * sourceLineHeight,
+            height: sourceLineHeight,
+            kind: "source-only",
+          }),
+        );
+  const sourceOnlyHeight =
+    options?.markdown === undefined ? 0 : sourceLineCount(options.markdown) * sourceLineHeight;
   return {
     lines: [],
     blocks: [],
-    totalHeight: 0,
+    sourceLines,
+    totalHeight: sourceOnlyHeight,
     containerWidth,
+    sourceFont: options?.sourceFont,
+    sourceLineHeight,
     version,
   };
 }
@@ -76,6 +140,34 @@ function attachLayoutUpdate(layout: DocumentLayout, update: LayoutUpdateMetadata
     ...layout,
     update,
   };
+}
+
+function previousRenderedSourceLine(
+  lines: ReadonlyMap<number, SourceLineLayout>,
+  index: number,
+): SourceLineLayout | null {
+  for (let candidate = index - 1; candidate >= 0; candidate -= 1) {
+    const line = lines.get(candidate);
+    if (line !== undefined) {
+      return line;
+    }
+  }
+  return null;
+}
+
+function nextRenderedSourceLine(
+  lines: ReadonlyMap<number, SourceLineLayout>,
+  index: number,
+): SourceLineLayout | null {
+  for (let candidate = index + 1; ; candidate += 1) {
+    const line = lines.get(candidate);
+    if (line !== undefined) {
+      return line;
+    }
+    if (candidate > index + lines.size + 10_000) {
+      return null;
+    }
+  }
 }
 
 function fullLayoutUpdate(
@@ -358,7 +450,13 @@ export class LayoutEngineImpl implements LayoutEngine {
       return 0;
     }
     if (blockIndex === 0) {
-      return block.marginTop;
+      if (this.lineBreakMode === "markdown") {
+        return block.marginTop;
+      }
+      const currentSpan = blockSpans[block.sourceBlockIndex];
+      const leadingNewlineCount =
+        currentSpan === undefined ? 0 : countNewlines(markdown, 0, currentSpan.from);
+      return block.marginTop + leadingNewlineCount * this.fonts.lineHeights.body;
     }
     if (this.lineBreakMode === "markdown") {
       return Math.max(previousMarginBottom, block.marginTop);
@@ -381,6 +479,118 @@ export class LayoutEngineImpl implements LayoutEngine {
 
     const newlineCount = countNewlines(markdown, previousSpan.to, currentSpan.from);
     return Math.max(0, newlineCount - 1) * this.fonts.lineHeights.body;
+  }
+
+  private trailingSourceLineGap(
+    normalizedBlocks: readonly NormalizedBlock[],
+    markdown: string,
+    blockSpans: readonly BlockSpan[],
+  ): number {
+    if (this.lineBreakMode === "markdown") {
+      return 0;
+    }
+    const lastBlock = normalizedBlocks.at(-1);
+    const lastSpan = lastBlock === undefined ? undefined : blockSpans[lastBlock.sourceBlockIndex];
+    if (lastSpan === undefined) {
+      return 0;
+    }
+    return countNewlines(markdown, lastSpan.to, markdown.length) * this.fonts.lineHeights.body;
+  }
+
+  private createSourceLineLayouts(
+    markdown: string,
+    lines: readonly LayoutLine[],
+    blocks: readonly BlockLayout[],
+    blockSpans: readonly BlockSpan[],
+  ): SourceLineLayout[] {
+    const sourceLines = splitSourceLines(markdown);
+    const renderedBySourceLine = new Map<number, SourceLineLayout>();
+    const layoutLinesBySourceBlock = new Map<number, LayoutLine[]>();
+
+    for (const line of lines) {
+      const block = blocks[line.blockIndex];
+      if (block === undefined) continue;
+      const group = layoutLinesBySourceBlock.get(block.sourceBlockIndex);
+      if (group === undefined) {
+        layoutLinesBySourceBlock.set(block.sourceBlockIndex, [line]);
+      } else {
+        group.push(line);
+      }
+    }
+
+    blockSpans.forEach((span, sourceBlockIndex) => {
+      const blockSourceLines = sourceLines.filter(
+        (line) => line.end > span.from && line.start < span.to,
+      );
+      const layoutLines = [...(layoutLinesBySourceBlock.get(sourceBlockIndex) ?? [])].sort(
+        (left, right) => left.y - right.y,
+      );
+      if (blockSourceLines.length === 0 || layoutLines.length === 0) {
+        return;
+      }
+
+      const reusableLayoutLines = [...layoutLines];
+      blockSourceLines.forEach((sourceLine, sourceLineIndex) => {
+        const layoutLine =
+          reusableLayoutLines[Math.min(sourceLineIndex, reusableLayoutLines.length - 1)];
+        if (layoutLine === undefined) {
+          return;
+        }
+        renderedBySourceLine.set(sourceLine.index, {
+          index: sourceLine.index,
+          start: sourceLine.start,
+          end: sourceLine.end,
+          y: layoutLine.y,
+          height: layoutLine.height,
+          kind: "rendered",
+          blockIndex: layoutLine.blockIndex,
+          lineIndex: layoutLine.index,
+        });
+      });
+    });
+
+    return sourceLines.map((sourceLine): SourceLineLayout => {
+      const rendered = renderedBySourceLine.get(sourceLine.index);
+      if (rendered !== undefined) {
+        return rendered;
+      }
+
+      const previous = previousRenderedSourceLine(renderedBySourceLine, sourceLine.index);
+      if (previous !== null) {
+        return {
+          index: sourceLine.index,
+          start: sourceLine.start,
+          end: sourceLine.end,
+          y:
+            previous.y +
+            previous.height +
+            (sourceLine.index - previous.index - 1) * this.fonts.lineHeights.body,
+          height: this.fonts.lineHeights.body,
+          kind: "source-only",
+        };
+      }
+
+      const next = nextRenderedSourceLine(renderedBySourceLine, sourceLine.index);
+      if (next !== null) {
+        return {
+          index: sourceLine.index,
+          start: sourceLine.start,
+          end: sourceLine.end,
+          y: next.y - (next.index - sourceLine.index) * this.fonts.lineHeights.body,
+          height: this.fonts.lineHeights.body,
+          kind: "source-only",
+        };
+      }
+
+      return {
+        index: sourceLine.index,
+        start: sourceLine.start,
+        end: sourceLine.end,
+        y: sourceLine.index * this.fonts.lineHeights.body,
+        height: this.fonts.lineHeights.body,
+        kind: "source-only",
+      };
+    });
   }
 
   private prepareBlock(block: NormalizedBlock): PreparedBlock {
@@ -764,7 +974,10 @@ export class LayoutEngineImpl implements LayoutEngine {
       const oldIndex = oldSuffixStart + offset;
       const newIndex = newSuffixStart + offset;
       const range = this.lastNormalizedDocument.sourceBlockRanges[oldIndex];
-      const slice = this.lastNormalizedDocument.blocks.slice(range.from, range.to);
+      const slice = this.lastNormalizedDocument.blocks.slice(range.from, range.to).map((block) => ({
+        ...block,
+        sourceBlockIndex: newIndex,
+      }));
       ranges[newIndex] = {
         from: output.length,
         to: output.length + slice.length,
@@ -810,7 +1023,11 @@ export class LayoutEngineImpl implements LayoutEngine {
     if (normalizedDocument.blocks.length === 0) {
       this.version += 1;
       this.blockCaches = [];
-      return emptyLayout(this.version, containerWidth);
+      return emptyLayout(this.version, containerWidth, {
+        markdown,
+        sourceFont: this.fonts.body,
+        sourceLineHeight: this.fonts.lineHeights.body,
+      });
     }
 
     const nextCaches: InternalBlockCache[] = [];
@@ -926,12 +1143,19 @@ export class LayoutEngineImpl implements LayoutEngine {
 
     this.blockCaches = nextCaches;
     this.version += 1;
+    const sourceLines = this.createSourceLineLayouts(markdown, lines, blocks, blockSpans);
 
     return {
       lines,
       blocks,
-      totalHeight: cursorY + previousMarginBottom,
+      sourceLines,
+      totalHeight:
+        cursorY +
+        this.trailingSourceLineGap(normalizedDocument.blocks, markdown, blockSpans) +
+        previousMarginBottom,
       containerWidth,
+      sourceFont: this.fonts.body,
+      sourceLineHeight: this.fonts.lineHeights.body,
       version: this.version,
     };
   }
@@ -945,7 +1169,11 @@ export class LayoutEngineImpl implements LayoutEngine {
     if (normalizedBlocks.length === 0) {
       this.version += 1;
       this.blockCaches = [];
-      return emptyLayout(this.version, containerWidth);
+      return emptyLayout(this.version, containerWidth, {
+        markdown,
+        sourceFont: this.fonts.body,
+        sourceLineHeight: this.fonts.lineHeights.body,
+      });
     }
 
     const nextCaches: InternalBlockCache[] = [];
@@ -1025,12 +1253,19 @@ export class LayoutEngineImpl implements LayoutEngine {
 
     this.blockCaches = nextCaches;
     this.version += 1;
+    const sourceLines = this.createSourceLineLayouts(markdown, lines, blocks, blockSpans);
 
     return {
       lines,
       blocks,
-      totalHeight: cursorY + previousMarginBottom,
+      sourceLines,
+      totalHeight:
+        cursorY +
+        this.trailingSourceLineGap(normalizedBlocks, markdown, blockSpans) +
+        previousMarginBottom,
       containerWidth,
+      sourceFont: this.fonts.body,
+      sourceLineHeight: this.fonts.lineHeights.body,
       version: this.version,
     };
   }

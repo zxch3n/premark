@@ -138,6 +138,14 @@ export class EditableLayoutIndex {
     );
 
     if (lineFragments.length === 0) {
+      const whitespaceLine = nearestVirtualLineBreakInVerticalGap(this.fragments, y);
+      if (whitespaceLine !== null) {
+        return {
+          offset: whitespaceLine.sourceRange.from,
+          fragment: whitespaceLine,
+          affinity: "after",
+        };
+      }
       const closest = closestFragment(this.fragments, x, y);
       if (closest === null) {
         return {
@@ -486,7 +494,14 @@ function buildEditableFragments(input: EditableLayoutIndexInput): EditableFragme
     toBlock: buildRange.toBlock,
     sourceCursor: sourceCursorForLayoutBlock(input, buildRange.fromBlock),
   });
-  return addVirtualSourceLineBreakFragments(fragments, input.markdown, input.blockSpans);
+  const fragmentsWithEmptyListCarets = addVirtualEmptyListItemContentFragments(fragments, input);
+  return addVirtualSourceLineBreakFragments(
+    fragmentsWithEmptyListCarets,
+    input.markdown,
+    input.layout,
+    input.blockSpans,
+    input.viewport,
+  );
 }
 
 function buildIncrementalEditableFragments(
@@ -524,7 +539,7 @@ function buildIncrementalEditableFragments(
   const oldSuffixStart = update.oldSuffixStartBlock;
 
   for (const fragment of previous.fragments) {
-    if (isVirtualLineBreakFragment(fragment)) continue;
+    if (isVirtualFragment(fragment)) continue;
 
     if (fragment.blockIndex < update.dirtyFromBlock) {
       if (fragment.sourceRange.to > update.sourceChange.fromA) {
@@ -555,10 +570,16 @@ function buildIncrementalEditableFragments(
     sourceCursor,
   });
   const textFragments = [...prefix, ...dirty, ...suffix].sort(compareEditableFragments);
-  const fragments = addVirtualSourceLineBreakFragments(
+  const textFragmentsWithEmptyListCarets = addVirtualEmptyListItemContentFragments(
     textFragments,
+    input,
+  );
+  const fragments = addVirtualSourceLineBreakFragments(
+    textFragmentsWithEmptyListCarets,
     input.markdown,
+    input.layout,
     input.blockSpans,
+    input.viewport,
   );
   return {
     fragments,
@@ -569,6 +590,16 @@ function buildIncrementalEditableFragments(
       transformedFragmentCount: suffix.length,
     }),
   };
+}
+
+function isVirtualFragment(fragment: EditableFragment): boolean {
+  if (fragment.blockId.startsWith("source-line:")) {
+    return true;
+  }
+  return (
+    fragment.text.length === 0 &&
+    (fragment.blockId.includes(":newline:") || fragment.blockId.includes(":empty-list-content:"))
+  );
 }
 
 function isVirtualLineBreakFragment(fragment: EditableFragment): boolean {
@@ -723,7 +754,7 @@ function editableIndexFallbackReason(input: EditableLayoutIndexInput): string {
 }
 
 function nonVirtualFragmentCount(fragments: readonly EditableFragment[]): number {
-  return fragments.filter((fragment) => !isVirtualLineBreakFragment(fragment)).length;
+  return fragments.filter((fragment) => !isVirtualFragment(fragment)).length;
 }
 
 function resolveEditableBuildRange(input: EditableLayoutIndexInput): {
@@ -898,9 +929,41 @@ function buildEditableTextFragments(
 function addVirtualSourceLineBreakFragments(
   fragments: readonly EditableFragment[],
   markdown: string,
+  layout: DocumentLayout,
   blockSpans: readonly BlockSpan[],
+  viewport: EditableLayoutViewport | undefined,
 ): EditableFragment[] {
+  if (layout.sourceLines !== undefined) {
+    return [
+      ...fragments,
+      ...createMissingSourceLineFragments(fragments, markdown, layout, viewport),
+    ].sort(compareEditableFragments);
+  }
+
+  if (fragments.length === 0) {
+    return createSourceOnlyLineFragments(markdown, layout, viewport);
+  }
+
   const virtualFragments: EditableFragment[] = [];
+  const sourceLineHeight = sourceLineBreakHeight(layout, fragments);
+  const firstSpan = blockSpans[0];
+  const firstFragment = fragments[0];
+  if (firstSpan !== undefined && firstFragment !== undefined) {
+    const leadingNewlineOffsets = newlineOffsetsInRange(markdown, 0, firstSpan.from);
+    for (let index = 0; index < leadingNewlineOffsets.length; index += 1) {
+      const sourceOffset =
+        index === 0 ? 0 : (leadingNewlineOffsets[index - 1] ?? firstSpan.from) + 1;
+      virtualFragments.push(
+        createVirtualLineBreakFragmentBefore(
+          firstFragment,
+          sourceOffset,
+          leadingNewlineOffsets.length - index,
+          sourceLineHeight,
+        ),
+      );
+    }
+  }
+
   for (let index = 1; index < blockSpans.length; index += 1) {
     const previousSpan = blockSpans[index - 1]!;
     const nextSpan = blockSpans[index]!;
@@ -914,14 +977,20 @@ function addVirtualSourceLineBreakFragments(
     const nextFragment = fragments.find((fragment) => fragment.sourceRange.from >= nextSpan.from);
     if (previousFragment === undefined || nextFragment === undefined) continue;
 
-    const lineHeight = previousFragment.rect.height;
-    const availableGap = nextFragment.rect.y - (previousFragment.rect.y + lineHeight);
+    const lineHeight = sourceLineHeight;
+    const availableGap =
+      nextFragment.rect.y - (previousFragment.rect.y + previousFragment.rect.height);
     if (availableGap + 0.5 < blankLineCount * lineHeight) continue;
 
     for (let blankLineIndex = 0; blankLineIndex < blankLineCount; blankLineIndex += 1) {
       const sourceOffset = (newlineOffsets[blankLineIndex] ?? previousSpan.to) + 1;
       virtualFragments.push(
-        createVirtualLineBreakFragment(previousFragment, sourceOffset, blankLineIndex + 1),
+        createVirtualLineBreakFragment(
+          previousFragment,
+          sourceOffset,
+          blankLineIndex + 1,
+          lineHeight,
+        ),
       );
     }
   }
@@ -932,7 +1001,12 @@ function addVirtualSourceLineBreakFragments(
     const trailingNewlineOffsets = newlineOffsetsInRange(markdown, lastSpan.to, markdown.length);
     trailingNewlineOffsets.forEach((newlineOffset, index) => {
       virtualFragments.push(
-        createVirtualLineBreakFragment(lastFragment, newlineOffset + 1, index + 1),
+        createVirtualLineBreakFragment(
+          lastFragment,
+          newlineOffset + 1,
+          index + 1,
+          sourceLineHeight,
+        ),
       );
     });
   }
@@ -940,10 +1014,73 @@ function addVirtualSourceLineBreakFragments(
   return [...fragments, ...virtualFragments].sort(compareEditableFragments);
 }
 
+function addVirtualEmptyListItemContentFragments(
+  fragments: readonly EditableFragment[],
+  input: EditableLayoutIndexInput,
+): EditableFragment[] {
+  const virtualFragments: EditableFragment[] = [];
+
+  for (const line of input.layout.lines) {
+    if (line.kind !== "text") continue;
+    const block = input.layout.blocks[line.blockIndex];
+    if (block?.type !== "list_item") continue;
+
+    const lineFragments = fragments.filter(
+      (fragment) => fragment.blockIndex === line.blockIndex && fragment.lineIndex === line.index,
+    );
+    if (lineFragments.length === 0) continue;
+
+    const firstFragment = lineFragments[0]!;
+    const sourceLine = sourceLineAround(input.markdown, firstFragment.sourceRange.from);
+    const prefixLength = emptyListItemPrefixLength(sourceLine.text);
+    if (prefixLength === null) continue;
+
+    const caretOffset = sourceLine.start + prefixLength;
+    const hasFragmentAtCaret = fragments.some(
+      (fragment) =>
+        fragment.sourceRange.from === caretOffset && fragment.sourceRange.to === caretOffset,
+    );
+    if (hasFragmentAtCaret) continue;
+
+    const lastPrefixFragment = lineFragments
+      .filter((fragment) => fragment.sourceRange.to <= caretOffset)
+      .at(-1);
+    if (lastPrefixFragment === undefined) continue;
+
+    virtualFragments.push({
+      blockId: `${lastPrefixFragment.blockId}:empty-list-content:${caretOffset}`,
+      blockIndex: line.blockIndex,
+      lineIndex: line.index,
+      fragmentIndex: lineFragments.length,
+      text: "",
+      font: lastPrefixFragment.font,
+      type: "text",
+      sourceRange: {
+        from: caretOffset,
+        to: caretOffset,
+      },
+      sourceOffsets: [caretOffset],
+      rect: {
+        x: inferListContentStartX(input.layout, line, lastPrefixFragment),
+        y: line.y,
+        width: 1,
+        height: line.height,
+      },
+      textInsetX: 0,
+    });
+  }
+
+  if (virtualFragments.length === 0) {
+    return [...fragments];
+  }
+  return [...fragments, ...virtualFragments].sort(compareEditableFragments);
+}
+
 function createVirtualLineBreakFragment(
   previousFragment: EditableFragment,
   sourceOffset: number,
   lineDelta: number,
+  lineHeight: number,
 ): EditableFragment {
   return {
     blockId: `${previousFragment.blockId}:newline:${sourceOffset}`,
@@ -960,12 +1097,227 @@ function createVirtualLineBreakFragment(
     sourceOffsets: [sourceOffset],
     rect: {
       x: 0,
-      y: previousFragment.rect.y + previousFragment.rect.height * lineDelta,
+      y: previousFragment.rect.y + previousFragment.rect.height + lineHeight * (lineDelta - 1),
       width: 1,
-      height: previousFragment.rect.height,
+      height: lineHeight,
     },
     textInsetX: 0,
   };
+}
+
+function createVirtualLineBreakFragmentBefore(
+  nextFragment: EditableFragment,
+  sourceOffset: number,
+  lineDelta: number,
+  lineHeight: number,
+): EditableFragment {
+  return {
+    blockId: `${nextFragment.blockId}:newline:${sourceOffset}`,
+    blockIndex: nextFragment.blockIndex,
+    lineIndex: -sourceOffset,
+    fragmentIndex: 0,
+    text: "",
+    font: nextFragment.font,
+    type: "text",
+    sourceRange: {
+      from: sourceOffset,
+      to: sourceOffset,
+    },
+    sourceOffsets: [sourceOffset],
+    rect: {
+      x: 0,
+      y: nextFragment.rect.y - lineHeight * lineDelta,
+      width: 1,
+      height: lineHeight,
+    },
+    textInsetX: 0,
+  };
+}
+
+function sourceLineBreakHeight(
+  layout: DocumentLayout,
+  fragments: readonly EditableFragment[],
+): number {
+  return (
+    layout.sourceLineHeight ??
+    fragments.find((fragment) => fragment.rect.height > 0)?.rect.height ??
+    16
+  );
+}
+
+function createMissingSourceLineFragments(
+  fragments: readonly EditableFragment[],
+  markdown: string,
+  layout: DocumentLayout,
+  viewport: EditableLayoutViewport | undefined,
+): EditableFragment[] {
+  const sourceLines = layout.sourceLines ?? [];
+  const font = layout.sourceFont ?? fragments[0]?.font ?? "normal 400 16px sans-serif";
+  return sourceLines
+    .filter((line) => sourceLineIntersectsViewport(line, viewport))
+    .filter((line) => markdown.slice(line.start, line.end).trim().length === 0)
+    .filter(
+      (line) =>
+        !fragments.some(
+          (fragment) =>
+            fragment.sourceRange.from <= line.start &&
+            fragment.sourceRange.to >= line.end &&
+            (line.start !== line.end || fragment.sourceRange.from === line.start),
+        ),
+    )
+    .map((line): EditableFragment => {
+      const text = markdown.slice(line.start, line.end);
+      const boundaries = measureGraphemeBoundaryXs(text, font);
+      return {
+        blockId: `source-line:${line.start}`,
+        blockIndex: line.blockIndex ?? 0,
+        lineIndex: line.index,
+        fragmentIndex: 0,
+        text,
+        font,
+        type: "text",
+        sourceRange: {
+          from: line.start,
+          to: line.end,
+        },
+        sourceOffsets: sourceOffsetsForLine(text, line.start),
+        rect: {
+          x: 0,
+          y: line.y,
+          width: Math.max(1, boundaries.at(-1) ?? 0),
+          height: line.height,
+        },
+        textInsetX: 0,
+      };
+    });
+}
+
+function createSourceOnlyLineFragments(
+  markdown: string,
+  layout: DocumentLayout,
+  viewport: EditableLayoutViewport | undefined,
+): EditableFragment[] {
+  const font = layout.sourceFont ?? "normal 400 16px sans-serif";
+  const lineHeight = sourceLineBreakHeight(layout, []);
+  return sourceLines(markdown)
+    .map((line, index) => ({ ...line, index }))
+    .filter((line) =>
+      sourceLineIntersectsViewport(
+        {
+          y: line.index * lineHeight,
+          height: lineHeight,
+        },
+        viewport,
+      ),
+    )
+    .map((line): EditableFragment => {
+      const boundaries = measureGraphemeBoundaryXs(line.text, font);
+      const width = boundaries.at(-1) ?? 0;
+      return {
+        blockId: `source-line:${line.start}`,
+        blockIndex: 0,
+        lineIndex: line.index,
+        fragmentIndex: 0,
+        text: line.text,
+        font,
+        type: "text",
+        sourceRange: {
+          from: line.start,
+          to: line.end,
+        },
+        sourceOffsets: sourceOffsetsForLine(line.text, line.start),
+        rect: {
+          x: 0,
+          y: line.index * lineHeight,
+          width: Math.max(1, width),
+          height: lineHeight,
+        },
+        textInsetX: 0,
+      };
+    });
+}
+
+function sourceLineIntersectsViewport(
+  line: { readonly y: number; readonly height: number },
+  viewport: EditableLayoutViewport | undefined,
+): boolean {
+  if (viewport === undefined) {
+    return true;
+  }
+  const overscanY = viewport.overscanY ?? 0;
+  const top = Math.max(0, viewport.y - overscanY);
+  const bottom = viewport.y + viewport.height + overscanY;
+  return line.y + line.height >= top && line.y <= bottom;
+}
+
+function sourceLines(markdown: string): Array<{ start: number; end: number; text: string }> {
+  const lines: Array<{ start: number; end: number; text: string }> = [];
+  let start = 0;
+  for (let offset = 0; offset < markdown.length; offset += 1) {
+    if (markdown.charCodeAt(offset) !== 10) continue;
+    lines.push({
+      start,
+      end: offset,
+      text: markdown.slice(start, offset),
+    });
+    start = offset + 1;
+  }
+  lines.push({
+    start,
+    end: markdown.length,
+    text: markdown.slice(start),
+  });
+  return lines;
+}
+
+function sourceOffsetsForLine(text: string, sourceStart: number): number[] {
+  if (text.length === 0) {
+    return [sourceStart];
+  }
+  const offsets = [sourceStart];
+  for (const segment of createGraphemeSegments(text)) {
+    offsets.push(sourceStart + segment.to);
+  }
+  return offsets;
+}
+
+function emptyListItemPrefixLength(line: string): number | null {
+  const quotePrefix = /^(?:(?: {0,3}> ?)+)/u.exec(line)?.[0] ?? "";
+  const rest = line.slice(quotePrefix.length);
+  const match = /^(?:[ \t]{0,3}(?:[-+*]|\d{1,9}[.)])[ \t]+(?:\[[ xX]\][ \t]+)?)$/u.exec(rest);
+  return match === null ? null : quotePrefix.length + match[0].length;
+}
+
+function sourceLineAround(markdown: string, offset: number): { start: number; text: string } {
+  const safeOffset = Math.max(0, Math.min(offset, markdown.length));
+  const start = markdown.lastIndexOf("\n", Math.max(0, safeOffset - 1)) + 1;
+  const nextBreak = markdown.indexOf("\n", safeOffset);
+  const end = nextBreak < 0 ? markdown.length : nextBreak;
+  return {
+    start,
+    text: markdown.slice(start, end),
+  };
+}
+
+function inferListContentStartX(
+  layout: DocumentLayout,
+  line: Extract<DocumentLayout["lines"][number], { kind: "text" }>,
+  fallbackFragment: EditableFragment,
+): number {
+  const block = layout.blocks[line.blockIndex];
+  for (const candidate of layout.lines) {
+    if (candidate.kind !== "text" || candidate.fragments.length < 2) continue;
+    const candidateBlock = layout.blocks[candidate.blockIndex];
+    if (
+      candidateBlock?.type === "list_item" &&
+      candidateBlock.context.listDepth === block?.context.listDepth &&
+      candidateBlock.context.ordered === block?.context.ordered
+    ) {
+      return candidate.x + candidate.fragments[1]!.x;
+    }
+  }
+
+  return fallbackFragment.rect.x + fallbackFragment.rect.width + 10;
 }
 
 function newlineOffsetsInRange(markdown: string, from: number, to: number): number[] {
@@ -1408,7 +1760,6 @@ function textBoundaryXs(fragment: EditableFragment): readonly number[] {
   }
 
   const boundaries = Array.from({ length: fragment.text.length + 1 }, () => 0);
-  const renderedTextWidth = visibleTextWidth(fragment);
   const measuredBoundaries = measureGraphemeBoundaryXs(
     fragment.text,
     fragment.font,
@@ -1416,10 +1767,8 @@ function textBoundaryXs(fragment: EditableFragment): readonly number[] {
       ? { whiteSpace: "pre-wrap" }
       : undefined,
   );
-  const measuredWidth = measuredBoundaries.at(-1) ?? 0;
-  const scale = measuredWidth > 0 ? renderedTextWidth / measuredWidth : 1;
   for (let offset = 0; offset < boundaries.length; offset += 1) {
-    boundaries[offset] = (measuredBoundaries[offset] ?? 0) * scale;
+    boundaries[offset] = measuredBoundaries[offset] ?? 0;
   }
   fragmentBoundaryCache.set(fragment, boundaries);
   return boundaries;
@@ -1563,6 +1912,89 @@ function nearestFragmentOnLine(
     const candidateDistance = distanceToRectX(candidate.rect, x);
     return candidateDistance < bestDistance ? candidate : best;
   });
+}
+
+interface EditableVisualLineBand {
+  readonly top: number;
+  readonly bottom: number;
+  readonly center: number;
+  readonly virtualLineBreak: EditableFragment | null;
+}
+
+function nearestVirtualLineBreakInVerticalGap(
+  fragments: readonly EditableFragment[],
+  y: number,
+): EditableFragment | null {
+  const lines = editableVisualLineBands(fragments);
+  if (lines.length === 0) return null;
+
+  let previous: EditableVisualLineBand | null = null;
+  let next: EditableVisualLineBand | null = null;
+  for (const line of lines) {
+    if (y >= line.top && y < line.bottom) {
+      return null;
+    }
+    if (line.bottom <= y) {
+      previous = line;
+      continue;
+    }
+    next = line;
+    break;
+  }
+
+  if (previous?.virtualLineBreak != null && next?.virtualLineBreak != null) {
+    return Math.abs(y - previous.center) <= Math.abs(y - next.center)
+      ? previous.virtualLineBreak
+      : next.virtualLineBreak;
+  }
+
+  if (previous?.virtualLineBreak != null && next !== null) {
+    return previous.virtualLineBreak;
+  }
+
+  if (next?.virtualLineBreak != null && previous !== null) {
+    return next.virtualLineBreak;
+  }
+
+  if (next?.virtualLineBreak != null && y >= next.top - (next.bottom - next.top)) {
+    return next.virtualLineBreak;
+  }
+
+  if (
+    previous?.virtualLineBreak != null &&
+    y <= previous.bottom + (previous.bottom - previous.top)
+  ) {
+    return previous.virtualLineBreak;
+  }
+
+  return null;
+}
+
+function editableVisualLineBands(fragments: readonly EditableFragment[]): EditableVisualLineBand[] {
+  const lines: EditableVisualLineBand[] = [];
+  for (const fragment of [...fragments].sort(compareEditableFragments)) {
+    const existing = lines.find(
+      (line) =>
+        Math.abs(line.top - fragment.rect.y) < 0.5 &&
+        Math.abs(line.bottom - (fragment.rect.y + fragment.rect.height)) < 0.5,
+    );
+    if (existing !== undefined) {
+      if (existing.virtualLineBreak === null && isVirtualLineBreakFragment(fragment)) {
+        lines[lines.indexOf(existing)] = {
+          ...existing,
+          virtualLineBreak: fragment,
+        };
+      }
+      continue;
+    }
+    lines.push({
+      top: fragment.rect.y,
+      bottom: fragment.rect.y + fragment.rect.height,
+      center: fragment.rect.y + fragment.rect.height / 2,
+      virtualLineBreak: isVirtualLineBreakFragment(fragment) ? fragment : null,
+    });
+  }
+  return lines;
 }
 
 function closestFragment(

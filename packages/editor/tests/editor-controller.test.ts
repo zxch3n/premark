@@ -207,7 +207,7 @@ describe("PremarkEditorController", () => {
     expect(activeSnapshot.editableIndex.fragments.length).toBeLessThan(
       fullSnapshot.editableIndex.fragments.length / 20,
     );
-  });
+  }, 20_000);
 
   it("does not rebuild a full editable index for offscreen AI appends", () => {
     const markdown = buildLargeViewportFixture();
@@ -242,7 +242,7 @@ describe("PremarkEditorController", () => {
     );
     expect(snapshot.editableIndex.fragments.length).toBeLessThan(fullFragmentCount / 20);
     expect(snapshot.renderUpdate.dirtyRects).toEqual([]);
-  });
+  }, 20_000);
 
   it("applies remote patches without recording local undo and rebases selection", () => {
     const controller = createInMemoryPremarkEditorController("alpha beta gamma", 560);

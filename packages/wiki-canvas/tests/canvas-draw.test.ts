@@ -108,6 +108,29 @@ describe("drawTile", () => {
     );
   });
 
+  it("draws text after emoji at the Canvas-measured emoji boundary", () => {
+    const emoji = "👨‍👩‍👧‍👦";
+    const text = `${emoji}X${emoji}Y`;
+    const font = 'normal 400 16px "Segoe UI", Helvetica, Arial, sans-serif';
+    const boundaries = measureGraphemeBoundaryXs(text, font);
+    const layout = createTextLayout(text, font);
+    const ctx = createRecordingContext();
+
+    drawTile(ctx, layout, 240, 80, {
+      cardRadius: 0,
+      contentPadding: 0,
+      palette: darkTilePalette,
+    });
+
+    expect(ctx.calls.map((call) => call.text)).toEqual([emoji, "X", emoji, "Y"]);
+    expect(ctx.calls.map((call) => call.x)).toEqual([
+      boundaries[0],
+      boundaries[emoji.length],
+      boundaries[emoji.length + 1],
+      boundaries[emoji.length * 2 + 1],
+    ]);
+  });
+
   it("draws revealed Markdown control graphemes at layout boundaries", () => {
     const text = "Try **bold**";
     const font = 'normal 400 16px "Segoe UI", Helvetica, Arial, sans-serif';
