@@ -14,6 +14,8 @@ Core invariants:
 - Grapheme boundaries are the smallest editable text boundary. Never place a caret or deletion range inside a grapheme cluster.
 - Text measurement, editable geometry, and Canvas painting must share the same boundary model. Do not add a Canvas-only width heuristic.
 - Source-mode editing preserves every `\n` as a visual line advance.
+- Source-mode parsing preserves line-leading spaces as editable text and does not treat 4-space indentation as an implicit code block; fenced code remains the explicit code-block syntax.
+- When the caret or selection touches a table block or image source line, only that table/image range renders as plain Markdown source text; other tables/images keep normal rendering.
 - Hidden textarea state is only an OS input bridge. It must not overwrite native composition state while IME is active.
 - Active Markdown controls and composition are render views over the same source, not separate documents.
 - Remote/AI patches must go through explicit source patch APIs and must not enter local undo history.

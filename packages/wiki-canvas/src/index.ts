@@ -12,6 +12,7 @@ export type {
   PremarkCanvasEditorHostPaintOptions,
   PremarkCanvasEditorHostPaintState,
   PremarkCanvasEditorHostRenderState,
+  PremarkCanvasEditorHostSize,
 } from "./editor-host.ts";
 export {
   layoutMasonry,

@@ -70,6 +70,43 @@ describe("createLayoutEngine", () => {
     expect(boundaries[3]).toBeGreaterThan(boundaries[2]!);
   });
 
+  it("preserves source spaces as layout fragments in source mode", () => {
+    const markdown = "a    b";
+    const engine = createLayoutEngine({
+      fontTheme: "github",
+      lineBreakMode: "source",
+    });
+    const layout = engine.layout(markdown, 900);
+    const line = layout.lines.find((candidate) => candidate.kind === "text");
+    expect(line?.kind).toBe("text");
+    if (line?.kind !== "text") return;
+
+    const fragment = line.fragments[0]!;
+    const boundaries = measureGraphemeBoundaryXs(markdown, fragment.font);
+    expect(fragment.text).toBe(markdown);
+    expect(fragment.width).toBeCloseTo(boundaries.at(-1)!, 5);
+    expect(fragment.sourceOffsets).toEqual([0, 1, 2, 3, 4, 5, 6]);
+  });
+
+  it("preserves leading source spaces without creating an indented code block in source mode", () => {
+    const markdown = "    abc";
+    const engine = createLayoutEngine({
+      fontTheme: "github",
+      lineBreakMode: "source",
+    });
+    const layout = engine.layout(markdown, 900);
+    const line = layout.lines.find((candidate) => candidate.kind === "text");
+    expect(layout.blocks[0]?.type).toBe("paragraph");
+    expect(line?.kind).toBe("text");
+    if (line?.kind !== "text") return;
+
+    const fragment = line.fragments[0]!;
+    const boundaries = measureGraphemeBoundaryXs(markdown, fragment.font);
+    expect(fragment.text).toBe(markdown);
+    expect(fragment.width).toBeCloseTo(boundaries.at(-1)!, 5);
+    expect(fragment.sourceOffsets).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+  });
+
   it("uses Canvas-measured visual widths after pretext chooses text lines", () => {
     const emoji = "👨‍👩‍👧‍👦";
     const markdown = `${emoji.repeat(3)}X`;
@@ -126,6 +163,58 @@ describe("createLayoutEngine", () => {
       520,
     );
     expect(layout.lines.some((line) => line.kind === "opaque")).toBe(true);
+  });
+
+  it("lays out selected table source ranges as editable text without affecting other tables", () => {
+    const firstTable = "| A | B |\n| - | - |\n| **x** | y |";
+    const secondTable = "| C | D |\n| - | - |\n| 1 | 2 |";
+    const markdown = `${firstTable}\n\noutside\n\n${secondTable}`;
+    const engine = createLayoutEngine({
+      fontTheme: "github",
+      lineBreakMode: "source",
+      sourceTextBlockRanges: [{ from: 0, to: firstTable.length }],
+    });
+    const layout = engine.layout(markdown, 720);
+
+    expect(layout.blocks[0]?.type).toBe("paragraph");
+    expect(layout.blocks.at(-1)?.type).toBe("table");
+    const sourceLines = layout.lines
+      .filter((line) => line.kind === "text")
+      .flatMap((line) =>
+        line.kind === "text" ? line.fragments.map((fragment) => fragment.text) : [],
+      );
+    expect(sourceLines).toEqual(
+      expect.arrayContaining(["| A | B |", "| - | - |", "| **x** | y |", "outside"]),
+    );
+    expect(
+      layout.lines.some((line) => line.kind === "opaque" && line.content.type === "table"),
+    ).toBe(true);
+  });
+
+  it("lays out selected image source ranges as editable text without affecting other images", () => {
+    const firstImage = "![alt](./one.png)";
+    const secondImage = "![other](./two.png)";
+    const markdown = `${firstImage}\n\noutside\n\n${secondImage}`;
+    const engine = createLayoutEngine({
+      fontTheme: "github",
+      lineBreakMode: "source",
+      sourceTextBlockRanges: [{ from: 0, to: firstImage.length }],
+    });
+    const layout = engine.layout(markdown, 720);
+
+    expect(layout.blocks[0]?.type).toBe("paragraph");
+    expect(layout.blocks.at(-1)?.type).toBe("image");
+    expect(
+      layout.lines
+        .filter((line) => line.kind === "text")
+        .some(
+          (line) =>
+            line.kind === "text" && line.fragments.some((fragment) => fragment.text === firstImage),
+        ),
+    ).toBe(true);
+    expect(
+      layout.lines.some((line) => line.kind === "opaque" && line.content.type === "image"),
+    ).toBe(true);
   });
 
   it("keeps Markdown softbreaks collapsed by default", () => {

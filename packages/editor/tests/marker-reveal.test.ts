@@ -44,6 +44,15 @@ describe("Markdown control reveal", () => {
     expect(revealed.markdown).toBe(markdown);
   });
 
+  it("does not show heading controls for a caret on the blank line after the heading", () => {
+    const markdown = "# Head\n\nPlain";
+    const blankLineStart = markdown.indexOf("\n\n") + 1;
+    const revealed = reveal(markdown, blankLineStart);
+
+    expect(revealed.markerState).toBe("hidden");
+    expect(revealed.markdown).toBe(markdown);
+  });
+
   it("shows fenced code controls for a caret or inner selection inside the code block", () => {
     const markdown = ["```ts", "const value = 1;", "```", "", "After"].join("\n");
 
@@ -125,6 +134,61 @@ describe("Markdown control reveal", () => {
     expect(revealed.markerState).toBe("hidden");
     expect(revealed.markdown).toBe(markdown);
     expect(revealed.activeControls).toEqual([]);
+  });
+
+  it("requests source-text rendering for the active table block only", () => {
+    const firstTable = "| A | B |\n| - | - |\n| **x** | y |";
+    const secondTable = "| C | D |\n| - | - |\n| 1 | 2 |";
+    const markdown = `${firstTable}\n\noutside **bold**\n\n${secondTable}`;
+
+    const first = reveal(markdown, markdown.indexOf("x"));
+    expect(first.markerState).toBe("active");
+    expect(first.markdown).toBe(markdown);
+    expect(first.activeControls.map((control) => control.type)).toEqual(["table"]);
+    expect(first.sourceTextBlockRanges).toEqual([{ from: 0, to: firstTable.length }]);
+
+    const secondTableFrom = markdown.indexOf(secondTable);
+    const second = reveal(markdown, markdown.indexOf("1 | 2"));
+    expect(second.activeControls.map((control) => control.type)).toEqual(["table"]);
+    expect(second.sourceTextBlockRanges).toEqual([
+      { from: secondTableFrom, to: secondTableFrom + secondTable.length },
+    ]);
+
+    const outside = reveal(markdown, markdown.indexOf("bold"));
+    expect(outside.activeControls.map((control) => control.type)).toEqual(["strong"]);
+    expect(outside.sourceTextBlockRanges).toEqual([]);
+  });
+
+  it("requests source-text rendering for the active image block only", () => {
+    const firstImage = "![alt](./one.png)";
+    const secondImage = "![other](./two.png)";
+    const markdown = `${firstImage}\n\noutside **bold**\n\n${secondImage}`;
+
+    const first = reveal(markdown, markdown.indexOf("alt"));
+    expect(first.markerState).toBe("active");
+    expect(first.markdown).toBe(markdown);
+    expect(first.activeControls.map((control) => control.type)).toEqual(["image"]);
+    expect(first.sourceTextBlockRanges).toEqual([{ from: 0, to: firstImage.length }]);
+
+    const secondImageFrom = markdown.indexOf(secondImage);
+    const second = reveal(markdown, markdown.indexOf("other"));
+    expect(second.activeControls.map((control) => control.type)).toEqual(["image"]);
+    expect(second.sourceTextBlockRanges).toEqual([
+      { from: secondImageFrom, to: secondImageFrom + secondImage.length },
+    ]);
+
+    const outside = reveal(markdown, markdown.indexOf("bold"));
+    expect(outside.activeControls.map((control) => control.type)).toEqual(["strong"]);
+    expect(outside.sourceTextBlockRanges).toEqual([]);
+  });
+
+  it("treats a paragraph containing an image as one active source line", () => {
+    const markdown = "before ![alt](./one.png) after";
+    const revealed = reveal(markdown, markdown.indexOf("before"));
+
+    expect(revealed.markerState).toBe("active");
+    expect(revealed.activeControls.map((control) => control.type)).toEqual(["image"]);
+    expect(revealed.sourceTextBlockRanges).toEqual([{ from: 0, to: markdown.length }]);
   });
 
   it("emits explicit editable runs for revealed control characters", () => {

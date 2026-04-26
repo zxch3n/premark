@@ -10,6 +10,9 @@ import type {
   ListItemNode,
   MarkdownBlock,
   MarkdownInline,
+  MarkdownParseMode,
+  MarkdownParseOptions,
+  SourceRange,
   TableCellNode,
 } from "./types.ts";
 
@@ -27,6 +30,11 @@ interface TopLevelBlockEntry {
 
 interface InlineConversionOptions {
   readonly plainUrls: boolean;
+}
+
+interface ResolvedMarkdownParseOptions {
+  readonly mode: MarkdownParseMode;
+  readonly sourceTextBlockRanges: readonly SourceRange[];
 }
 
 interface ConvertedInlineNode {
@@ -48,39 +56,50 @@ export interface ParsedMarkdownDocument {
 }
 
 const markdownParser = baseParser.configure(GFM);
+const sourceMarkdownParser = baseParser.configure([GFM, { remove: ["IndentedCode"] }]);
 const defaultInlineConversionOptions: InlineConversionOptions = {
   plainUrls: true,
 };
 const linkLabelInlineConversionOptions: InlineConversionOptions = {
   plainUrls: false,
 };
+let activeInlineSourceBase = 0;
 
-export function parseMarkdown(markdown: string): readonly MarkdownBlock[] {
-  return parseMarkdownDocument(markdown).blocks;
+export function parseMarkdown(
+  markdown: string,
+  options: MarkdownParseOptions = {},
+): readonly MarkdownBlock[] {
+  return parseMarkdownDocument(markdown, options).blocks;
 }
 
-export function parseMarkdownDocument(markdown: string): ParsedMarkdownDocument {
-  const tree = markdownParser.parse(markdown);
-  const { entries, definitions } = extractTopLevelBlockEntries(tree, markdown);
+export function parseMarkdownDocument(
+  markdown: string,
+  options: MarkdownParseOptions = {},
+): ParsedMarkdownDocument {
+  const resolvedOptions = resolveMarkdownParseOptions(options);
+  const tree = getMarkdownParser(resolvedOptions).parse(markdown);
+  const { entries, definitions } = extractTopLevelBlockEntries(tree, markdown, 0, resolvedOptions);
   return {
     tree,
-    blocks: materializeBlocks(entries, markdown, definitions),
+    blocks: materializeBlocks(entries, markdown, definitions, resolvedOptions),
     blockSpans: freezeBlockSpans(entries.map((entry) => entry.span)),
   };
 }
 
-export function getMarkdownParser() {
-  return markdownParser;
+export function getMarkdownParser(options: MarkdownParseOptions = {}) {
+  return resolveParseMode(options) === "source" ? sourceMarkdownParser : markdownParser;
 }
 
 export function extractTopLevelBlockEntries(
   tree: Tree,
   markdown: string,
   startBlockIndex = 0,
+  options: MarkdownParseOptions = {},
 ): {
   entries: TopLevelBlockEntry[];
   definitions: Map<string, ReferenceDefinition>;
 } {
+  const parseMode = resolveParseMode(options);
   const topNode = tree.topNode;
   const definitions = collectReferenceDefinitions(topNode, markdown);
   const entries: TopLevelBlockEntry[] = [];
@@ -96,7 +115,7 @@ export function extractTopLevelBlockEntries(
       return;
     }
 
-    for (const entry of createTopLevelEntries(child, markdown, blockType)) {
+    for (const entry of createTopLevelEntries(child, markdown, blockType, parseMode)) {
       if (blockIndex >= startBlockIndex) {
         entries.push(entry);
       }
@@ -114,14 +133,31 @@ function createTopLevelEntries(
   node: SyntaxNode,
   markdown: string,
   blockType: string,
+  parseMode: MarkdownParseMode,
 ): TopLevelBlockEntry[] {
   if (node.type.name !== "BulletList" && node.type.name !== "OrderedList") {
-    return [createTopLevelEntry(node, markdown, blockType, node.from, node.to)];
+    return [
+      createTopLevelEntry(
+        node,
+        markdown,
+        blockType,
+        sourceModeBlockFrom(markdown, node, parseMode),
+        node.to,
+      ),
+    ];
   }
 
   const segments = createListItemSegments(node, markdown);
   if (segments.length === 1) {
-    return [createTopLevelEntry(node, markdown, blockType, node.from, node.to)];
+    return [
+      createTopLevelEntry(
+        node,
+        markdown,
+        blockType,
+        sourceModeBlockFrom(markdown, node, parseMode),
+        node.to,
+      ),
+    ];
   }
 
   return segments.map((segment) => ({
@@ -154,20 +190,141 @@ export function materializeBlocks(
   entries: readonly TopLevelBlockEntry[],
   markdown: string,
   definitions: Map<string, ReferenceDefinition>,
+  options: MarkdownParseOptions = {},
 ): readonly MarkdownBlock[] {
+  const resolvedOptions = resolveMarkdownParseOptions(options);
   return freezeMarkdownBlocks(
-    entries.map((entry) =>
-      convertBlockNode(entry.node, markdown, definitions, {
-        listItemFrom: entry.listItemFrom,
-        listItemTo: entry.listItemTo,
-      }),
-    ),
+    entries.map((entry) => {
+      const previousSourceBase = activeInlineSourceBase;
+      activeInlineSourceBase = entry.span.from;
+      try {
+        if (shouldMaterializeAsSourceText(entry.span, resolvedOptions.sourceTextBlockRanges)) {
+          return convertSourceTextBlock(markdown, entry.span);
+        }
+        return convertBlockNode(entry.node, markdown, definitions, {
+          parseMode: resolvedOptions.mode,
+          sourceFrom: entry.span.from,
+          sourceTo: entry.span.to,
+          listItemFrom: entry.listItemFrom,
+          listItemTo: entry.listItemTo,
+        });
+      } finally {
+        activeInlineSourceBase = previousSourceBase;
+      }
+    }),
   );
 }
 
+function inlineSourceRange(from: number, to: number) {
+  return {
+    from: from - activeInlineSourceBase,
+    to: to - activeInlineSourceBase,
+  };
+}
+
+function resolveMarkdownParseOptions(options: MarkdownParseOptions): ResolvedMarkdownParseOptions {
+  return {
+    mode: options.mode ?? "markdown",
+    sourceTextBlockRanges: normalizeSourceTextBlockRanges(options.sourceTextBlockRanges),
+  };
+}
+
+function resolveParseMode(options: MarkdownParseOptions): MarkdownParseMode {
+  return resolveMarkdownParseOptions(options).mode;
+}
+
+function normalizeSourceTextBlockRanges(
+  ranges: readonly SourceRange[] | undefined,
+): readonly SourceRange[] {
+  if (ranges === undefined || ranges.length === 0) {
+    return [];
+  }
+  return Object.freeze(
+    ranges
+      .filter((range) => range.to >= range.from)
+      .map((range) => ({ from: range.from, to: range.to }))
+      .sort((left, right) => left.from - right.from || left.to - right.to),
+  );
+}
+
+function shouldMaterializeAsSourceText(
+  span: SourceRange,
+  sourceTextBlockRanges: readonly SourceRange[],
+): boolean {
+  return sourceTextBlockRanges.some((range) => range.to > span.from && range.from < span.to);
+}
+
+function sourceModeBlockFrom(
+  markdown: string,
+  node: SyntaxNode,
+  parseMode: MarkdownParseMode,
+): number {
+  if (parseMode !== "source") {
+    return node.from;
+  }
+
+  if (node.type.name !== "Paragraph") {
+    return node.from;
+  }
+
+  return lineStartBefore(markdown, node.from);
+}
+
+function lineStartBefore(markdown: string, offset: number): number {
+  const newline = markdown.lastIndexOf("\n", Math.max(0, offset - 1));
+  return newline < 0 ? 0 : newline + 1;
+}
+
 interface BlockConversionOptions {
+  readonly parseMode?: MarkdownParseMode;
+  readonly sourceFrom?: number;
+  readonly sourceTo?: number;
   readonly listItemFrom?: number;
   readonly listItemTo?: number;
+}
+
+function convertSourceTextBlock(markdown: string, span: SourceRange): MarkdownBlock {
+  const children: MarkdownInline[] = [];
+  let chunkStart = span.from;
+  for (let offset = span.from; offset < span.to; offset += 1) {
+    if (markdown.charCodeAt(offset) !== 10) {
+      continue;
+    }
+    if (offset > chunkStart) {
+      children.push({
+        type: "text",
+        text: markdown.slice(chunkStart, offset),
+        source: {
+          from: chunkStart - span.from,
+          to: offset - span.from,
+        },
+      });
+    }
+    children.push({
+      type: "softbreak",
+      source: {
+        from: offset - span.from,
+        to: offset + 1 - span.from,
+      },
+    });
+    chunkStart = offset + 1;
+  }
+
+  if (chunkStart < span.to) {
+    children.push({
+      type: "text",
+      text: markdown.slice(chunkStart, span.to),
+      source: {
+        from: chunkStart - span.from,
+        to: span.to - span.from,
+      },
+    });
+  }
+
+  return {
+    type: "paragraph",
+    children,
+  };
 }
 
 function convertBlockNode(
@@ -194,7 +351,13 @@ function convertBlockNode(
     case "Paragraph":
       return {
         type: "paragraph",
-        children: convertInlineRange(node, markdown, definitions),
+        children: convertInlineRange(
+          node,
+          markdown,
+          definitions,
+          options.parseMode === "source" ? (options.sourceFrom ?? node.from) : node.from,
+          options.parseMode === "source" ? (options.sourceTo ?? node.to) : node.to,
+        ),
       };
     case "FencedCode":
     case "CodeBlock":
@@ -457,7 +620,7 @@ function convertInlineRange(
 
     if (child.from > cursor) {
       const textTo = Math.min(child.from, to);
-      pushText(output, markdown.slice(cursor, textTo), options, markdown[textTo] === "\\");
+      pushText(output, markdown.slice(cursor, textTo), cursor, options, markdown[textTo] === "\\");
     }
 
     if (child.from < cursor) {
@@ -471,7 +634,7 @@ function convertInlineRange(
   }
 
   if (cursor < to) {
-    pushText(output, markdown.slice(cursor, to), options);
+    pushText(output, markdown.slice(cursor, to), cursor, options);
   }
 
   return output;
@@ -496,13 +659,20 @@ function convertInlineNode(
       return convertedInlineNode(node, [
         convertWrappedInline(node, markdown, definitions, "strikethrough", options),
       ]);
-    case "InlineCode":
+    case "InlineCode": {
+      const sourceText = markdown.slice(node.from, node.to);
+      const opening = /^`+/u.exec(sourceText)?.[0].length ?? 0;
+      const closing = /`+$/u.exec(sourceText)?.[0].length ?? 0;
+      const contentFrom = node.from + opening;
+      const contentTo = Math.max(contentFrom, node.to - closing);
       return convertedInlineNode(node, [
         {
           type: "code-span",
-          text: stripCodeMarks(markdown.slice(node.from, node.to)),
+          text: stripCodeMarks(sourceText),
+          source: inlineSourceRange(contentFrom, contentTo),
         },
       ]);
+    }
     case "Link":
       return convertedInlineNode(node, [convertLink(node, markdown, definitions)]);
     case "Image":
@@ -516,6 +686,7 @@ function convertInlineNode(
         {
           type: "text",
           text: decodeMarkdownEntity(markdown.slice(node.from, node.to)),
+          source: inlineSourceRange(node.from, node.to),
         },
       ]);
     case "HTMLTag":
@@ -524,15 +695,22 @@ function convertInlineNode(
         {
           type: "html",
           content: markdown.slice(node.from, node.to),
+          source: inlineSourceRange(node.from, node.to),
         },
       ]);
     case "HardBreak":
-      return convertedInlineNode(node, [{ type: "hardbreak" }]);
+      return convertedInlineNode(node, [
+        {
+          type: "hardbreak",
+          source: inlineSourceRange(node.from, node.to),
+        },
+      ]);
     case "Escape":
       return convertedInlineNode(node, [
         {
           type: "text",
           text: markdown.slice(node.from + 1, node.to),
+          source: inlineSourceRange(node.from + 1, node.to),
         },
       ]);
     default:
@@ -540,6 +718,7 @@ function convertInlineNode(
         {
           type: "text",
           text: markdown.slice(node.from, node.to),
+          source: inlineSourceRange(node.from, node.to),
         },
       ]);
   }
@@ -567,6 +746,7 @@ function convertBareUrl(
       {
         type: "text",
         text: href,
+        source: inlineSourceRange(node.from, node.to),
       },
     ]);
   }
@@ -576,10 +756,12 @@ function convertBareUrl(
       {
         type: "link",
         href,
+        source: inlineSourceRange(node.from, plainUrl.to),
         children: [
           {
             type: "text",
             text: href,
+            source: inlineSourceRange(node.from, plainUrl.to),
           },
         ],
       },
@@ -601,6 +783,7 @@ function convertWrappedInline(
 
   return {
     type,
+    source: inlineSourceRange(node.from, node.to),
     children: convertInlineRange(node, markdown, definitions, innerFrom, innerTo, options),
   };
 }
@@ -615,6 +798,7 @@ function convertLink(
     type: "link",
     href: descriptor.href,
     title: descriptor.title,
+    source: inlineSourceRange(node.from, node.to),
     children: descriptor.children,
   };
 }
@@ -629,6 +813,7 @@ function convertImage(
     type: "image",
     href: descriptor.href,
     title: descriptor.title,
+    source: inlineSourceRange(node.from, node.to),
     children: descriptor.children,
   };
 }
@@ -643,10 +828,15 @@ function convertAutolink(node: SyntaxNode, markdown: string): MarkdownInline {
   return {
     type: "link",
     href,
+    source: inlineSourceRange(node.from, node.to),
     children: [
       {
         type: "text",
         text: href,
+        source:
+          urlNode === null
+            ? inlineSourceRange(node.from + 1, node.to - 1)
+            : inlineSourceRange(urlNode.from, urlNode.to),
       },
     ],
   };
@@ -807,11 +997,12 @@ function skipWhitespace(markdown: string, from: number, to: number): number {
 function pushText(
   target: MarkdownInline[],
   text: string,
+  sourceStart: number,
   options: InlineConversionOptions = defaultInlineConversionOptions,
   endsBeforeEscape = false,
 ): void {
   if (!options.plainUrls) {
-    pushPlainText(target, text);
+    pushPlainText(target, text, sourceStart);
     return;
   }
 
@@ -820,41 +1011,47 @@ function pushText(
     if (endsBeforeEscape && match.to === text.length) {
       continue;
     }
-    pushPlainText(target, text.slice(cursor, match.from));
+    pushPlainText(target, text.slice(cursor, match.from), sourceStart + cursor);
     target.push({
       type: "link",
       href: match.text,
+      source: inlineSourceRange(sourceStart + match.from, sourceStart + match.to),
       children: [
         {
           type: "text",
           text: match.text,
+          source: inlineSourceRange(sourceStart + match.from, sourceStart + match.to),
         },
       ],
     });
     cursor = match.to;
   }
-  pushPlainText(target, text.slice(cursor));
+  pushPlainText(target, text.slice(cursor), sourceStart + cursor);
 }
 
-function pushPlainText(target: MarkdownInline[], text: string): void {
+function pushPlainText(target: MarkdownInline[], text: string, sourceStart: number): void {
   if (text.length === 0) {
     return;
   }
 
   const segments = text.split("\n");
+  let cursor = sourceStart;
   segments.forEach((segment, index) => {
     if (segment.length > 0) {
       target.push({
         type: "text",
         text: segment,
+        source: inlineSourceRange(cursor, cursor + segment.length),
       });
     }
 
     if (index < segments.length - 1) {
       target.push({
         type: "softbreak",
+        source: inlineSourceRange(cursor + segment.length, cursor + segment.length + 1),
       });
     }
+    cursor += segment.length + 1;
   });
 }
 

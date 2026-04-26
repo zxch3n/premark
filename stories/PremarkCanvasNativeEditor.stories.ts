@@ -7,12 +7,16 @@ import {
 import {
   createPremarkCanvasEditorHost,
   darkTilePalette,
+  type PremarkCanvasEditorHost,
 } from "../packages/wiki-canvas/src/index.ts";
 import { waitForPremarkStoryFonts } from "./font-loading.ts";
 
 export default {
   title: "Editing/Premark Canvas Native Editor",
 };
+
+const sampleImageSrc =
+  "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='160'%20height='96'%3E%3Crect%20width='160'%20height='96'%20rx='10'%20fill='%23d7efe5'/%3E%3Ccircle%20cx='46'%20cy='42'%20r='18'%20fill='%234a8f72'/%3E%3Cpath%20d='M78%2072%20108%2032%20146%2072z'%20fill='%232f5f8f'/%3E%3Ctext%20x='18'%20y='86'%20font-family='Arial'%20font-size='12'%20fill='%23223835'%3ETiny%20sample%3C/text%3E%3C/svg%3E";
 
 const defaultMarkdown = `# Canvas native editor
 
@@ -21,6 +25,13 @@ Click text, drag across blocks, then type directly on the rendered canvas.
 - Selection is stored as source offsets.
 - The hidden textarea mirrors only the active source slice.
 - Cross-block replacement uses one source operation.
+
+| Element | Active editing behavior |
+| --- | --- |
+| Table | Shows this Markdown source while the caret is inside it. |
+| Image | Shows the image Markdown source while the caret is on it. |
+
+![Tiny sample image](${sampleImageSrc})
 
 Widths iiiii WWWW done.
 
@@ -81,11 +92,22 @@ function initialMarkdown(): string {
 }
 
 const width = 780;
-const height = 430;
+const minAutoCanvasHeight = 320;
+const fixedLargeCanvasHeight = 430;
+const maxAutoCanvasHeight = 1100;
 const contentPadding = 28;
 const editorWidth = width - contentPadding * 2;
-const editorViewportHeight = height - contentPadding * 2;
 const highlighter = createHighlighter();
+
+function canvasHeightForLayout(layoutHeight: number, fixture: string | null): number {
+  if (fixture === "large") {
+    return fixedLargeCanvasHeight;
+  }
+  return Math.max(
+    minAutoCanvasHeight,
+    Math.min(maxAutoCanvasHeight, Math.ceil(layoutHeight + contentPadding * 2)),
+  );
+}
 
 export const InteractiveCanvasNativeEditor = () => {
   const root = document.createElement("div");
@@ -110,14 +132,16 @@ export const InteractiveCanvasNativeEditor = () => {
       .pcne-editor {
         position: relative;
         width: ${width}px;
-        height: ${height}px;
+        min-height: ${minAutoCanvasHeight}px;
+        height: ${minAutoCanvasHeight}px;
         overflow: hidden;
       }
 
       .pcne-canvas {
         display: block;
         width: ${width}px;
-        height: ${height}px;
+        min-height: ${minAutoCanvasHeight}px;
+        height: ${minAutoCanvasHeight}px;
         cursor: text;
       }
 
@@ -195,6 +219,7 @@ export const InteractiveCanvasNativeEditor = () => {
 
   const canvas = root.querySelector<HTMLCanvasElement>("[data-canvas-native-editor]")!;
   const textarea = root.querySelector<HTMLTextAreaElement>("[data-canvas-input-bridge]")!;
+  const editorSurface = root.querySelector<HTMLElement>(".pcne-editor")!;
   const debugSelection = root.querySelector<HTMLPreElement>("[data-canvas-debug-selection]")!;
   const debugRender = root.querySelector<HTMLPreElement>("[data-canvas-debug-render]")!;
   const debugSource = root.querySelector<HTMLPreElement>("[data-canvas-debug-source]")!;
@@ -209,19 +234,45 @@ export const InteractiveCanvasNativeEditor = () => {
     const undoManager = new LocalUndoManager();
     const controller = createPremarkEditorController({ state: editor, undoManager });
     const searchParams = new URLSearchParams(window.location.search);
+    const fixture = searchParams.get("fixture");
     let autoStreamTimer: number | null = null;
+    let canvasHeight = canvasHeightForLayout(editor.layout.totalHeight, fixture);
+    let host: PremarkCanvasEditorHost | null = null;
 
-    const host = createPremarkCanvasEditorHost({
+    function setCanvasHeight(nextHeight: number) {
+      editorSurface.style.height = `${nextHeight}px`;
+      canvas.style.height = `${nextHeight}px`;
+    }
+
+    function syncCanvasHeight(layoutHeight: number): boolean {
+      const nextHeight = canvasHeightForLayout(layoutHeight, fixture);
+      if (nextHeight === canvasHeight) {
+        return false;
+      }
+      canvasHeight = nextHeight;
+      setCanvasHeight(nextHeight);
+      const viewportHeight = Math.max(0, nextHeight - contentPadding * 2);
+      host?.resize({
+        height: nextHeight,
+        viewportHeight,
+        overscanY: viewportHeight,
+      });
+      return true;
+    }
+
+    setCanvasHeight(canvasHeight);
+
+    host = createPremarkCanvasEditorHost({
       editor,
       controller,
       undoManager,
       canvas,
       inputBridge: textarea,
       width,
-      height,
+      height: canvasHeight,
       contentPadding,
-      viewportHeight: editorViewportHeight,
-      overscanY: editorViewportHeight,
+      viewportHeight: Math.max(0, canvasHeight - contentPadding * 2),
+      overscanY: Math.max(0, canvasHeight - contentPadding * 2),
       paint: {
         cardRadius: 0,
         palette: darkTilePalette,
@@ -241,11 +292,14 @@ export const InteractiveCanvasNativeEditor = () => {
           2,
         );
         debugSource.textContent = controller.markdown();
+        if (syncCanvasHeight(state.snapshot.layout.totalHeight)) {
+          window.requestAnimationFrame(() => host?.render({ syncBridgeValue: false }));
+        }
       },
     });
 
     function render(options: { readonly syncBridgeValue?: boolean } = {}) {
-      host.render(options);
+      host?.render(options);
     }
 
     if (searchParams.get("autostream") === "1") {
@@ -350,7 +404,7 @@ export const InteractiveCanvasNativeEditor = () => {
       },
       streamAIChunk,
       scrollTo(y) {
-        host.scrollTo(y);
+        host?.scrollTo(y);
       },
     };
 

@@ -1,4 +1,4 @@
-import type { TextChange } from "@pretext-md/parser";
+import type { SourceRange, TextChange } from "@pretext-md/parser";
 
 export interface FontTheme {
   sansFamily: string;
@@ -82,6 +82,7 @@ export interface StyleConfig {
   highlighter?: PrismHighlighter;
   theme?: string;
   lineBreakMode?: "markdown" | "source";
+  sourceTextBlockRanges?: readonly SourceRange[];
 }
 
 export interface BlockContext {
@@ -259,6 +260,11 @@ export interface InlineFragment {
   font: string;
   type: FragmentType;
   meta?: FragmentMeta;
+  sourceRange?: {
+    from: number;
+    to: number;
+  };
+  sourceOffsets?: readonly number[];
 }
 
 export type FragmentType =

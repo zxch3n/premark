@@ -1,5 +1,9 @@
 import type { DocumentLayout, StyleConfig } from "@pretext-md/layout";
-import { createIncrementalParseState, createMarkdownInlineSourceMap } from "@pretext-md/parser";
+import {
+  createMarkdownInlineSourceMap,
+  type BlockSpan,
+  type MarkdownInlineSourceRecord,
+} from "@pretext-md/parser";
 
 import {
   createEditableLayoutIndex,
@@ -20,7 +24,11 @@ import {
   type AppliedInputIntent,
 } from "./input-commands.ts";
 import type { NormalizedInputIntent } from "./input-trace.ts";
-import { createActiveMarkerRevealMarkdown, type ActiveMarkdownControl } from "./marker-reveal.ts";
+import {
+  createActiveMarkerRevealMarkdown,
+  findActiveSourceTextControls,
+  type ActiveMarkdownControl,
+} from "./marker-reveal.ts";
 import { createLayoutDirtyRects } from "./render-dirty-regions.ts";
 import { LocalUndoManager } from "./undo.ts";
 import type {
@@ -210,8 +218,14 @@ export class PremarkEditorController {
   renderSnapshot(options: PremarkEditorRenderSnapshotOptions = {}): PremarkEditorRenderSnapshot {
     const compositionView = this.state.compositionView;
     if (options.composition !== false && compositionView !== null) {
-      const parseState = createIncrementalParseState(compositionView.virtualText);
-      const layout = this.state.layoutMarkdownView(compositionView.virtualText);
+      const sourceTextBlockRanges = sourceTextBlockRangesForComposition(
+        this.state.parseState.blockSpans,
+        this.state.inlineSources,
+        compositionView,
+      );
+      const viewOptions = { sourceTextBlockRanges };
+      const parseState = this.state.createParseState(compositionView.virtualText, viewOptions);
+      const layout = this.state.layoutMarkdownView(compositionView.virtualText, viewOptions);
       const editableIndex = createEditableLayoutIndex({
         markdown: compositionView.virtualText,
         layout,
@@ -244,7 +258,9 @@ export class PremarkEditorController {
         selectionRange: this.state.selectionSourceRange,
       });
       if (reveal.markerState === "active") {
-        const layout = this.state.layoutMarkdownView(reveal.markdown);
+        const layout = this.state.layoutMarkdownView(reveal.markdown, {
+          sourceTextBlockRanges: reveal.sourceTextBlockRanges,
+        });
         return this.createRenderSnapshot({
           viewMarkdown: reveal.markdown,
           renderMode: "active-controls",
@@ -583,6 +599,39 @@ export class PremarkEditorController {
       listener(event);
     }
   }
+}
+
+function sourceTextBlockRangesForComposition(
+  blockSpans: readonly BlockSpan[],
+  inlineSources: readonly MarkdownInlineSourceRecord[],
+  compositionView: CompositionView,
+): SourceRange[] {
+  return findActiveSourceTextControls({
+    blockSpans,
+    inlineSources,
+    selectionRange: compositionView.replacementRange,
+  }).map((control) => transformRangeForCompositionView(control.source, compositionView));
+}
+
+function transformRangeForCompositionView(
+  range: SourceRange,
+  compositionView: CompositionView,
+): SourceRange {
+  const replacement = compositionView.replacementRange;
+  const delta = compositionView.preeditText.length - (replacement.to - replacement.from);
+  if (replacement.to < range.from) {
+    return {
+      from: range.from + delta,
+      to: range.to + delta,
+    };
+  }
+  if (replacement.from > range.to) {
+    return range;
+  }
+  return {
+    from: range.from,
+    to: Math.max(range.from, range.to + delta),
+  };
 }
 
 export function createPremarkEditorController(

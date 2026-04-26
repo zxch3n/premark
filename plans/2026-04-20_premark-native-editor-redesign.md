@@ -1,17 +1,20 @@
 # Premark Native Editor Redesign Plan
 
-Status: Phase 21 completed; DOM and Canvas editor renderer hosts extracted
+Status: Phase 25 completed; active table and image ranges render as editable source text
 Owner: Codex / Zixuan
-Last Updated: 2026-04-21
+Last Updated: 2026-04-26
 Compaction Rule: after memory reload or compaction, reread this whole file before continuing.
 
 ## Current Objective
 
+- Keep source-mode editing on source whitespace semantics: every source space/newline that is editable must be measurable, paintable, hit-testable, and selectable.
+- Keep source-mode parsing on editor semantics: line-leading spaces are editable text, and 4-space indentation does not implicitly create a code block.
+- Keep active table editing source-exact: when the caret/selection touches a table block, only that table block renders as plain Markdown source text.
+- Keep active image editing source-exact: when the caret/selection touches an image source line, only that image line/block renders as plain Markdown source text.
+- Keep direct source offsets flowing from parser to layout to editable geometry for normal source-mode rendering.
+- Keep active-control and composition preview layout isolated from the main document layout engine, because preview layout must not mutate incremental state for the source document.
 - Keep DOM and Canvas Storybook examples as thin wrappers over reusable editor host APIs.
-- Keep the shared browser input host as the single hidden-textarea/IME/pointer implementation.
-- Preserve the Safari/WebKit and real foreground interaction acceptance added in Phase 18.
 - Keep the native Premark-rendered editor as the product path; CodeMirror overlay remains removed.
-- Record core invariants, architecture decisions, and test-ladder rules in `AGENTS.md` so future agents get the right assumptions before touching editor code.
 
 ## New Learnings
 
@@ -69,6 +72,17 @@ Compaction Rule: after memory reload or compaction, reread this whole file befor
 - Incremental layout reuse must rewrite reused suffix normalized blocks to their new `sourceBlockIndex`. Source-mode gap calculation reads `blockSpans[block.sourceBlockIndex]`; stale suffix indexes can make a correct source newline count render with extra or missing visual blank lines.
 - Visual-line x geometry is now Canvas-owned after pretext chooses the line split. Pretext remains the wrapping/y authority, but layout rewrites text fragment x/width with Canvas `measureText`, editable geometry uses unscaled Canvas grapheme boundaries, and Canvas paint places boundary-sensitive chunks from the same table.
 - Active-control tests must not compare hidden-marker geometry against revealed-marker geometry as if they were the same view. A caret at a link/code boundary can intentionally reveal `[` or backtick marker width; hidden-view fragment adjacency and active-view marker width need separate assertions.
+- Active-control source-line geometry must map revealed-view line offsets back to original Markdown offsets before creating virtual blank-line fragments. Otherwise a heading reveal can shift following blank-line offsets and make the next selection appear to be inside the wrong block/control state.
+- Active-control viewport builds need both cursors: original source cursor and revealed view cursor. Starting revealed text search at `0` is wrong for repeated text in a scrolled viewport; the first visible layout source line must seed the revealed cursor.
+- Active-control generated wrapper lines, such as the outer fence used to reveal code-block controls, are not original source lines. Non-empty revealed source lines with no `sourceMap` coverage must not create source-only editable fragments.
+- Source-mode layout cannot inherit Markdown/HTML collapsible whitespace rules. Spaces must be preserved in layout fragments, editable boundary tables, and Canvas paint calls, or caret/hit-test geometry will diverge from what the user sees.
+- Source-mode parser policy cannot inherit all CommonMark block rules. In the editor path, line-leading spaces must stay in paragraph source spans, and indented code must be disabled so typing four spaces at line start does not change the block type; fenced code remains the explicit code syntax.
+- Parser inline source ranges used by layout should be block-relative. Incremental parser reuse can keep block objects while their absolute source offsets shift; adding the block source base in layout avoids stale inline offsets.
+- Source-mode prepared rich-text blocks carry absolute source offsets after preparation, so they cannot use the shared prepared-block memo. Normal hidden/source rendering may still reuse translated suffix lines if their fragment source offsets are transformed through the text change.
+- Active-control and composition preview layouts must use an isolated one-shot layout engine. Reusing the main layout engine for preview text mutates its incremental cache and can corrupt the next source edit's suffix offsets.
+- Shared fragment boundaries need right-side hit-test bias plus a small subpixel tolerance. Browser event coordinates can land just left of a glyph boundary after rounding; clicking rendered link text must not place the caret before the hidden `[` marker.
+- Active table editing is not a global parser mode. The active render view must materialize only the touched table block as source text, so a second table elsewhere in the same document can remain rendered as a table.
+- Image editing should use the same active source-text materialization path as tables. Standalone images normally render as opaque image blocks, but the active image source line must become editable raw Markdown while unrelated images keep normal image rendering.
 
 ## Architecture Direction
 
@@ -427,6 +441,80 @@ Acceptance:
 - [x] Canvas story does not implement wheel/viewport, dirty clip, dirty overlay, DPR setup, or bridge positioning itself.
 - [x] `vp check --fix`, `vp test`, `vp run test:browser`, and `vp run test:browser:webkit` pass.
 
+## Phase 22: Source-Mode Whitespace And Geometry
+
+Goal: make source-mode editing use source text semantics end to end, not Markdown reading whitespace semantics.
+
+- [x] Add parser inline source ranges for text, html/entity, escape, code span, link label, bare URL, and other plaintext-visible inline nodes.
+- [x] Store inline source ranges as block-relative ranges and add block source bases during layout, so incremental parser block reuse cannot leave stale absolute offsets.
+- [x] Preserve whitespace in source-mode rich-text preparation and measure grapheme boundaries with Canvas `measureText` semantics.
+- [x] Carry direct `sourceOffsets` and `sourceRange` on layout fragments in source mode, and let editable geometry consume those direct offsets before falling back to source-map text search.
+- [x] Keep active-control/source-map views on explicit source maps, not direct layout offsets, because revealed controls can contain generated or non-contiguous source text.
+- [x] Disable prepared-block memo reuse in source mode where prepared blocks contain absolute source offsets; transform reusable suffix line fragment offsets through source changes.
+- [x] Isolate active-control and composition preview layout from the main source document layout engine.
+- [x] Prefer the following fragment at shared x boundaries, with subpixel tolerance for browser coordinate rounding.
+- [x] Add pure and browser regressions for repeated spaces, Canvas text paint, link-boundary hit-test, preview-layout cache pollution, and Enter caret placement.
+
+Acceptance:
+
+- [x] Multiple source spaces remain visible, editable, measured, and passed to Canvas paint without collapsing.
+- [x] Link label clicks at the rendered glyph boundary insert into the label, not before hidden Markdown control characters.
+- [x] Active-control previews cannot corrupt the next source edit's incremental layout offsets.
+- [x] `vp check`, `vp test`, `vp run build`, and full Playwright Chromium browser tests pass.
+
+## Phase 23: Source-Mode Block Whitespace Parse Policy
+
+Goal: make source-mode parsing preserve line-leading spaces as editable text instead of applying reader-only CommonMark indentation semantics.
+
+- [x] Add parser parse modes so normal Markdown parsing keeps CommonMark behavior while source-mode parsing can use editor behavior.
+- [x] Disable `IndentedCode` only in source-mode parsing; fenced code remains the explicit code-block syntax.
+- [x] Expand source-mode paragraph block spans to the physical line start so leading spaces enter inline text conversion with exact source offsets.
+- [x] Thread source parse mode through layout engine, editor document state, composition preview parsing, and incremental parser reuse.
+- [x] Keep markdown parse mode as the default for existing parser and reader APIs.
+- [x] Add parser, layout, editable geometry, Canvas paint, and Canvas Storybook input regressions for line-leading spaces and 4-space input.
+
+Acceptance:
+
+- [x] In source mode, `"    abc"` lays out as one paragraph fragment with text `"    abc"` and source offsets `0..7`.
+- [x] Typing four spaces at the start of a Canvas native editor line keeps the source as `"    abc"` and does not create an indented code block.
+- [x] In markdown parse mode, `"    abc"` still parses as a CommonMark indented code block.
+- [x] `vp check`, `vp test`, `vp run build`, and full browser gates pass after the parser policy split.
+
+## Phase 24: Active Table Source View
+
+Goal: make table editing source-exact without turning unrelated tables into source text.
+
+- [x] Add parser support for materializing selected source block ranges as plain source-text paragraphs while keeping original block spans.
+- [x] Thread active source-text block ranges through layout and editor render snapshots.
+- [x] Make active table detection range-specific: caret/selection touching a table activates only that table block.
+- [x] Suppress inline control reveal inside active tables because the raw table source already exposes Markdown markers.
+- [x] Keep composition preview compatible with active table source ranges.
+- [x] Add parser, layout, marker-reveal, controller, and Canvas Storybook browser regressions.
+
+Acceptance:
+
+- [x] Caret inside `| A | B |\n| - | - |\n| **x** | y |` renders the row text, including `|`, `-`, and `**`, as editable source text.
+- [x] A second table outside the active source range still renders as a normal table.
+- [x] Moving the caret outside the table restores normal table rendering.
+- [x] `vp check --fix`, `vp test`, and `vp run test:browser` pass.
+
+## Phase 25: Active Image Source View
+
+Goal: make image editing source-exact through the same active source-text view as tables.
+
+- [x] Detect active image source ranges from parser inline source records and their owning block spans.
+- [x] Materialize only the active image source line/block as plain Markdown source text.
+- [x] Suppress inline/block control reveal inside active image source ranges because the raw source already exposes Markdown markers.
+- [x] Keep composition preview compatible with active image source ranges.
+- [x] Add parser, layout, marker-reveal, controller, and Canvas Storybook browser regressions.
+
+Acceptance:
+
+- [x] Caret inside `![alt](./asset.png)` renders the image Markdown as editable source text, not as an opaque image block.
+- [x] A second image outside the active source range still renders as a normal image.
+- [x] Moving the caret outside the image restores normal image rendering.
+- [x] `vp check`, `vp test`, `vp run build`, `vp run test:browser`, and `vp run test:browser:webkit` pass.
+
 ## Iteration Log
 
 ### 2026-04-20
@@ -539,3 +627,9 @@ Acceptance:
 - Corrected inline x geometry after the remaining Canvas emoji drift. `measureGraphemeBoundaryXs` now uses Canvas prefix `measureText` at grapheme boundaries for all text. Text and rich-text layout keep pretext for line split decisions, then use Canvas-measured fragment widths for the visual line's x/width. Editable geometry no longer scales measured boundary tables to fragment width, so mismatched layout widths are exposed instead of hidden.
 - Added regression coverage for Canvas-measured visual widths, rich inline fragment adjacency after emoji, editor caret placement across emoji/link/code fragments, Canvas draw calls after emoji, and browser hidden-vs-revealed control geometry. The browser test intentionally checks hidden-view fragment adjacency separately from active reveal marker width.
 - Verification after the line-level Canvas measurement correction: `git diff --check`, `vp check --fix`, targeted layout/editor/canvas tests (67 tests), `vp test` (235 tests), `vp run build`, `vp run test:browser` (45 Playwright tests), and `vp run test:browser:webkit` (7 passed, 5 expected skips) pass. One browser run failed because the new test compared hidden link geometry to active reveal geometry; the implementation was correct, and the test was revised to assert those two states separately.
+- Fixed intermittent heading-marker reveal while the caret was visually on the blank line after a heading. Root cause: active heading reveal changes `viewMarkdown` length, and `DocumentLayout.sourceLines` is produced in that revealed coordinate space. Editable layout was using those revealed source-line offsets directly for blank-line fragments while the controller selection remains in original Markdown offsets. Now virtual source-line fragments map through `sourceMap` first, and block-control reveal uses its own collapsed-range predicate instead of sharing inline boundary behavior. Added marker, editable-layout, and controller regressions. Verification on 2026-04-26: `vp run build`, `vp check`, `vp test` (238 tests), and `vp run test:browser` (45 Playwright tests) pass.
+- Follow-up sourceMap audit found and fixed two more similar bugs. First, active-control viewport builds over repeated text could map visible fragments to earlier identical source because the revealed search cursor started at `0`; editable layout now seeds both source and revealed cursors from the first visible layout source line, with a source-to-revealed fallback. Second, active code-block reveal could turn generated outer fence lines into fake source-only blank fragments; editable layout now skips non-empty revealed lines that have no sourceMap coverage. Added controller/editable regressions for repeated viewport text and generated code-block fences. Verification on 2026-04-26: `vp check --fix`, `vp test` (240 tests), `vp run build`, ad-hoc dist repro script, and `vp run test:browser` (45 Playwright tests) pass.
+- Completed Phase 22 source-mode whitespace and geometry hardening. Root decision: source editing cannot share Markdown reading whitespace semantics. Parser inline nodes now expose block-relative source ranges, source-mode layout preserves spaces and carries direct source boundary offsets, editable geometry consumes those offsets, and Canvas paint receives the same repeated-space text that geometry measured. Active-control and composition preview layouts now use isolated one-shot layout engines so preview rendering cannot mutate the main incremental layout cache. Boundary hit-test now prefers the following fragment within a small subpixel tolerance, fixing link-label clicks that landed before hidden control characters. No rollback occurred. Verification on 2026-04-26: `vp check`, `vp test` (245 tests), `vp run build`, full Chromium Playwright browser tests (45 tests), and `vp run test:browser:webkit` (7 passed, 5 expected skips) pass.
+- Completed Phase 23 after a manual report that line-leading spaces were not rendered and four spaces at line start became an indented code block. Root cause: Phase 22 fixed inline whitespace after parsing, but the CommonMark block parser had already consumed line-leading indentation or turned it into `CodeBlock`. The architecture now has a source parse mode that removes `IndentedCode`, keeps paragraph spans starting at the physical line start, and flows that mode through layout/editor/composition incremental parsing. Added parser/layout/editable/Canvas/browser regressions. No rollback occurred. Verification on 2026-04-26: `vp check --fix`, targeted parser/layout/editor/canvas tests (102 tests), `vp check`, `vp test` (250 tests), `vp run build`, `vp run test:browser` (46 tests), and `vp run test:browser:webkit` (7 passed, 5 expected skips) pass.
+- Completed Phase 24 after deciding table editing should switch the active table to raw source text instead of trying to edit rendered table cells. Important architecture decision: this is a range-specific source-block materialization view, not a global "disable table syntax" parser mode. Parser block spans remain authoritative, layout can receive source-text block ranges for one-shot render views, and controller active-control snapshots pass only the touched table range. Inline control reveal is filtered out inside active tables because the raw source already shows those markers. Added parser, layout, marker-reveal, controller, composition, and Canvas browser coverage for active-table-only raw rendering. No rollback occurred. Verification on 2026-04-26: `vp check --fix`, targeted parser/layout/editor tests (88 tests), `vp test` (255 tests), `vp run build`, `vp run test:browser` (47 tests), and `vp run test:browser:webkit` (7 passed, 5 expected skips) pass.
+- Completed Phase 25 after extending the table raw-source path to images. Active source-text controls are now table/image generic: tables come from block spans, images come from inline source records plus their owning block span. This keeps the source-text materialization in parser/layout and prevents Canvas-only branches. Inline and block marker reveal are suppressed inside active image source ranges, so raw Markdown is the only editable view for that line. Composition preview uses the same active source-text helper and transforms the range into virtual composition coordinates. No rollback occurred. Verification on 2026-04-26: `vp check --fix`, targeted parser/layout/editor tests (94 tests), `vp test` (261 tests), `vp run build`, `vp run test:browser` (48 tests), and `vp run test:browser:webkit` (7 passed, 5 expected skips) pass.

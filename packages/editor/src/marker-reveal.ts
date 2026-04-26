@@ -7,7 +7,9 @@ export type RevealedMarkerType =
   | "code-span"
   | "link"
   | "heading"
-  | "code-block";
+  | "code-block"
+  | "table"
+  | "image";
 
 export interface ActiveMarkdownControl {
   readonly type: RevealedMarkerType;
@@ -42,6 +44,7 @@ export interface ActiveMarkerRevealMarkdown {
   readonly activeToken: MarkdownInlineSourceRecord | null;
   readonly activeControls: readonly ActiveMarkdownControl[];
   readonly sourceMap: ActiveMarkerRevealSourceMap;
+  readonly sourceTextBlockRanges: readonly SourceRange[];
   readonly markerState: "hidden" | "active";
 }
 
@@ -87,13 +90,31 @@ const MARKER_SEPARATOR = String.fromCharCode(0x2060);
 export function createActiveMarkerRevealMarkdown(
   input: ActiveMarkerRevealMarkdownInput,
 ): ActiveMarkerRevealMarkdown {
-  const inlineTokens = findActiveMarkerTokens(input.inlineSources, input.selectionRange);
+  const activeSourceTextControls = findActiveSourceTextControls({
+    blockSpans: input.blockSpans ?? [],
+    inlineSources: input.inlineSources,
+    selectionRange: input.selectionRange,
+  });
+  const inlineTokens = findActiveMarkerTokens(input.inlineSources, input.selectionRange).filter(
+    (token) =>
+      !activeSourceTextControls.some((control) => rangeContains(control.source, token.source)),
+  );
   const activeBlockControls = findActiveBlockControls(
     input.markdown,
     input.blockSpans ?? [],
     input.selectionRange,
+  ).filter(
+    (control) =>
+      !activeSourceTextControls.some((sourceControl) =>
+        rangeContains(sourceControl.source, control.source),
+      ),
   );
   const activeControls: ActiveMarkdownControl[] = [
+    ...activeSourceTextControls.map((control) => ({
+      type: control.type,
+      source: control.source,
+      kind: "block" as const,
+    })),
     ...activeBlockControls.map((control) => ({
       type: control.type,
       source: control.source,
@@ -112,6 +133,7 @@ export function createActiveMarkerRevealMarkdown(
       activeToken: null,
       activeControls: [],
       sourceMap: createIdentitySourceMap(input.markdown),
+      sourceTextBlockRanges: [],
       markerState: "hidden",
     };
   }
@@ -126,18 +148,42 @@ export function createActiveMarkerRevealMarkdown(
     input.markdown,
   );
   const applied = applyReplacements(input.markdown, replacements);
+  const sourceMap = {
+    markdown: applied.markdown,
+    segments: applied.segments,
+    runs: applied.runs,
+  };
 
   return {
     markdown: applied.markdown,
     activeToken: inlineTokens[0] ?? null,
     activeControls,
-    sourceMap: {
-      markdown: applied.markdown,
-      segments: applied.segments,
-      runs: applied.runs,
-    },
+    sourceMap,
+    sourceTextBlockRanges: activeSourceTextControls
+      .map((control) => mapSourceRangeToRevealedRange(sourceMap, control.source))
+      .filter((range): range is SourceRange => range !== null),
     markerState: "active",
   };
+}
+
+export interface ActiveSourceTextControl {
+  readonly type: Extract<RevealedMarkerType, "table" | "image">;
+  readonly source: SourceRange;
+}
+
+export interface FindActiveSourceTextControlsInput {
+  readonly blockSpans: readonly BlockSpan[];
+  readonly inlineSources: readonly MarkdownInlineSourceRecord[];
+  readonly selectionRange: SourceRange;
+}
+
+export function findActiveSourceTextControls(
+  input: FindActiveSourceTextControlsInput,
+): ActiveSourceTextControl[] {
+  return dedupeSourceTextControls([
+    ...findActiveTableSourceControls(input.blockSpans, input.selectionRange),
+    ...findActiveImageSourceControls(input.blockSpans, input.inlineSources, input.selectionRange),
+  ]);
 }
 
 export function findActiveMarkerToken(
@@ -157,7 +203,7 @@ function findActiveMarkerTokens(
     .filter(
       (record) =>
         hasRevealableMarkdownControls(record) &&
-        shouldRevealControlRange(record.source, { from, to }),
+        shouldRevealInlineControlRange(record.source, { from, to }),
     )
     .sort(
       (left, right) => left.source.to - left.source.from - (right.source.to - right.source.from),
@@ -190,7 +236,7 @@ function findActiveBlockControls(
     if (span.type !== "heading" && span.type !== "code-block") {
       return [];
     }
-    if (!shouldRevealControlRange(span, { from, to })) {
+    if (!shouldRevealBlockControlRange(span, { from, to })) {
       return [];
     }
     if (span.type === "heading" && headingMarkerRange(markdown, span) === null) {
@@ -208,7 +254,86 @@ function findActiveBlockControls(
   });
 }
 
-function shouldRevealControlRange(control: SourceRange, selection: SourceRange): boolean {
+function findActiveTableSourceControls(
+  blockSpans: readonly BlockSpan[],
+  selectionRange: SourceRange,
+): ActiveSourceTextControl[] {
+  const from = Math.min(selectionRange.from, selectionRange.to);
+  const to = Math.max(selectionRange.from, selectionRange.to);
+  return blockSpans.flatMap((span): ActiveSourceTextControl[] => {
+    if (span.type !== "table" || !shouldActivateSourceTextBlockRange(span, { from, to })) {
+      return [];
+    }
+    return [
+      {
+        type: "table",
+        source: {
+          from: span.from,
+          to: span.to,
+        },
+      },
+    ];
+  });
+}
+
+function findActiveImageSourceControls(
+  blockSpans: readonly BlockSpan[],
+  inlineSources: readonly MarkdownInlineSourceRecord[],
+  selectionRange: SourceRange,
+): ActiveSourceTextControl[] {
+  const from = Math.min(selectionRange.from, selectionRange.to);
+  const to = Math.max(selectionRange.from, selectionRange.to);
+  return inlineSources.flatMap((record): ActiveSourceTextControl[] => {
+    if (record.type !== "image" || !record.sourceText.startsWith("![")) {
+      return [];
+    }
+    const span = findInlineBlockSpan(blockSpans, record);
+    if (span === null || span.type === "table") {
+      return [];
+    }
+    if (!shouldActivateSourceTextBlockRange(span, { from, to })) {
+      return [];
+    }
+    return [
+      {
+        type: "image",
+        source: {
+          from: span.from,
+          to: span.to,
+        },
+      },
+    ];
+  });
+}
+
+function findInlineBlockSpan(
+  blockSpans: readonly BlockSpan[],
+  record: MarkdownInlineSourceRecord,
+): BlockSpan | null {
+  return (
+    blockSpans.find((span) => span.id === record.blockId) ??
+    blockSpans.find((span) => record.source.from >= span.from && record.source.to <= span.to) ??
+    null
+  );
+}
+
+function dedupeSourceTextControls(
+  controls: readonly ActiveSourceTextControl[],
+): ActiveSourceTextControl[] {
+  const seen = new Set<string>();
+  return [...controls]
+    .sort((left, right) => left.source.from - right.source.from || left.source.to - right.source.to)
+    .filter((control) => {
+      const key = `${control.source.from}:${control.source.to}`;
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+}
+
+function shouldRevealInlineControlRange(control: SourceRange, selection: SourceRange): boolean {
   if (selection.from === selection.to) {
     return selection.from >= control.from && selection.from <= control.to;
   }
@@ -218,6 +343,30 @@ function shouldRevealControlRange(control: SourceRange, selection: SourceRange):
   }
 
   return selection.to > control.from && selection.from < control.to;
+}
+
+function shouldRevealBlockControlRange(control: SourceRange, selection: SourceRange): boolean {
+  if (selection.from === selection.to) {
+    return selection.from >= control.from && selection.from < control.to;
+  }
+
+  if (selection.from <= control.from && selection.to >= control.to) {
+    return false;
+  }
+
+  return selection.to > control.from && selection.from < control.to;
+}
+
+function shouldActivateSourceTextBlockRange(control: SourceRange, selection: SourceRange): boolean {
+  if (selection.from === selection.to) {
+    return selection.from >= control.from && selection.from <= control.to;
+  }
+
+  return selection.to > control.from && selection.from < control.to;
+}
+
+function rangeContains(outer: SourceRange, inner: SourceRange): boolean {
+  return inner.from >= outer.from && inner.to <= outer.to;
 }
 
 interface Replacement {
@@ -659,6 +808,40 @@ function createLinearOffsets(from: number, length: number): number[] {
 
 function escapeMarkdownAsVisibleText(text: string): string {
   return text.replace(ESCAPABLE_MARKDOWN_PUNCTUATION_RE, "\\$&");
+}
+
+function mapSourceRangeToRevealedRange(
+  sourceMap: ActiveMarkerRevealSourceMap,
+  range: SourceRange,
+): SourceRange | null {
+  const from = mapSourceOffsetToRevealedOffset(sourceMap, range.from, "start");
+  const to = mapSourceOffsetToRevealedOffset(sourceMap, range.to, "end");
+  if (from === null || to === null || to < from) {
+    return null;
+  }
+  return { from, to };
+}
+
+function mapSourceOffsetToRevealedOffset(
+  sourceMap: ActiveMarkerRevealSourceMap,
+  offset: number,
+  bias: "start" | "end",
+): number | null {
+  for (const segment of sourceMap.segments) {
+    const contains =
+      bias === "start"
+        ? offset >= segment.sourceFrom && offset < segment.sourceTo
+        : offset > segment.sourceFrom && offset <= segment.sourceTo;
+    if (!contains && offset !== segment.sourceFrom && offset !== segment.sourceTo) {
+      continue;
+    }
+    if (segment.sourceTo === segment.sourceFrom) {
+      return bias === "start" ? segment.revealedFrom : segment.revealedTo;
+    }
+    const ratio = (offset - segment.sourceFrom) / (segment.sourceTo - segment.sourceFrom);
+    return Math.round(segment.revealedFrom + ratio * (segment.revealedTo - segment.revealedFrom));
+  }
+  return null;
 }
 
 function createIdentitySourceMap(markdown: string): ActiveMarkerRevealSourceMap {

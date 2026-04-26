@@ -15,14 +15,30 @@ import type {
   IncrementalParseOptions,
   IncrementalParseResult,
   IncrementalParseState,
+  MarkdownParseMode,
+  MarkdownParseOptions,
   MarkdownBlock,
+  SourceRange,
   StreamParseSnapshot,
   TextChange,
 } from "./types.ts";
 
-export function createIncrementalParseState(markdown = ""): IncrementalParseState {
-  const parsed = parseMarkdownDocument(markdown);
-  return createState(markdown, parsed.tree, parsed.blocks, parsed.blockSpans, 1);
+interface ResolvedIncrementalParseConfig {
+  readonly parseMode: MarkdownParseMode;
+  readonly sourceTextBlockRanges: readonly SourceRange[];
+  readonly key: string;
+}
+
+export function createIncrementalParseState(
+  markdown = "",
+  options: MarkdownParseOptions = {},
+): IncrementalParseState {
+  const parseConfig = resolveParseConfig(options);
+  const parsed = parseMarkdownDocument(markdown, {
+    mode: parseConfig.parseMode,
+    sourceTextBlockRanges: parseConfig.sourceTextBlockRanges,
+  });
+  return createState(markdown, parseConfig, parsed.tree, parsed.blocks, parsed.blockSpans, 1);
 }
 
 export function incrementalParse(
@@ -31,12 +47,16 @@ export function incrementalParse(
   options?: IncrementalParseOptions,
 ): IncrementalParseResult {
   const change = simpleDiff(previousState.text, newText);
+  const parseConfig = resolveIncrementalParseConfig(previousState, options);
 
   if (change === null) {
+    if (parseConfig.key !== previousState.parseOptionsKey) {
+      return fullParseResult(previousState, newText, null, parseConfig);
+    }
     return unchangedParseResult(previousState);
   }
 
-  return parseWithChange(previousState, newText, change, options);
+  return parseWithChange(previousState, newText, change, parseConfig, options);
 }
 
 export function appendIncrementalParse(
@@ -51,14 +71,20 @@ export function appendIncrementalParse(
   const oldLength = previousState.text.length;
   const newText = previousState.text + chunk;
   const change = createAppendChange(oldLength, chunk);
+  const parseConfig = resolveIncrementalParseConfig(previousState, options);
+  if (parseConfig.key !== previousState.parseOptionsKey) {
+    return fullParseResult(previousState, newText, change, parseConfig);
+  }
   if (shouldFullReparse(change, options)) {
-    return fullParseResult(previousState, newText, change);
+    return fullParseResult(previousState, newText, change, parseConfig);
   }
 
   const fragments = TreeFragment.applyChanges(previousState.fragments, [change]);
-  const tree = getMarkdownParser().parse(newText, fragments);
+  const tree = getMarkdownParser({ mode: parseConfig.parseMode }).parse(newText, fragments);
   const reusedPrefixCount = previousState.closedBlocks.length;
-  const extracted = extractTopLevelBlockEntries(tree, newText, reusedPrefixCount);
+  const extracted = extractTopLevelBlockEntries(tree, newText, reusedPrefixCount, {
+    mode: parseConfig.parseMode,
+  });
   const tailSpans = extracted.entries.map((entry) => entry.span);
   const nextSpans = freezeBlockSpans([
     ...previousState.blockSpans.slice(0, reusedPrefixCount),
@@ -66,9 +92,19 @@ export function appendIncrementalParse(
   ]);
   const nextBlocks = freezeMarkdownBlocks([
     ...previousState.blocks.slice(0, reusedPrefixCount),
-    ...materializeBlocks(extracted.entries, newText, extracted.definitions),
+    ...materializeBlocks(extracted.entries, newText, extracted.definitions, {
+      mode: parseConfig.parseMode,
+      sourceTextBlockRanges: parseConfig.sourceTextBlockRanges,
+    }),
   ]);
-  const nextState = createState(newText, tree, nextBlocks, nextSpans, previousState.version + 1);
+  const nextState = createState(
+    newText,
+    parseConfig,
+    tree,
+    nextBlocks,
+    nextSpans,
+    previousState.version + 1,
+  );
 
   return {
     state: nextState,
@@ -110,11 +146,16 @@ export function finalizeIncrementalParseState(state: IncrementalParseState): Inc
 function fullParseResult(
   previousState: IncrementalParseState,
   newText: string,
-  change: TextChange,
+  change: TextChange | null,
+  parseConfig = parseConfigFromState(previousState),
 ): IncrementalParseResult {
-  const parsed = parseMarkdownDocument(newText);
+  const parsed = parseMarkdownDocument(newText, {
+    mode: parseConfig.parseMode,
+    sourceTextBlockRanges: parseConfig.sourceTextBlockRanges,
+  });
   const nextState = createState(
     newText,
+    parseConfig,
     parsed.tree,
     parsed.blocks,
     parsed.blockSpans,
@@ -160,15 +201,22 @@ function parseWithChange(
   previousState: IncrementalParseState,
   newText: string,
   change: TextChange,
+  parseConfig: ResolvedIncrementalParseConfig,
   options?: IncrementalParseOptions,
 ): IncrementalParseResult {
+  if (parseConfig.key !== previousState.parseOptionsKey) {
+    return fullParseResult(previousState, newText, change, parseConfig);
+  }
+
   if (shouldFullReparse(change, options)) {
-    return fullParseResult(previousState, newText, change);
+    return fullParseResult(previousState, newText, change, parseConfig);
   }
 
   const fragments = TreeFragment.applyChanges(previousState.fragments, [change]);
-  const tree = getMarkdownParser().parse(newText, fragments);
-  const extracted = extractTopLevelBlockEntries(tree, newText);
+  const tree = getMarkdownParser({ mode: parseConfig.parseMode }).parse(newText, fragments);
+  const extracted = extractTopLevelBlockEntries(tree, newText, 0, {
+    mode: parseConfig.parseMode,
+  });
   const nextSpans = extracted.entries.map((entry) => entry.span);
   const reusedPrefixCount = countReusablePrefix(
     previousState.blockSpans,
@@ -191,11 +239,16 @@ function parseWithChange(
       extracted.entries.slice(middleStart, middleEnd),
       newText,
       extracted.definitions,
+      {
+        mode: parseConfig.parseMode,
+        sourceTextBlockRanges: parseConfig.sourceTextBlockRanges,
+      },
     ),
     ...previousState.blocks.slice(previousState.blocks.length - reusedSuffixCount),
   ]);
   const nextState = createState(
     newText,
+    parseConfig,
     tree,
     nextBlocks,
     freezeBlockSpans(nextSpans),
@@ -221,6 +274,7 @@ function parseWithChange(
 
 function createState(
   text: string,
+  parseConfig: ResolvedIncrementalParseConfig,
   tree: import("@lezer/common").Tree,
   blocks: readonly MarkdownBlock[],
   blockSpans: readonly BlockSpan[],
@@ -230,6 +284,9 @@ function createState(
 
   return Object.freeze({
     text,
+    parseMode: parseConfig.parseMode,
+    parseOptionsKey: parseConfig.key,
+    sourceTextBlockRanges: parseConfig.sourceTextBlockRanges,
     tree,
     fragments: TreeFragment.addTree(tree),
     blocks,
@@ -239,6 +296,65 @@ function createState(
     sourceLength: text.length,
     version,
   });
+}
+
+function resolveParseConfig(options: MarkdownParseOptions): ResolvedIncrementalParseConfig {
+  const parseMode = options.mode ?? "markdown";
+  const sourceTextBlockRanges = normalizeSourceTextBlockRanges(options.sourceTextBlockRanges);
+  return {
+    parseMode,
+    sourceTextBlockRanges,
+    key: createParseOptionsKey(parseMode, sourceTextBlockRanges),
+  };
+}
+
+function resolveIncrementalParseConfig(
+  previousState: IncrementalParseState,
+  options?: IncrementalParseOptions,
+): ResolvedIncrementalParseConfig {
+  const parseMode = options?.parseMode ?? previousState.parseMode;
+  const sourceTextBlockRanges = normalizeSourceTextBlockRanges(
+    options?.sourceTextBlockRanges ?? previousState.sourceTextBlockRanges,
+  );
+  return {
+    parseMode,
+    sourceTextBlockRanges,
+    key: createParseOptionsKey(parseMode, sourceTextBlockRanges),
+  };
+}
+
+function parseConfigFromState(state: IncrementalParseState): ResolvedIncrementalParseConfig {
+  return {
+    parseMode: state.parseMode,
+    sourceTextBlockRanges: state.sourceTextBlockRanges,
+    key: state.parseOptionsKey,
+  };
+}
+
+function normalizeSourceTextBlockRanges(
+  ranges: readonly SourceRange[] | undefined,
+): readonly SourceRange[] {
+  if (ranges === undefined || ranges.length === 0) {
+    return [];
+  }
+  return Object.freeze(
+    ranges
+      .filter((range) => range.to >= range.from)
+      .map((range) => ({ from: range.from, to: range.to }))
+      .sort((left, right) => left.from - right.from || left.to - right.to),
+  );
+}
+
+function createParseOptionsKey(
+  parseMode: MarkdownParseMode,
+  sourceTextBlockRanges: readonly SourceRange[],
+): string {
+  if (sourceTextBlockRanges.length === 0) {
+    return parseMode;
+  }
+  return `${parseMode}|source-text:${sourceTextBlockRanges
+    .map((range) => `${range.from}:${range.to}`)
+    .join(",")}`;
 }
 
 function splitClosedAndPartialBlocks(

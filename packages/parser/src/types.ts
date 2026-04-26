@@ -27,6 +27,13 @@ export interface SourceRange {
   readonly to: number;
 }
 
+export type MarkdownParseMode = "markdown" | "source";
+
+export interface MarkdownParseOptions {
+  readonly mode?: MarkdownParseMode;
+  readonly sourceTextBlockRanges?: readonly SourceRange[];
+}
+
 export interface MarkdownNodeSource {
   readonly source?: SourceRange;
 }
@@ -202,6 +209,9 @@ export interface TextChange {
 
 export interface IncrementalParseState {
   readonly text: string;
+  readonly parseMode: MarkdownParseMode;
+  readonly parseOptionsKey: string;
+  readonly sourceTextBlockRanges: readonly SourceRange[];
   readonly tree: Tree;
   readonly fragments: readonly TreeFragment[];
   readonly blocks: readonly MarkdownBlock[];
@@ -216,6 +226,8 @@ export interface IncrementalParseOptions {
   maxChangedChars?: number;
   maxChangedRatio?: number;
   maxChangedLines?: number;
+  parseMode?: MarkdownParseMode;
+  sourceTextBlockRanges?: readonly SourceRange[];
 }
 
 export interface IncrementalParseResult extends StreamParseSnapshot {

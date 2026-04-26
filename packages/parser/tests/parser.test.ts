@@ -50,6 +50,86 @@ describe("parseMarkdown", () => {
     });
   });
 
+  it("keeps leading spaces as paragraph source text in source parse mode", () => {
+    const blocks = parseMarkdown("  abc", { mode: "source" });
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toMatchObject({
+      type: "paragraph",
+      children: [{ type: "text", text: "  abc", source: { from: 0, to: 5 } }],
+    });
+
+    const state = createIncrementalParseState("    abc", { mode: "source" });
+    expect(state.blockSpans[0]).toMatchObject({ from: 0, to: 7, type: "paragraph" });
+    expect(state.blocks[0]).toMatchObject({
+      type: "paragraph",
+      children: [{ type: "text", text: "    abc", source: { from: 0, to: 7 } }],
+    });
+
+    const updated = incrementalParse(state, "      abc", {
+      ...forceIncrementalOptions,
+      parseMode: "source",
+    });
+    expect(updated.state.blockSpans[0]).toMatchObject({ from: 0, to: 9, type: "paragraph" });
+    expect(updated.state.blocks[0]).toMatchObject({
+      type: "paragraph",
+      children: [{ type: "text", text: "      abc", source: { from: 0, to: 9 } }],
+    });
+  });
+
+  it("keeps CommonMark indented code in markdown parse mode", () => {
+    expect(parseMarkdown("    abc")[0]).toMatchObject({
+      type: "code-block",
+      content: "abc",
+    });
+  });
+
+  it("can materialize a parsed table block as source text for editor views", () => {
+    const markdown = "| A | B |\n| - | - |\n| **x** | y |";
+    const tableRange = { from: 0, to: markdown.length };
+    const state = createIncrementalParseState(markdown, {
+      mode: "source",
+      sourceTextBlockRanges: [tableRange],
+    });
+
+    expect(state.blockSpans[0]).toMatchObject({ type: "table", from: 0, to: markdown.length });
+    expect(state.blocks[0]).toMatchObject({
+      type: "paragraph",
+      children: [
+        { type: "text", text: "| A | B |", source: { from: 0, to: 9 } },
+        { type: "softbreak", source: { from: 9, to: 10 } },
+        { type: "text", text: "| - | - |", source: { from: 10, to: 19 } },
+        { type: "softbreak", source: { from: 19, to: 20 } },
+        { type: "text", text: "| **x** | y |", source: { from: 20, to: markdown.length } },
+      ],
+    });
+
+    const renderedAgain = incrementalParse(state, markdown, {
+      parseMode: "source",
+      sourceTextBlockRanges: [],
+    });
+    expect(renderedAgain.mode).toBe("full");
+    expect(renderedAgain.state.blocks[0]).toMatchObject({ type: "table" });
+  });
+
+  it("can materialize a parsed image paragraph as source text for editor views", () => {
+    const image = "![alt](./asset.png)";
+    const markdown = `${image}\n\n![other](./other.png)`;
+    const state = createIncrementalParseState(markdown, {
+      mode: "source",
+      sourceTextBlockRanges: [{ from: 0, to: image.length }],
+    });
+
+    expect(state.blockSpans[0]).toMatchObject({ type: "paragraph", from: 0, to: image.length });
+    expect(state.blocks[0]).toMatchObject({
+      type: "paragraph",
+      children: [{ type: "text", text: image, source: { from: 0, to: image.length } }],
+    });
+    expect(state.blocks[1]).toMatchObject({
+      type: "paragraph",
+      children: [{ type: "image", href: "./other.png" }],
+    });
+  });
+
   it("captures heading inline content for ATX and Setext variants", () => {
     expect(parseMarkdown("# Hello World")[0]).toMatchObject({
       type: "heading",
