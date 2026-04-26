@@ -4,7 +4,7 @@ import {
   type LayoutCursor,
   type PreparedTextWithSegments,
 } from "@chenglou/pretext";
-import type { MarkdownInline } from "@pretext-md/parser";
+import type { MarkdownInline, SourceRange } from "@pretext-md/parser";
 
 import type {
   FragmentMeta,
@@ -42,6 +42,8 @@ interface TextSpec {
   meta?: FragmentMeta;
   chromeWidth: number;
   collapseOuterWhitespace: boolean;
+  preserveWhitespace: boolean;
+  sourceOffsets?: readonly number[];
 }
 
 interface BreakSpec {
@@ -61,6 +63,7 @@ interface PreparedTextItem {
   font: string;
   type: FragmentType;
   meta?: FragmentMeta;
+  sourceOffsets?: readonly number[];
 }
 
 interface PreparedBreakItem {
@@ -83,6 +86,7 @@ export interface PrepareRichTextOptions {
   baseFont: string;
   lineHeight: number;
   lineBreakMode?: "markdown" | "source";
+  sourceOffsetBase?: number;
   prefix?: ListPrefix;
 }
 
@@ -192,9 +196,12 @@ function pushTextSpec(target: InlineSpec[], spec: Omit<TextSpec, "kind">): void 
     previous.type === spec.type &&
     previous.chromeWidth === spec.chromeWidth &&
     previous.collapseOuterWhitespace === spec.collapseOuterWhitespace &&
+    previous.preserveWhitespace === spec.preserveWhitespace &&
+    sourceOffsetsCanMerge(previous.sourceOffsets, spec.sourceOffsets) &&
     metasEqual(previous.meta, spec.meta)
   ) {
     previous.text += spec.text;
+    previous.sourceOffsets = appendMergedSourceOffsets(previous.sourceOffsets, spec.sourceOffsets);
     return;
   }
 
@@ -211,7 +218,9 @@ function collectInlineSpecs(
   baseFont: string,
   state: StyleState,
   lineBreakMode: "markdown" | "source",
+  sourceOffsetBase: number,
 ): void {
+  const sourceMode = lineBreakMode === "source";
   for (const node of nodes) {
     switch (node.type) {
       case "text": {
@@ -222,7 +231,11 @@ function collectInlineSpecs(
           type: style.type,
           meta: style.meta,
           chromeWidth: 0,
-          collapseOuterWhitespace: true,
+          collapseOuterWhitespace: !sourceMode,
+          preserveWhitespace: sourceMode,
+          sourceOffsets: sourceMode
+            ? sourceOffsetsForText(node.text, node.source, sourceOffsetBase)
+            : undefined,
         });
         break;
       }
@@ -233,6 +246,10 @@ function collectInlineSpecs(
           type: "inline_code",
           chromeWidth: 12,
           collapseOuterWhitespace: false,
+          preserveWhitespace: true,
+          sourceOffsets: sourceMode
+            ? sourceOffsetsForText(node.text, node.source, sourceOffsetBase)
+            : undefined,
         });
         break;
       case "softbreak": {
@@ -248,6 +265,8 @@ function collectInlineSpecs(
           meta: style.meta,
           chromeWidth: 0,
           collapseOuterWhitespace: true,
+          preserveWhitespace: false,
+          sourceOffsets: undefined,
         });
         break;
       }
@@ -265,6 +284,7 @@ function collectInlineSpecs(
             strong: true,
           },
           lineBreakMode,
+          sourceOffsetBase,
         );
         break;
       case "emphasis":
@@ -278,6 +298,7 @@ function collectInlineSpecs(
             emphasis: true,
           },
           lineBreakMode,
+          sourceOffsetBase,
         );
         break;
       case "strikethrough":
@@ -291,6 +312,7 @@ function collectInlineSpecs(
             strikethrough: true,
           },
           lineBreakMode,
+          sourceOffsetBase,
         );
         break;
       case "link":
@@ -307,6 +329,7 @@ function collectInlineSpecs(
             },
           },
           lineBreakMode,
+          sourceOffsetBase,
         );
         break;
       case "image": {
@@ -318,6 +341,7 @@ function collectInlineSpecs(
           meta: style.meta,
           chromeWidth: 0,
           collapseOuterWhitespace: false,
+          preserveWhitespace: true,
         });
         break;
       }
@@ -329,7 +353,11 @@ function collectInlineSpecs(
           type: style.type,
           meta: style.meta,
           chromeWidth: 0,
-          collapseOuterWhitespace: true,
+          collapseOuterWhitespace: !sourceMode,
+          preserveWhitespace: sourceMode,
+          sourceOffsets: sourceMode
+            ? sourceOffsetsForText(node.content, node.source, sourceOffsetBase)
+            : undefined,
         });
         break;
       }
@@ -350,18 +378,22 @@ function prepareInlineItems(specs: readonly InlineSpec[]): PreparedInlineItem[] 
 
     let text = spec.text;
     let leadingGap = pendingGap;
+    let sourceOffsets = spec.sourceOffsets;
 
     if (spec.collapseOuterWhitespace) {
       const hasLeadingWhitespace = /^\s/u.test(text);
       const hasTrailingWhitespace = /\s$/u.test(text);
       const collapsedWidth = measureCollapsedSpaceWidth(spec.font);
-      const trimmed = text.trim();
+      const trimStart = text.length - text.trimStart().length;
+      const trimEnd = text.trimEnd().length;
+      const trimmed = text.slice(trimStart, trimEnd);
 
       if (leadingGap === 0 && hasLeadingWhitespace) {
         leadingGap = collapsedWidth;
       }
       pendingGap = hasTrailingWhitespace ? collapsedWidth : 0;
       text = trimmed;
+      sourceOffsets = sourceOffsets?.slice(trimStart, trimEnd + 1);
     } else {
       pendingGap = 0;
     }
@@ -373,7 +405,7 @@ function prepareInlineItems(specs: readonly InlineSpec[]): PreparedInlineItem[] 
     const prepared = prepareWithSegments(
       text,
       spec.font,
-      spec.chromeWidth > 0 ? { whiteSpace: "pre-wrap" } : undefined,
+      spec.preserveWhitespace || spec.chromeWidth > 0 ? { whiteSpace: "pre-wrap" } : undefined,
     );
     const fullLine = layoutNextLine(prepared, LINE_START_CURSOR, UNBOUNDED_WIDTH);
     if (fullLine === null) {
@@ -391,6 +423,10 @@ function prepareInlineItems(specs: readonly InlineSpec[]): PreparedInlineItem[] 
       font: spec.font,
       type: spec.type,
       meta: spec.meta,
+      sourceOffsets:
+        sourceOffsets !== undefined && sourceOffsets.length === fullLine.text.length + 1
+          ? sourceOffsets
+          : undefined,
     });
   }
 
@@ -447,6 +483,7 @@ export function prepareRichText(options: PrepareRichTextOptions): PreparedRichTe
       strikethrough: false,
     },
     options.lineBreakMode ?? "markdown",
+    options.sourceOffsetBase ?? 0,
   );
   const items = prepareInlineItems(specs);
 
@@ -481,6 +518,7 @@ export function layoutRichText(
   let maxRight = 0;
   let itemIndex = 0;
   let textCursor: LayoutCursor | null = null;
+  let textOffset: number | null = null;
 
   function lineX(): number {
     return options.x + (lineIndex === 0 ? 0 : prepared.hangingIndent);
@@ -532,8 +570,15 @@ export function layoutRichText(
     contentFragmentCount = 0;
   }
 
-  function addFragment(item: PreparedTextItem, text: string, leadingGap: number): void {
+  function addFragment(
+    item: PreparedTextItem,
+    text: string,
+    leadingGap: number,
+    textFrom: number,
+    textTo: number,
+  ): void {
     const width = measureTextWidth(text, item.font);
+    const sourceOffsets = item.sourceOffsets?.slice(textFrom, textTo + 1);
     const fragment: InlineFragment = {
       text,
       x: lineWidth + leadingGap,
@@ -541,17 +586,35 @@ export function layoutRichText(
       font: item.font,
       type: item.type,
       meta: item.meta,
+      sourceOffsets,
+      sourceRange:
+        sourceOffsets !== undefined && sourceOffsets.length > 0
+          ? sourceRangeFromOffsets(sourceOffsets)
+          : undefined,
     };
     const previous = currentFragments.at(-1);
     if (canMergeFragments(previous, fragment)) {
       if (previous !== undefined) {
+        const previousWidth = previous.width;
         previous.text += fragment.text;
-        previous.width += fragment.width;
+        previous.width =
+          previous.type === "inline_code" || leadingGap > 0
+            ? previous.width + fragment.width
+            : measureTextWidth(previous.text, previous.font);
+        previous.sourceOffsets = appendMergedSourceOffsets(
+          previous.sourceOffsets,
+          fragment.sourceOffsets,
+        );
+        previous.sourceRange =
+          previous.sourceOffsets !== undefined
+            ? sourceRangeFromOffsets(previous.sourceOffsets)
+            : undefined;
+        lineWidth += leadingGap + previous.width - previousWidth;
       }
     } else {
       currentFragments.push(fragment);
+      lineWidth += leadingGap + width + item.chromeWidth;
     }
-    lineWidth += leadingGap + width + item.chromeWidth;
     contentFragmentCount += 1;
   }
 
@@ -565,12 +628,14 @@ export function layoutRichText(
       seedLinePrefix();
       itemIndex += 1;
       textCursor = null;
+      textOffset = null;
       continue;
     }
 
     if (textCursor !== null && cursorsMatch(textCursor, item.endCursor)) {
       itemIndex += 1;
       textCursor = null;
+      textOffset = null;
       continue;
     }
 
@@ -587,7 +652,7 @@ export function layoutRichText(
     if (textCursor === null) {
       const fullWidth = leadingGap + item.fullWidth + item.chromeWidth;
       if (fullWidth <= remainingWidth) {
-        addFragment(item, item.fullText, leadingGap);
+        addFragment(item, item.fullText, leadingGap, 0, item.fullText.length);
         itemIndex += 1;
         continue;
       }
@@ -602,7 +667,7 @@ export function layoutRichText(
 
     if (line === null || cursorsMatch(startCursor, line.end)) {
       if (contentFragmentCount === 0) {
-        addFragment(item, item.fullText, leadingGap);
+        addFragment(item, item.fullText, leadingGap, 0, item.fullText.length);
         itemIndex += 1;
         continue;
       }
@@ -612,15 +677,19 @@ export function layoutRichText(
       continue;
     }
 
-    addFragment(item, line.text, leadingGap);
+    const lineTextFrom = textOffset ?? 0;
+    const lineTextTo = Math.min(item.fullText.length, lineTextFrom + line.text.length);
+    addFragment(item, line.text, leadingGap, lineTextFrom, lineTextTo);
 
     if (cursorsMatch(line.end, item.endCursor)) {
       itemIndex += 1;
       textCursor = null;
+      textOffset = null;
       continue;
     }
 
     textCursor = line.end;
+    textOffset = lineTextTo;
     commitLine(false);
     seedLinePrefix();
   }
@@ -633,5 +702,54 @@ export function layoutRichText(
     lines,
     height: lines.length * prepared.lineHeight,
     width: maxRight,
+  };
+}
+
+function sourceOffsetsForText(
+  text: string,
+  source: SourceRange | undefined,
+  sourceOffsetBase: number,
+): readonly number[] | undefined {
+  if (source === undefined) {
+    return undefined;
+  }
+
+  const sourceFrom = sourceOffsetBase + source.from;
+  const sourceTo = sourceOffsetBase + source.to;
+  if (text.length === source.to - source.from) {
+    return Array.from({ length: text.length + 1 }, (_, index) => sourceFrom + index);
+  }
+
+  return Array.from({ length: text.length + 1 }, (_, index) => {
+    const ratio = text.length === 0 ? 0 : index / text.length;
+    return Math.round(sourceFrom + (sourceTo - sourceFrom) * ratio);
+  });
+}
+
+function sourceOffsetsCanMerge(
+  left: readonly number[] | undefined,
+  right: readonly number[] | undefined,
+): boolean {
+  if (left === undefined || right === undefined) {
+    return left === right;
+  }
+  return left.at(-1) === right[0];
+}
+
+function appendMergedSourceOffsets(
+  left: readonly number[] | undefined,
+  right: readonly number[] | undefined,
+): readonly number[] | undefined {
+  if (!sourceOffsetsCanMerge(left, right)) {
+    return undefined;
+  }
+  if (left === undefined || right === undefined) return undefined;
+  return [...left, ...right.slice(1)];
+}
+
+function sourceRangeFromOffsets(offsets: readonly number[]): SourceRange {
+  return {
+    from: Math.min(...offsets),
+    to: Math.max(...offsets),
   };
 }

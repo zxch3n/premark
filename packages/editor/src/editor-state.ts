@@ -5,6 +5,7 @@ import {
   incrementalParse,
   type IncrementalParseState,
   type MarkdownInlineSourceRecord,
+  type MarkdownParseMode,
 } from "@pretext-md/parser";
 
 import { createCompositionSession, type CompositionSession } from "./composition.ts";
@@ -53,10 +54,18 @@ export interface EditorDocumentSetViewportOptions {
   readonly overscanY?: number;
 }
 
+export interface EditorDocumentViewOptions {
+  readonly sourceTextBlockRanges?: readonly SourceRange[];
+}
+
 export class EditorDocumentState {
   readonly adapter: TextDocumentAdapter;
 
   private readonly layoutEngine;
+
+  private readonly layoutStyle: StyleConfig;
+
+  readonly parseMode: MarkdownParseMode;
 
   private containerWidth: number;
 
@@ -88,16 +97,18 @@ export class EditorDocumentState {
     this.scrollTop = options.scrollTop ?? 0;
     this.viewportHeight = options.viewportHeight ?? null;
     this.overscanY = options.overscanY ?? 0;
-    this.layoutEngine = createLayoutEngine({
+    this.layoutStyle = {
       ...(options.layoutStyle ?? { fontTheme: "github" }),
       lineBreakMode: options.layoutStyle?.lineBreakMode ?? "source",
-    });
+    };
+    this.parseMode = this.layoutStyle.lineBreakMode === "source" ? "source" : "markdown";
+    this.layoutEngine = createLayoutEngine(this.layoutStyle);
     this.selectionRange = this.adapter.createRange(0, 0, {
       kind: "selection",
       bias: "stick-end",
     });
 
-    this.parseState = createIncrementalParseState(this.adapter.getText());
+    this.parseState = this.createParseState(this.adapter.getText());
     this.inlineSources = createMarkdownInlineSourceMap(this.parseState);
     this.layout = this.layoutEngine.layout(this.adapter.getText(), this.containerWidth);
     this.editableIndex = this.createEditableIndex();
@@ -242,14 +253,27 @@ export class EditorDocumentState {
     this.editableIndex = this.createEditableIndex();
   }
 
-  layoutMarkdownView(markdown: string): DocumentLayout {
-    return this.layoutEngine.layout(markdown, this.containerWidth);
+  layoutMarkdownView(markdown: string, options: EditorDocumentViewOptions = {}): DocumentLayout {
+    return createLayoutEngine({
+      ...this.layoutStyle,
+      sourceTextBlockRanges: options.sourceTextBlockRanges,
+    }).layout(markdown, this.containerWidth);
+  }
+
+  createParseState(
+    markdown: string,
+    options: EditorDocumentViewOptions = {},
+  ): IncrementalParseState {
+    return createIncrementalParseState(markdown, {
+      mode: this.parseMode,
+      sourceTextBlockRanges: options.sourceTextBlockRanges,
+    });
   }
 
   refresh(): void {
     const previousEditableIndex = this.editableIndex;
     const markdown = this.adapter.getText();
-    const parseResult = incrementalParse(this.parseState, markdown);
+    const parseResult = incrementalParse(this.parseState, markdown, { parseMode: this.parseMode });
     this.parseState = parseResult.state;
     this.inlineSources = createMarkdownInlineSourceMap(this.parseState);
     this.layout = this.layoutEngine.applyParseResult(parseResult, this.containerWidth);

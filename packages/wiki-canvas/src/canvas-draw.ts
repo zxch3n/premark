@@ -3,6 +3,7 @@ import {
   type BlockLayout,
   type CodeBlockContent,
   type DocumentLayout,
+  type ImageBlockContent,
   type InlineFragment,
   type OpaqueLine,
   type TableCell,
@@ -67,6 +68,7 @@ export interface TileDrawOptions {
   compositionRects?: readonly CanvasOverlayRect[];
   compositionColor?: string;
   scrollY?: number;
+  requestRepaint?: () => void;
 }
 
 export interface CanvasOverlayRect {
@@ -81,6 +83,14 @@ const DEFAULTS = {
   cardRadius: 20,
   titleBarHeight: 44,
 } as const;
+
+interface BrowserImageCacheEntry {
+  readonly image: HTMLImageElement;
+  status: "loading" | "loaded" | "error";
+  readonly repaintCallbacks: Set<() => void>;
+}
+
+const browserImageCache = new Map<string, BrowserImageCacheEntry>();
 
 export function drawTile(
   ctx: CanvasRenderingContext2D,
@@ -150,7 +160,15 @@ export function drawTile(
       block.firstLineIndex,
       block.firstLineIndex + block.lineCount,
     );
-    drawBlock(ctx, block, blockLines as Array<TextLine | OpaqueLine>, originX, originY, palette);
+    drawBlock(
+      ctx,
+      block,
+      blockLines as Array<TextLine | OpaqueLine>,
+      originX,
+      originY,
+      palette,
+      options.requestRepaint,
+    );
   }
 
   drawSelectionOverlay(ctx, options.selectionRects ?? [], originX, originY, {
@@ -739,6 +757,181 @@ function drawTableCell(
   }
 }
 
+function getCachedBrowserImage(
+  src: string,
+  requestRepaint: (() => void) | undefined,
+): HTMLImageElement | null {
+  if (src.trim() === "") return null;
+  const ImageCtor = (globalThis as typeof globalThis & { Image?: new () => HTMLImageElement })
+    .Image;
+  if (typeof ImageCtor !== "function") return null;
+
+  let entry = browserImageCache.get(src);
+  if (entry === undefined) {
+    const image = new ImageCtor();
+    entry = {
+      image,
+      status: "loading",
+      repaintCallbacks: new Set(),
+    };
+    browserImageCache.set(src, entry);
+    image.decoding = "async";
+    if (/^https?:\/\//i.test(src)) {
+      image.crossOrigin = "anonymous";
+    }
+    image.onload = () => {
+      entry!.status = "loaded";
+      for (const callback of entry!.repaintCallbacks) {
+        callback();
+      }
+      entry!.repaintCallbacks.clear();
+    };
+    image.onerror = () => {
+      entry!.status = "error";
+      entry!.repaintCallbacks.clear();
+    };
+    image.src = src;
+    if (image.complete && image.naturalWidth > 0) {
+      entry.status = "loaded";
+    }
+  }
+
+  if (entry.status === "loading" && requestRepaint !== undefined) {
+    entry.repaintCallbacks.add(requestRepaint);
+  }
+  return entry.status === "loaded" ? entry.image : null;
+}
+
+function containRect(
+  sourceWidth: number,
+  sourceHeight: number,
+  targetX: number,
+  targetY: number,
+  targetWidth: number,
+  targetHeight: number,
+): { x: number; y: number; width: number; height: number } {
+  if (sourceWidth <= 0 || sourceHeight <= 0 || targetWidth <= 0 || targetHeight <= 0) {
+    return { x: targetX, y: targetY, width: 0, height: 0 };
+  }
+  const scale = Math.min(targetWidth / sourceWidth, targetHeight / sourceHeight);
+  const width = sourceWidth * scale;
+  const height = sourceHeight * scale;
+  return {
+    x: targetX + (targetWidth - width) / 2,
+    y: targetY + (targetHeight - height) / 2,
+    width,
+    height,
+  };
+}
+
+function drawImagePlaceholderIcon(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  palette: TilePalette,
+): void {
+  const iconSize = Math.min(72, Math.max(42, Math.min(width, height) * 0.38));
+  const iconX = x + (width - iconSize) / 2;
+  const iconY = y + (height - iconSize) / 2;
+
+  roundedRect(ctx, iconX, iconY, iconSize, iconSize, 10);
+  ctx.strokeStyle = palette.tableStroke;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(iconX + iconSize * 0.32, iconY + iconSize * 0.32, iconSize * 0.09, 0, Math.PI * 2);
+  ctx.fillStyle = palette.accent;
+  ctx.globalAlpha = 0.75;
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(iconX + iconSize * 0.14, iconY + iconSize * 0.78);
+  ctx.lineTo(iconX + iconSize * 0.42, iconY + iconSize * 0.5);
+  ctx.lineTo(iconX + iconSize * 0.6, iconY + iconSize * 0.68);
+  ctx.lineTo(iconX + iconSize * 0.76, iconY + iconSize * 0.44);
+  ctx.lineTo(iconX + iconSize * 0.88, iconY + iconSize * 0.78);
+  ctx.closePath();
+  ctx.fillStyle = palette.quoteBar;
+  ctx.globalAlpha = 0.6;
+  ctx.fill();
+  ctx.globalAlpha = 1;
+}
+
+function drawImageBlock(
+  ctx: CanvasRenderingContext2D,
+  line: OpaqueLine,
+  content: ImageBlockContent,
+  originX: number,
+  originY: number,
+  palette: TilePalette,
+  requestRepaint: (() => void) | undefined,
+): void {
+  const x = originX + line.x;
+  const y = originY + line.y;
+  const width = line.width;
+  const height = line.height;
+  const radius = 12;
+
+  const bg = ctx.createLinearGradient(x, y, x + width, y + height);
+  bg.addColorStop(0, "rgba(147,197,253,0.16)");
+  bg.addColorStop(1, "rgba(125,211,174,0.12)");
+  roundedRect(ctx, x, y, width, height, radius);
+  ctx.fillStyle = bg;
+  ctx.fill();
+  ctx.strokeStyle = palette.tableStroke;
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  const padding = 16;
+  const captionHeight = content.alt.trim() === "" ? 0 : 36;
+  const mediaX = x + padding;
+  const mediaY = y + padding;
+  const mediaWidth = Math.max(0, width - padding * 2);
+  const mediaHeight = Math.max(0, height - padding * 2 - captionHeight);
+
+  ctx.save();
+  roundedRect(ctx, mediaX, mediaY, mediaWidth, mediaHeight, 8);
+  ctx.clip();
+  ctx.fillStyle = "rgba(15,19,32,0.22)";
+  ctx.fillRect(mediaX, mediaY, mediaWidth, mediaHeight);
+
+  const image = getCachedBrowserImage(content.src, requestRepaint);
+  if (image !== null) {
+    const target = containRect(
+      image.naturalWidth || image.width,
+      image.naturalHeight || image.height,
+      mediaX,
+      mediaY,
+      mediaWidth,
+      mediaHeight,
+    );
+    if (target.width > 0 && target.height > 0) {
+      try {
+        ctx.drawImage(image, target.x, target.y, target.width, target.height);
+      } catch {
+        drawImagePlaceholderIcon(ctx, mediaX, mediaY, mediaWidth, mediaHeight, palette);
+      }
+    }
+  } else {
+    drawImagePlaceholderIcon(ctx, mediaX, mediaY, mediaWidth, mediaHeight, palette);
+  }
+  ctx.restore();
+
+  if (content.alt.trim() !== "") {
+    ctx.font = `600 14px "Inter", -apple-system, system-ui, sans-serif`;
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = palette.text;
+    ctx.fillText(
+      truncateText(ctx, content.alt, Math.max(0, width - padding * 2)),
+      mediaX,
+      y + height - 18,
+    );
+  }
+}
+
 function drawBlock(
   ctx: CanvasRenderingContext2D,
   block: BlockLayout,
@@ -746,6 +939,7 @@ function drawBlock(
   originX: number,
   originY: number,
   palette: TilePalette,
+  requestRepaint: (() => void) | undefined,
 ): void {
   if (block.context.quoteDepth > 0) {
     const barX = originX + Math.max(0, block.contentBox.x - 14);
@@ -774,6 +968,8 @@ function drawBlock(
       drawCodeBlock(ctx, opaque, opaque.content, originX, originY, palette);
     } else if (opaque.content.type === "table") {
       drawTable(ctx, opaque, opaque.content, originX, originY, palette);
+    } else if (opaque.content.type === "image") {
+      drawImageBlock(ctx, opaque, opaque.content, originX, originY, palette, requestRepaint);
     }
     return;
   }

@@ -11,6 +11,9 @@ export default {
   title: "Editing/Premark Native Editor",
 };
 
+const sampleImageSrc =
+  "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='160'%20height='96'%3E%3Crect%20width='160'%20height='96'%20rx='10'%20fill='%23d7efe5'/%3E%3Ccircle%20cx='46'%20cy='42'%20r='18'%20fill='%234a8f72'/%3E%3Cpath%20d='M78%2072%20108%2032%20146%2072z'%20fill='%232f5f8f'/%3E%3Ctext%20x='18'%20y='86'%20font-family='Arial'%20font-size='12'%20fill='%23223835'%3ETiny%20sample%3C/text%3E%3C/svg%3E";
+
 const sampleMarkdown = `# Native rendered Markdown
 
 Click text, drag across blocks, then type directly on the rendered surface.
@@ -18,6 +21,13 @@ Click text, drag across blocks, then type directly on the rendered surface.
 - Selection is stored as source offsets.
 - The hidden textarea mirrors only the active source slice.
 - Cross-block replacement uses one source operation.
+
+| Element | Active editing behavior |
+| --- | --- |
+| Table | Shows this Markdown source while the caret is inside it. |
+| Image | Shows the image Markdown source while the caret is on it. |
+
+![Tiny sample image](${sampleImageSrc})
 
 Try **bold text**, \`inline code\`, [docs](https://example.com), 中文输入, and emoji 👨‍👩‍👧‍👦.`;
 

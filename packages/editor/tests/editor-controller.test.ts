@@ -55,6 +55,38 @@ describe("PremarkEditorController", () => {
     expect(snapshot.viewport.containerWidth).toBe(600);
   });
 
+  it("keeps source layout offsets after active-control render snapshots", () => {
+    const controller = createInMemoryPremarkEditorController(
+      "# Title\n\n- A\n- B\n\nTarget line.",
+      600,
+    );
+
+    expect(controller.renderSnapshot().renderMode).toBe("active-controls");
+    const targetBefore = controller.markdown().indexOf("Target");
+    const beforeCaret = controller
+      .renderSnapshot({ activeControls: false })
+      .editableIndex.sourceOffsetToCaretRect(targetBefore);
+
+    controller.setCaret(targetBefore);
+    controller.applyInputIntent({ type: "insert-paragraph" });
+
+    const markdown = controller.markdown();
+    const targetAfter = markdown.indexOf("Target");
+    const snapshot = controller.renderSnapshot({ activeControls: false });
+    const targetFragment = snapshot.editableIndex.fragments.find(
+      (fragment) => fragment.text === "Target line.",
+    );
+
+    expect(targetAfter).toBe(targetBefore + 1);
+    expect(targetFragment?.sourceRange.from).toBe(targetAfter);
+    expect(markdown.slice(targetFragment?.sourceRange.from, targetFragment?.sourceRange.to)).toBe(
+      "Target line.",
+    );
+    expect(snapshot.editableIndex.sourceOffsetToCaretRect(targetAfter).rect.y).toBeGreaterThan(
+      beforeCaret.rect.y,
+    );
+  });
+
   it("emits change and final selection snapshots after replacing selection", () => {
     const controller = createInMemoryPremarkEditorController("Hello world", 600);
     const worldFrom = controller.markdown().indexOf("world");
@@ -208,6 +240,138 @@ describe("PremarkEditorController", () => {
       fullSnapshot.editableIndex.fragments.length / 20,
     );
   }, 20_000);
+
+  it("maps active-control viewport fragments from the visible block, not repeated earlier text", () => {
+    const paragraph = "Repeated **bold** tail.";
+    const markdown = Array.from({ length: 80 }, () => paragraph).join("\n\n");
+    const targetBlockIndex = 40;
+    const targetBlockStart = targetBlockIndex * (paragraph.length + 2);
+    const previousBlockStart = targetBlockStart - (paragraph.length + 2);
+    const controller = createPremarkEditorController({
+      markdown,
+      containerWidth: 560,
+      viewportHeight: 160,
+      overscanY: 0,
+    });
+    const sourceSnapshot = controller.renderSnapshot({ activeControls: false });
+    const targetBlock = sourceSnapshot.layout.blocks.find(
+      (block) => block.sourceBlockIndex === targetBlockIndex,
+    );
+    expect(targetBlock).toBeDefined();
+
+    controller.setViewport({ scrollTop: targetBlock!.y, height: 160 });
+    controller.setCaret(targetBlockStart + paragraph.indexOf("bold"));
+    const activeSnapshot = controller.renderSnapshot();
+
+    expect(activeSnapshot.renderMode).toBe("active-controls");
+    const repeatedFragments = activeSnapshot.editableIndex.fragments.filter((fragment) =>
+      fragment.text.includes("Repeated"),
+    );
+    expect(repeatedFragments.length).toBeGreaterThan(0);
+    expect(Math.min(...repeatedFragments.map((fragment) => fragment.sourceRange.from))).toBe(
+      previousBlockStart,
+    );
+    expect(repeatedFragments.some((fragment) => fragment.sourceRange.from === 0)).toBe(false);
+    expect(
+      activeSnapshot.editableIndex.sourceOffsetToCaretRect(targetBlockStart).fragment?.sourceRange
+        .from,
+    ).toBe(targetBlockStart);
+  }, 20_000);
+
+  it("does not keep heading controls active after moving from heading text to its blank line", () => {
+    const markdown = "# Title\n\nbody";
+    const controller = createInMemoryPremarkEditorController(markdown, 560);
+    controller.setCaret(markdown.indexOf("Title"));
+    const activeSnapshot = controller.renderSnapshot();
+    expect(activeSnapshot.renderMode).toBe("active-controls");
+
+    const blankLineStart = markdown.indexOf("\n\n") + 1;
+    const blankCaret = activeSnapshot.editableIndex.sourceOffsetToCaretRect(blankLineStart);
+    const hit = activeSnapshot.editableIndex.hitTest(
+      240,
+      blankCaret.rect.y + blankCaret.rect.height / 2,
+    );
+    expect(hit.offset).toBe(blankLineStart);
+
+    controller.setCaret(hit.offset);
+    const blankSnapshot = controller.renderSnapshot();
+    expect(blankSnapshot.renderMode).toBe("source");
+    expect(blankSnapshot.activeControls).toEqual([]);
+  });
+
+  it("renders the active table block as source text and restores table rendering outside it", () => {
+    const table = "| A | B |\n| - | - |\n| **x** | y |";
+    const markdown = `${table}\n\noutside`;
+    const controller = createInMemoryPremarkEditorController(markdown, 720);
+
+    controller.setCaret(markdown.indexOf("x"));
+    const activeSnapshot = controller.renderSnapshot();
+    expect(activeSnapshot.renderMode).toBe("active-controls");
+    expect(activeSnapshot.viewMarkdown).toBe(markdown);
+    expect(activeSnapshot.activeControls.map((control) => control.type)).toEqual(["table"]);
+    expect(activeSnapshot.layout.blocks[0]?.type).toBe("paragraph");
+    expect(
+      activeSnapshot.editableIndex.fragments.some((fragment) => fragment.text === "| **x** | y |"),
+    ).toBe(true);
+
+    controller.setCaret(markdown.indexOf("outside"));
+    const sourceSnapshot = controller.renderSnapshot();
+    expect(sourceSnapshot.renderMode).toBe("source");
+    expect(sourceSnapshot.layout.blocks[0]?.type).toBe("table");
+  });
+
+  it("renders composition previews inside tables as source text", () => {
+    const table = "| A | B |\n| - | - |\n| **x** | y |";
+    const controller = createInMemoryPremarkEditorController(`${table}\n\noutside`, 720);
+
+    controller.setCaret(controller.markdown().indexOf("x"));
+    controller.updateComposition("中");
+    const snapshot = controller.renderSnapshot();
+
+    expect(snapshot.renderMode).toBe("composition");
+    expect(snapshot.layout.blocks[0]?.type).toBe("paragraph");
+    expect(
+      snapshot.editableIndex.fragments.some((fragment) => fragment.text === "| **中x** | y |"),
+    ).toBe(true);
+  });
+
+  it("renders the active image block as source text and restores image rendering outside it", () => {
+    const image = "![alt](./asset.png)";
+    const markdown = `${image}\n\noutside`;
+    const controller = createInMemoryPremarkEditorController(markdown, 720);
+
+    controller.setCaret(markdown.indexOf("alt"));
+    const activeSnapshot = controller.renderSnapshot();
+    expect(activeSnapshot.renderMode).toBe("active-controls");
+    expect(activeSnapshot.viewMarkdown).toBe(markdown);
+    expect(activeSnapshot.activeControls.map((control) => control.type)).toEqual(["image"]);
+    expect(activeSnapshot.layout.blocks[0]?.type).toBe("paragraph");
+    expect(activeSnapshot.editableIndex.fragments.some((fragment) => fragment.text === image)).toBe(
+      true,
+    );
+
+    controller.setCaret(markdown.indexOf("outside"));
+    const sourceSnapshot = controller.renderSnapshot();
+    expect(sourceSnapshot.renderMode).toBe("source");
+    expect(sourceSnapshot.layout.blocks[0]?.type).toBe("image");
+  });
+
+  it("renders composition previews inside images as source text", () => {
+    const image = "![alt](./asset.png)";
+    const controller = createInMemoryPremarkEditorController(`${image}\n\noutside`, 720);
+
+    controller.setCaret(controller.markdown().indexOf("alt"));
+    controller.updateComposition("图");
+    const snapshot = controller.renderSnapshot();
+
+    expect(snapshot.renderMode).toBe("composition");
+    expect(snapshot.layout.blocks[0]?.type).toBe("paragraph");
+    expect(
+      snapshot.editableIndex.fragments.some(
+        (fragment) => fragment.text === "![图alt](./asset.png)",
+      ),
+    ).toBe(true);
+  });
 
   it("does not rebuild a full editable index for offscreen AI appends", () => {
     const markdown = buildLargeViewportFixture();

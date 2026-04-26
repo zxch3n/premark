@@ -26,7 +26,7 @@ function measuredTextWidth(text: string, font: string): number {
 }
 
 function createTestIndex(markdown: string, width = 800) {
-  const state = createIncrementalParseState(markdown);
+  const state = createIncrementalParseState(markdown, { mode: "source" });
   const inlineSources = createMarkdownInlineSourceMap(state);
   const layout = createLayoutEngine({ fontTheme: "github", lineBreakMode: "source" }).layout(
     markdown,
@@ -129,6 +129,23 @@ describe("EditableLayoutIndex", () => {
     expect(hit.fragment?.text).toBe("bold");
     expect(hit.offset).toBeGreaterThanOrEqual(markdown.indexOf("bold"));
     expect(hit.offset).toBeLessThanOrEqual(markdown.indexOf("bold") + "bold".length);
+  });
+
+  it("hit-tests a shared fragment boundary into the following visible fragment", () => {
+    const markdown = "Try [docs](https://example.com)";
+    const { index } = createTestIndex(markdown);
+    const docsOffset = markdown.indexOf("docs");
+    const docsCaret = index.sourceOffsetToCaretRect(docsOffset);
+    const hit = index.hitTest(docsCaret.rect.x, docsCaret.rect.y + docsCaret.rect.height / 2);
+    const quantizedHit = index.hitTest(
+      docsCaret.rect.x - 0.75,
+      docsCaret.rect.y + docsCaret.rect.height / 2,
+    );
+
+    expect(hit.fragment?.text).toBe("docs");
+    expect(hit.offset).toBe(docsOffset);
+    expect(quantizedHit.fragment?.text).toBe("docs");
+    expect(quantizedHit.offset).toBe(docsOffset);
   });
 
   it("hit-tests supported inline and block fixtures", () => {
@@ -281,6 +298,52 @@ describe("EditableLayoutIndex", () => {
     const nextCaret = index.sourceOffsetToCaretRect(wOffset + 1);
     const hit = index.hitTest((caret.rect.x + nextCaret.rect.x) / 2, caret.rect.y + 1);
     expect(hit.offset).toBe(wOffset);
+  });
+
+  it("keeps every source space addressable in source-mode layout", () => {
+    const markdown = "a    b";
+    const { index } = createTestIndex(markdown);
+    const fragment = index.fragments.find((candidate) => candidate.text === markdown);
+    expect(fragment).toBeDefined();
+    expect(fragment?.sourceOffsets).toEqual([0, 1, 2, 3, 4, 5, 6]);
+
+    const carets = Array.from({ length: markdown.length + 1 }, (_, offset) =>
+      index.sourceOffsetToCaretRect(offset),
+    );
+    const xs = carets.map((caret) => caret.rect.x);
+    for (let offset = 1; offset < xs.length; offset += 1) {
+      expect(xs[offset], `caret offset ${offset}`).toBeGreaterThan(xs[offset - 1]!);
+    }
+
+    const beforeB = carets[markdown.indexOf("b")]!;
+    const hit = index.hitTest(beforeB.rect.x - 0.5, beforeB.rect.y + beforeB.rect.height / 2);
+    expect(hit.offset).toBe(markdown.indexOf("b"));
+  });
+
+  it("keeps leading source spaces addressable in source-mode layout", () => {
+    const markdown = "    abc";
+    const { index, layout, state } = createTestIndex(markdown);
+    expect(state.blockSpans[0]).toMatchObject({ from: 0, to: markdown.length, type: "paragraph" });
+    expect(layout.blocks[0]?.type).toBe("paragraph");
+
+    const fragment = index.fragments.find((candidate) => candidate.text === markdown);
+    expect(fragment).toBeDefined();
+    expect(fragment?.sourceOffsets).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+
+    const carets = Array.from({ length: markdown.length + 1 }, (_, offset) =>
+      index.sourceOffsetToCaretRect(offset),
+    );
+    const xs = carets.map((caret) => caret.rect.x);
+    for (let offset = 1; offset < xs.length; offset += 1) {
+      expect(xs[offset], `caret offset ${offset}`).toBeGreaterThan(xs[offset - 1]!);
+    }
+
+    const beforeText = carets[4]!;
+    const hit = index.hitTest(
+      beforeText.rect.x - 0.5,
+      beforeText.rect.y + beforeText.rect.height / 2,
+    );
+    expect(hit.offset).toBe(4);
   });
 
   it("uses grapheme boundaries for emoji caret and hit-test placement", () => {
@@ -772,6 +835,96 @@ describe("EditableLayoutIndex", () => {
     expect(
       incremental.sourceOffsetToCaretRect(markdown.indexOf("**") + 1).fragment?.text,
     ).toContain("**");
+  });
+
+  it("maps active heading source-only lines back to original source offsets", () => {
+    const markdown = "# Title\n\nbody";
+    const state = createIncrementalParseState(markdown);
+    const inlineSources = createMarkdownInlineSourceMap(state);
+    const reveal = createActiveMarkerRevealMarkdown({
+      markdown,
+      inlineSources,
+      blockSpans: state.blockSpans,
+      selectionRange: {
+        from: markdown.indexOf("Title"),
+        to: markdown.indexOf("Title"),
+      },
+    });
+    const activeLayout = createLayoutEngine({
+      fontTheme: "github",
+      lineBreakMode: "source",
+    }).layout(reveal.markdown, 520);
+    const index = createEditableLayoutIndex({
+      markdown,
+      layout: activeLayout,
+      blockSpans: state.blockSpans,
+      inlineSources,
+      sourceMap: reveal.sourceMap,
+    });
+    const blankLineStart = markdown.indexOf("\n\n") + 1;
+    const blankFragment = index.fragments.find(
+      (fragment) => fragment.blockId === `source-line:${blankLineStart}`,
+    );
+
+    expect(blankFragment).toBeDefined();
+    expect(blankFragment!.sourceRange).toEqual({
+      from: blankLineStart,
+      to: blankLineStart,
+    });
+    expect(index.fragments.every((fragment) => fragment.sourceRange.to <= markdown.length)).toBe(
+      true,
+    );
+
+    const hit = index.hitTest(240, blankFragment!.rect.y + blankFragment!.rect.height / 2);
+    expect(hit.offset).toBe(blankLineStart);
+  });
+
+  it("does not create source-only lines for generated code-block reveal fences", () => {
+    const markdown = ["before", "", "```ts", "const x = 1;", "```", "", "after"].join("\n");
+    const state = createIncrementalParseState(markdown);
+    const inlineSources = createMarkdownInlineSourceMap(state);
+    const reveal = createActiveMarkerRevealMarkdown({
+      markdown,
+      inlineSources,
+      blockSpans: state.blockSpans,
+      selectionRange: {
+        from: markdown.indexOf("const"),
+        to: markdown.indexOf("const"),
+      },
+    });
+    const activeLayout = createLayoutEngine({
+      fontTheme: "github",
+      lineBreakMode: "source",
+    }).layout(reveal.markdown, 520);
+    const index = createEditableLayoutIndex({
+      markdown,
+      layout: activeLayout,
+      blockSpans: state.blockSpans,
+      inlineSources,
+      sourceMap: reveal.sourceMap,
+    });
+    const closingFenceStart = markdown.lastIndexOf("```");
+    const closingFenceEnd = closingFenceStart + "```".length;
+    const blankLineStart = closingFenceEnd + 1;
+    const closingFenceFragment = index.fragments.find(
+      (fragment) => fragment.text === "```" && fragment.sourceRange.to === closingFenceEnd,
+    );
+    const fakeGeneratedFenceLine = index.fragments.find(
+      (fragment) =>
+        fragment.blockId === `source-line:${closingFenceEnd}` &&
+        fragment.sourceRange.from === closingFenceEnd &&
+        fragment.sourceRange.to === closingFenceEnd,
+    );
+    const blankFragment = index.fragments.find(
+      (fragment) => fragment.blockId === `source-line:${blankLineStart}`,
+    );
+
+    expect(closingFenceFragment).toBeDefined();
+    expect(fakeGeneratedFenceLine).toBeUndefined();
+    expect(blankFragment).toBeDefined();
+    expect(blankFragment!.rect.y).toBeGreaterThan(closingFenceFragment!.rect.y);
+    const hit = index.hitTest(240, blankFragment!.rect.y + blankFragment!.rect.height / 2);
+    expect(hit.offset).toBe(blankLineStart);
   });
 
   it("records limited bidi hit-test behavior with logical source offsets", () => {

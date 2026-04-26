@@ -202,6 +202,7 @@ test.describe("Premark native editor visual baselines", () => {
 
   test("matches Canvas native editor crop", async ({ page }) => {
     await page.goto(canvasNativeStoryUrl);
+    await expect(page.locator(".pcne-root")).toHaveAttribute("data-fonts-ready", "1");
     const canvas = page.locator("[data-canvas-native-editor]");
     await expect(canvas).toBeVisible();
     await expect(canvas).toHaveScreenshot("native-editor-visual-canvas-native-editor.png", {
@@ -210,8 +211,31 @@ test.describe("Premark native editor visual baselines", () => {
     });
   });
 
+  test("matches Canvas native image block crop", async ({ page }) => {
+    await page.setViewportSize({ width: 900, height: 900 });
+    await page.goto(canvasNativeStoryUrl);
+    await expect(page.locator(".pcne-root")).toHaveAttribute("data-fonts-ready", "1");
+    const canvas = page.locator("[data-canvas-native-editor]");
+    await expect(canvas).toBeVisible();
+    const box = await canvas.boundingBox();
+    expect(box).not.toBeNull();
+    const imageCrop = await page.screenshot({
+      animations: "disabled",
+      clip: {
+        x: box!.x,
+        y: box!.y + 420,
+        width: box!.width,
+        height: 260,
+      },
+    });
+    expect(imageCrop).toMatchSnapshot("native-editor-visual-canvas-native-image.png", {
+      maxDiffPixelRatio: 0.01,
+    });
+  });
+
   test("matches Canvas native control, link and emoji editing crops", async ({ page }) => {
     await page.goto(canvasNativeStoryUrl);
+    await expect(page.locator(".pcne-root")).toHaveAttribute("data-fonts-ready", "1");
     const canvas = page.locator("[data-canvas-native-editor]");
     await expect(canvas).toBeVisible();
 

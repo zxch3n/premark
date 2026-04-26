@@ -1,4 +1,8 @@
-import { measureGraphemeBoundaryXs, type DocumentLayout } from "@pretext-md/layout";
+import {
+  createLayoutEngine,
+  measureGraphemeBoundaryXs,
+  type DocumentLayout,
+} from "@pretext-md/layout";
 import { installNodeCanvas } from "../../layout/src/node-canvas.ts";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -30,6 +34,7 @@ function createRecordingContext(): CanvasRenderingContext2D & { calls: FillTextC
     stroke() {},
     clip() {},
     fillRect() {},
+    drawImage() {},
     arc() {},
     fillText: (text: string, x: number, y: number) => calls.push({ text, x, y }),
     measureText: (text: string) => new OffscreenCanvas(1, 1).getContext("2d")!.measureText(text),
@@ -129,6 +134,58 @@ describe("drawTile", () => {
       boundaries[emoji.length + 1],
       boundaries[emoji.length * 2 + 1],
     ]);
+  });
+
+  it("passes repeated source spaces through to Canvas text paint", () => {
+    const text = "a    b";
+    const font = 'normal 400 16px "Segoe UI", Helvetica, Arial, sans-serif';
+    const layout = createTextLayout(text, font);
+    const ctx = createRecordingContext();
+
+    drawTile(ctx, layout, 240, 80, {
+      cardRadius: 0,
+      contentPadding: 0,
+      palette: darkTilePalette,
+    });
+
+    expect(ctx.calls.map((call) => call.text)).toContain(text);
+  });
+
+  it("passes leading source spaces from source-mode layout through to Canvas text paint", () => {
+    const text = "    abc";
+    const layout = createLayoutEngine({ fontTheme: "github", lineBreakMode: "source" }).layout(
+      text,
+      240,
+    );
+    const ctx = createRecordingContext();
+
+    drawTile(ctx, layout, 240, 80, {
+      cardRadius: 0,
+      contentPadding: 0,
+      palette: darkTilePalette,
+    });
+
+    expect(ctx.calls.map((call) => call.text)).toContain(text);
+  });
+
+  it("draws image blocks instead of leaving opaque image lines blank", () => {
+    const layout = createLayoutEngine({ fontTheme: "github" }).layout(
+      "![Tiny sample image](./asset.png)",
+      320,
+    );
+    const ctx = createRecordingContext();
+
+    expect(
+      layout.lines.some((line) => line.kind === "opaque" && line.content.type === "image"),
+    ).toBe(true);
+
+    drawTile(ctx, layout, 360, 300, {
+      cardRadius: 0,
+      contentPadding: 0,
+      palette: darkTilePalette,
+    });
+
+    expect(ctx.calls.map((call) => call.text)).toContain("Tiny sample image");
   });
 
   it("draws revealed Markdown control graphemes at layout boundaries", () => {

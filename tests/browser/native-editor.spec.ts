@@ -12,6 +12,26 @@ const canvasNativeRepeatedEmojiStoryUrl = `${canvasNativeStoryUrl}&fixture=repea
 const canvasNativeLargeStoryUrl = `${canvasNativeStoryUrl}&fixture=large`;
 const canvasNativeStreamingStoryUrl = `${canvasNativeStoryUrl}&fixture=streaming`;
 const canvasNativeContentPadding = 28;
+const nativeInteractionMarkdown = `# Native rendered Markdown
+
+Click text, drag across blocks, then type directly on the rendered surface.
+
+- Selection is stored as source offsets.
+- The hidden textarea mirrors only the active source slice.
+- Cross-block replacement uses one source operation.
+
+Try **bold text**, \`inline code\`, [docs](https://example.com), 中文输入, and emoji 👨‍👩‍👧‍👦.`;
+const canvasInteractionMarkdown = `# Canvas native editor
+
+Click text, drag across blocks, then type directly on the rendered canvas.
+
+- Selection is stored as source offsets.
+- The hidden textarea mirrors only the active source slice.
+- Cross-block replacement uses one source operation.
+
+Widths iiiii WWWW done.
+
+Try **bold text**, \`inline code\`, [docs](https://example.com), 中文输入, and emoji 👨‍👩‍👧‍👦.`;
 const blankRunMarkdownFixture = [
   "# Canvas native editor",
   "",
@@ -200,6 +220,29 @@ async function readCanvasRenderDebug(page: Page) {
   };
 }
 
+async function readCanvasElementMetrics(page: Page) {
+  return page.evaluate(() => {
+    const canvas = document.querySelector<HTMLCanvasElement>("[data-canvas-native-editor]");
+    const editor = document.querySelector<HTMLElement>(".pcne-editor");
+    const render = JSON.parse(
+      document.querySelector("[data-canvas-debug-render]")?.textContent ?? "{}",
+    ) as {
+      viewport?: { scrollTop: number; height: number; overscanY: number };
+    };
+    const canvasRect = canvas?.getBoundingClientRect();
+    const editorRect = editor?.getBoundingClientRect();
+    return {
+      cssWidth: canvasRect?.width ?? 0,
+      cssHeight: canvasRect?.height ?? 0,
+      editorHeight: editorRect?.height ?? 0,
+      bitmapWidth: canvas?.width ?? 0,
+      bitmapHeight: canvas?.height ?? 0,
+      devicePixelRatio: window.devicePixelRatio || 1,
+      viewport: render.viewport,
+    };
+  });
+}
+
 async function insertCanvasTextAt(page: Page, offset: number, text: string) {
   await page.evaluate(
     ({ offset, text }) =>
@@ -324,6 +367,24 @@ async function canvasFragmentForText(page: Page, text: string) {
       }
     ).__premarkCanvasNativeEditor!;
     return editor.fragmentForText(needle);
+  }, text);
+}
+
+async function canvasHasFragmentForText(page: Page, text: string) {
+  return page.evaluate((needle) => {
+    const editor = (
+      window as typeof window & {
+        __premarkCanvasNativeEditor?: {
+          fragmentForText(text: string): unknown;
+        };
+      }
+    ).__premarkCanvasNativeEditor!;
+    try {
+      editor.fragmentForText(needle);
+      return true;
+    } catch {
+      return false;
+    }
   }, text);
 }
 
@@ -545,6 +606,18 @@ async function pasteCanvasMarkdown(page: Page, markdown: string) {
 }
 
 test.describe("Premark native editor story", () => {
+  test("ships table and image examples in the default editor fixtures", async ({ page }) => {
+    await page.goto(storyUrl);
+    await expect(page.locator("[data-editor-surface]")).toContainText("Native rendered Markdown");
+    expect(await editorMarkdown(page)).toContain("| Element | Active editing behavior |");
+    expect(await editorMarkdown(page)).toContain("![Tiny sample image](data:image/svg+xml");
+
+    await page.goto(canvasNativeStoryUrl);
+    await expect(page.locator("[data-canvas-native-editor]")).toBeVisible();
+    expect(await canvasEditorMarkdown(page)).toContain("| Element | Active editing behavior |");
+    expect(await canvasEditorMarkdown(page)).toContain("![Tiny sample image](data:image/svg+xml");
+  });
+
   test("captures deterministic screenshot-mode editor states", async ({ page }, testInfo) => {
     await page.goto(screenshotStoryUrl);
 
@@ -773,6 +846,47 @@ test.describe("Premark native editor story", () => {
     }
   });
 
+  test("auto-sizes the Canvas native example to the rendered document height", async ({ page }) => {
+    await page.goto(canvasNativeStoryUrl);
+
+    const canvas = page.locator("[data-canvas-native-editor]");
+    const root = page.locator(".pcne-root");
+    await expect(canvas).toBeVisible();
+    await expect(root).toHaveAttribute("data-fonts-ready", "1");
+
+    await setCanvasEditorMarkdown(
+      page,
+      [
+        "# Auto height",
+        "",
+        ...Array.from({ length: 28 }, (_, index) => `Visible source line ${index + 1}`),
+      ].join("\n"),
+    );
+
+    await expect
+      .poll(async () => (await readCanvasElementMetrics(page)).cssHeight)
+      .toBeGreaterThan(430);
+    await expect
+      .poll(async () => {
+        const metrics = await readCanvasElementMetrics(page);
+        return Math.round(
+          (metrics.viewport?.height ?? 0) - (metrics.cssHeight - canvasNativeContentPadding * 2),
+        );
+      })
+      .toBe(0);
+
+    const metrics = await readCanvasElementMetrics(page);
+    expect(metrics.cssWidth).toBe(780);
+    expect(metrics.editorHeight).toBeCloseTo(metrics.cssHeight, 0);
+    expect(metrics.bitmapWidth).toBe(Math.round(metrics.cssWidth * metrics.devicePixelRatio));
+    expect(metrics.bitmapHeight).toBe(Math.round(metrics.cssHeight * metrics.devicePixelRatio));
+    expect(metrics.viewport?.height).toBeCloseTo(
+      metrics.cssHeight - canvasNativeContentPadding * 2,
+      0,
+    );
+    expect(metrics.viewport?.scrollTop).toBe(0);
+  });
+
   test("supports Canvas native editor hit-test, typing, drag replacement and composition", async ({
     page,
   }, testInfo) => {
@@ -783,8 +897,9 @@ test.describe("Premark native editor story", () => {
     const bridge = page.locator("[data-canvas-input-bridge]");
     const source = page.locator("[data-canvas-debug-source]");
     await expect(canvas).toBeVisible();
-    await expect(source).toContainText("Canvas native editor");
     await expect(root).toHaveAttribute("data-fonts-ready", "1");
+    await setCanvasEditorMarkdown(page, canvasInteractionMarkdown);
+    await expect(source).toContainText("Canvas native editor");
 
     const headingTextStart = await canvasSourceOffset(page, "Canvas native editor");
     await setCanvasCaret(page, 0);
@@ -874,6 +989,7 @@ test.describe("Premark native editor story", () => {
     const root = page.locator(".pcne-root");
     await expect(canvas).toBeVisible();
     await expect(root).toHaveAttribute("data-fonts-ready", "1");
+    await setCanvasEditorMarkdown(page, canvasInteractionMarkdown);
 
     const widthsPoint = await canvasPointForText(page, "Widths");
     await canvas.click({ position: widthsPoint });
@@ -931,6 +1047,36 @@ test.describe("Premark native editor story", () => {
     const a = await canvasPointForText(page, "a");
     const b = await canvasPointForText(page, "b");
     expect(b.y - a.y).toBeCloseTo(geometry.headCaret.rect.height * 3, 0);
+  });
+
+  test("keeps leading spaces as source text instead of indented code in Canvas editor", async ({
+    page,
+  }) => {
+    await page.goto(canvasNativeStoryUrl);
+
+    const canvas = page.locator("[data-canvas-native-editor]");
+    const root = page.locator(".pcne-root");
+    const bridge = page.locator("[data-canvas-input-bridge]");
+    await expect(canvas).toBeVisible();
+    await expect(root).toHaveAttribute("data-fonts-ready", "1");
+    await setCanvasEditorMarkdown(page, "abc");
+
+    const start = await canvasPointForText(page, "abc");
+    await canvas.click({ position: start });
+    await expect(bridge).toBeFocused();
+    await page.keyboard.type("    ");
+
+    expect(await canvasEditorMarkdown(page)).toBe("    abc");
+    const fragment = await canvasFragmentForText(page, "abc");
+    expect(fragment.text).toBe("    abc");
+    expect(fragment.sourceRange).toEqual({ from: 0, to: 7 });
+
+    await setCanvasCaret(page, 0);
+    const startCaret = await readCanvasGeometry(page);
+    await setCanvasCaret(page, 4);
+    const textStartCaret = await readCanvasGeometry(page);
+    expect(textStartCaret.headCaret.rect.x).toBeGreaterThan(startCaret.headCaret.rect.x + 8);
+    expect(await countCanvasCaretPixels(page)).toBeGreaterThan(0);
   });
 
   test("keeps Canvas native large documents on viewport incremental paths", async ({ page }) => {
@@ -1056,6 +1202,56 @@ test.describe("Premark native editor story", () => {
     expect(docsStart.headCaret.rect.x - linkOpen.headCaret.rect.x).toBeLessThan(8);
   });
 
+  test("renders only the active Canvas table block as raw source text", async ({ page }) => {
+    await page.goto(canvasNativeStoryUrl);
+
+    const canvas = page.locator("[data-canvas-native-editor]");
+    const root = page.locator(".pcne-root");
+    await expect(canvas).toBeVisible();
+    await expect(root).toHaveAttribute("data-fonts-ready", "1");
+
+    const firstTable = "| A | B |\n| - | - |\n| **x** | y |";
+    const secondTable = "| C | D |\n| - | - |\n| 1 | 2 |";
+    const markdown = `${firstTable}\n\noutside\n\n${secondTable}`;
+    await setCanvasEditorMarkdown(page, markdown);
+
+    await setCanvasCaret(page, markdown.indexOf("x"));
+    const rawRow = await canvasFragmentForText(page, "| **x** | y |");
+    expect(rawRow.sourceRange).toEqual({
+      from: markdown.indexOf("| **x** | y |"),
+      to: markdown.indexOf("| **x** | y |") + "| **x** | y |".length,
+    });
+    expect(await canvasHasFragmentForText(page, "| 1 | 2 |")).toBe(false);
+
+    await setCanvasCaret(page, markdown.indexOf("outside"));
+    expect(await canvasHasFragmentForText(page, "| **x** | y |")).toBe(false);
+  });
+
+  test("renders only the active Canvas image block as raw source text", async ({ page }) => {
+    await page.goto(canvasNativeStoryUrl);
+
+    const canvas = page.locator("[data-canvas-native-editor]");
+    const root = page.locator(".pcne-root");
+    await expect(canvas).toBeVisible();
+    await expect(root).toHaveAttribute("data-fonts-ready", "1");
+
+    const firstImage = "![alt](./one.png)";
+    const secondImage = "![other](./two.png)";
+    const markdown = `${firstImage}\n\noutside\n\n${secondImage}`;
+    await setCanvasEditorMarkdown(page, markdown);
+
+    await setCanvasCaret(page, markdown.indexOf("alt"));
+    const rawImage = await canvasFragmentForText(page, firstImage);
+    expect(rawImage.sourceRange).toEqual({
+      from: 0,
+      to: firstImage.length,
+    });
+    expect(await canvasHasFragmentForText(page, secondImage)).toBe(false);
+
+    await setCanvasCaret(page, markdown.indexOf("outside"));
+    expect(await canvasHasFragmentForText(page, firstImage)).toBe(false);
+  });
+
   test("supports double-click word and triple-click block selection", async ({ page }) => {
     await page.goto(storyUrl);
 
@@ -1135,6 +1331,7 @@ test.describe("Premark native editor story", () => {
     const root = page.locator(".pcne-root");
     await expect(canvas).toBeVisible();
     await expect(root).toHaveAttribute("data-fonts-ready", "1");
+    await setCanvasEditorMarkdown(page, canvasInteractionMarkdown);
 
     const wordStartPoint = await canvasPointForText(page, "WWWW");
     const wordEndPoint = await canvasPointForText(page, "WWWW", "end");
@@ -1196,6 +1393,8 @@ test.describe("Premark native editor story", () => {
     await page.goto(storyUrl);
 
     const surface = page.locator("[data-editor-surface]");
+    await expect(surface).toContainText("inline code");
+    await setEditorMarkdown(page, nativeInteractionMarkdown);
     await expect(surface).toContainText("inline code");
     const box = await surface.boundingBox();
     expect(box).not.toBeNull();

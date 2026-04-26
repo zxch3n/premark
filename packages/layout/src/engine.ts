@@ -3,9 +3,11 @@ import {
   incrementalParse,
   type IncrementalParseResult,
   type IncrementalParseState,
+  type MarkdownParseOptions,
+  type MarkdownParseMode,
   type BlockSpan,
   type MarkdownBlock,
-  type MarkdownInline,
+  type TextChange,
 } from "@pretext-md/parser";
 
 import { hashContent, type BlockCache } from "./cache.ts";
@@ -209,24 +211,6 @@ function plainInlineText(nodes: NonNullable<NormalizedBlock["inline"]>): string 
     .join("");
 }
 
-function inlineContainsSourceBreak(nodes: readonly MarkdownInline[]): boolean {
-  return nodes.some((node) => {
-    switch (node.type) {
-      case "softbreak":
-      case "hardbreak":
-        return true;
-      case "strong":
-      case "emphasis":
-      case "strikethrough":
-      case "link":
-      case "image":
-        return inlineContainsSourceBreak(node.children);
-      default:
-        return false;
-    }
-  });
-}
-
 function stripHtmlMarkup(html: string): string {
   return html
     .replace(/<[^>]+>/gu, " ")
@@ -249,6 +233,7 @@ function translateLine(
   blockIndex: number,
   firstLineIndex: number,
   yOffset: number,
+  sourceChange?: TextChange | null,
 ): LayoutLine {
   if (line.kind === "text") {
     return {
@@ -256,7 +241,7 @@ function translateLine(
       blockIndex,
       index: firstLineIndex + line.lineIndexInBlock,
       y: line.y + yOffset,
-      fragments: line.fragments.map((fragment) => ({ ...fragment })),
+      fragments: line.fragments.map((fragment) => translateFragment(fragment, sourceChange)),
     };
   }
 
@@ -266,6 +251,40 @@ function translateLine(
     index: firstLineIndex + line.lineIndexInBlock,
     y: line.y + yOffset,
   };
+}
+
+function translateFragment(
+  fragment: TextLine["fragments"][number],
+  sourceChange: TextChange | null | undefined,
+): TextLine["fragments"][number] {
+  if (sourceChange === undefined || sourceChange === null) {
+    return { ...fragment };
+  }
+
+  const sourceOffsets = fragment.sourceOffsets?.map((offset) =>
+    transformSourceOffsetAfterChange(offset, sourceChange),
+  );
+  return {
+    ...fragment,
+    sourceOffsets,
+    sourceRange:
+      sourceOffsets !== undefined && sourceOffsets.length > 0
+        ? {
+            from: Math.min(...sourceOffsets),
+            to: Math.max(...sourceOffsets),
+          }
+        : fragment.sourceRange,
+  };
+}
+
+function transformSourceOffsetAfterChange(offset: number, change: TextChange): number {
+  if (offset < change.fromA) {
+    return offset;
+  }
+  if (offset >= change.toA) {
+    return offset + (change.toB - change.fromB) - (change.toA - change.fromA);
+  }
+  return change.fromB;
 }
 
 function getRenderType(block: NormalizedBlock): BlockType {
@@ -295,6 +314,10 @@ export class LayoutEngineImpl implements LayoutEngine {
 
   private readonly lineBreakMode: NonNullable<StyleConfig["lineBreakMode"]>;
 
+  private readonly parseMode: MarkdownParseMode;
+
+  private readonly parseOptions: MarkdownParseOptions;
+
   private version = 0;
 
   private blockCaches: InternalBlockCache[] = [];
@@ -303,7 +326,7 @@ export class LayoutEngineImpl implements LayoutEngine {
 
   private lastMarkdown = "";
 
-  private lastParseState: IncrementalParseState = createIncrementalParseState();
+  private lastParseState: IncrementalParseState;
 
   private lastBlocks: readonly MarkdownBlock[] = [];
 
@@ -321,13 +344,19 @@ export class LayoutEngineImpl implements LayoutEngine {
     this.fonts = resolveFonts(config.fontTheme, config.fontOverrides);
     this.highlighter = config.highlighter;
     this.lineBreakMode = config.lineBreakMode ?? "markdown";
+    this.parseMode = this.lineBreakMode === "source" ? "source" : "markdown";
+    this.parseOptions = {
+      mode: this.parseMode,
+      sourceTextBlockRanges: config.sourceTextBlockRanges,
+    };
+    this.lastParseState = createIncrementalParseState("", this.parseOptions);
   }
 
   layout(markdown: string, containerWidth: number): DocumentLayout {
     const parseResult =
       this.lastMarkdown.length === 0 && this.lastParseState.text.length === 0
         ? (() => {
-            const state = createIncrementalParseState(markdown);
+            const state = createIncrementalParseState(markdown, this.parseOptions);
             return {
               state,
               mode: "full",
@@ -349,7 +378,10 @@ export class LayoutEngineImpl implements LayoutEngine {
               | "removedCount"
             >;
           })()
-        : incrementalParse(this.lastParseState, markdown);
+        : incrementalParse(this.lastParseState, markdown, {
+            parseMode: this.parseMode,
+            sourceTextBlockRanges: this.parseOptions.sourceTextBlockRanges,
+          });
 
     return this.applyParseResult(parseResult as IncrementalParseResult, containerWidth);
   }
@@ -360,7 +392,7 @@ export class LayoutEngineImpl implements LayoutEngine {
     markdown = this.lastMarkdown,
   ): DocumentLayout {
     const normalizedDocument = normalizeDocument(blocks, this.spacing);
-    const parseState = createIncrementalParseState(markdown);
+    const parseState = createIncrementalParseState(markdown, this.parseOptions);
     const layout = this.layoutNormalizedBlocks(
       normalizedDocument.blocks,
       containerWidth,
@@ -404,7 +436,7 @@ export class LayoutEngineImpl implements LayoutEngine {
     this.blockCaches = [];
     this.preparedBlockMemo.clear();
     this.lastBlocks = [];
-    this.lastParseState = createIncrementalParseState();
+    this.lastParseState = createIncrementalParseState("", this.parseOptions);
     this.lastNormalizedDocument = emptyNormalizedDocument();
     this.lastLayout = emptyLayout(this.version, 0);
     this.lastDirtyFromLayoutBlock = 0;
@@ -593,15 +625,18 @@ export class LayoutEngineImpl implements LayoutEngine {
     });
   }
 
-  private prepareBlock(block: NormalizedBlock): PreparedBlock {
+  private prepareBlock(
+    block: NormalizedBlock,
+    blockSpans: readonly BlockSpan[] = [],
+  ): PreparedBlock {
     if (block.type === "heading" || block.type === "paragraph") {
       const typography = this.getBaseTypography(block);
       const prefix = createListPrefix(block.context.listMarker, this.fonts, this.spacing);
       const plain =
+        this.lineBreakMode === "markdown" &&
         block.inline !== undefined &&
         inlineIsPlainText(block.inline) &&
-        prefix === undefined &&
-        (this.lineBreakMode === "markdown" || !inlineContainsSourceBreak(block.inline));
+        prefix === undefined;
       if (plain && block.inline !== undefined) {
         return {
           kind: "text",
@@ -622,6 +657,7 @@ export class LayoutEngineImpl implements LayoutEngine {
           baseFont: typography.font,
           lineHeight: typography.lineHeight,
           lineBreakMode: this.lineBreakMode,
+          sourceOffsetBase: blockSpans[block.sourceBlockIndex]?.from ?? 0,
           prefix,
         }),
       };
@@ -675,6 +711,10 @@ export class LayoutEngineImpl implements LayoutEngine {
     return {
       kind: "thematic_break",
     };
+  }
+
+  private canReusePreparedBlocks(): boolean {
+    return this.lineBreakMode !== "source";
   }
 
   private getMemoizedPreparedBlock(contentKey: string): PreparedBlock | undefined {
@@ -894,6 +934,7 @@ export class LayoutEngineImpl implements LayoutEngine {
           dirtyToLayoutBlock,
           parseResult.state.text,
           parseResult.state.blockSpans,
+          parseResult.change,
         );
     const layoutWithUpdate = attachLayoutUpdate(
       layout,
@@ -1019,6 +1060,7 @@ export class LayoutEngineImpl implements LayoutEngine {
     dirtyToBlock: number,
     markdown: string,
     blockSpans: readonly BlockSpan[],
+    sourceChange: TextChange | null,
   ): DocumentLayout {
     if (normalizedDocument.blocks.length === 0) {
       this.version += 1;
@@ -1063,10 +1105,14 @@ export class LayoutEngineImpl implements LayoutEngine {
       const contentHash = normalized.contentHash;
       const contentKey = normalized.contentKey;
       const cache = this.blockCaches[blockIndex];
+      const canReusePreparedBlock = this.canReusePreparedBlocks();
       const preparedBlock =
-        cache !== undefined && cache.contentKey === contentKey
+        canReusePreparedBlock && cache !== undefined && cache.contentKey === contentKey
           ? cache.preparedBlock
-          : (this.getMemoizedPreparedBlock(contentKey) ?? this.prepareBlock(normalized));
+          : canReusePreparedBlock
+            ? (this.getMemoizedPreparedBlock(contentKey) ??
+              this.prepareBlock(normalized, blockSpans))
+            : this.prepareBlock(normalized, blockSpans);
       const measured = this.layoutPreparedBlock(
         normalized,
         preparedBlock,
@@ -1088,7 +1134,9 @@ export class LayoutEngineImpl implements LayoutEngine {
         layoutWidth: width,
         block: measured.block,
       });
-      this.rememberPreparedBlock(contentKey, preparedBlock);
+      if (canReusePreparedBlock) {
+        this.rememberPreparedBlock(contentKey, preparedBlock);
+      }
       cursorY += measured.block.height;
       previousMarginBottom = normalized.marginBottom;
     }
@@ -1117,7 +1165,7 @@ export class LayoutEngineImpl implements LayoutEngine {
           oldBlock.firstLineIndex + oldBlock.lineCount,
         );
         const translatedLines = oldLines.map((line) =>
-          translateLine(line, newIndex, lines.length, yOffset),
+          translateLine(line, newIndex, lines.length, yOffset, sourceChange),
         );
         const translatedBlock: BlockLayout = {
           ...oldBlock,
@@ -1195,7 +1243,13 @@ export class LayoutEngineImpl implements LayoutEngine {
       const contentKey = block.contentKey;
       const cache = this.blockCaches[blockIndex];
 
-      if (cache !== undefined && cache.contentKey === contentKey && cache.layoutWidth === width) {
+      const canReusePreparedBlock = this.canReusePreparedBlocks();
+      if (
+        canReusePreparedBlock &&
+        cache !== undefined &&
+        cache.contentKey === contentKey &&
+        cache.layoutWidth === width
+      ) {
         const translatedLines = cache.lines.map((line) =>
           translateLine(line, blockIndex, lines.length, cursorY - cache.block.y),
         );
@@ -1222,9 +1276,11 @@ export class LayoutEngineImpl implements LayoutEngine {
       }
 
       const preparedBlock =
-        cache !== undefined && cache.contentKey === contentKey
+        canReusePreparedBlock && cache !== undefined && cache.contentKey === contentKey
           ? cache.preparedBlock
-          : (this.getMemoizedPreparedBlock(contentKey) ?? this.prepareBlock(block));
+          : canReusePreparedBlock
+            ? (this.getMemoizedPreparedBlock(contentKey) ?? this.prepareBlock(block, blockSpans))
+            : this.prepareBlock(block, blockSpans);
       const measured = this.layoutPreparedBlock(
         block,
         preparedBlock,
@@ -1246,7 +1302,9 @@ export class LayoutEngineImpl implements LayoutEngine {
         layoutWidth: width,
         block: measured.block,
       });
-      this.rememberPreparedBlock(contentKey, preparedBlock);
+      if (canReusePreparedBlock) {
+        this.rememberPreparedBlock(contentKey, preparedBlock);
+      }
       cursorY += measured.block.height;
       previousMarginBottom = block.marginBottom;
     });

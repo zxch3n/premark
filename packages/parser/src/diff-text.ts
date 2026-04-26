@@ -1,10 +1,14 @@
 import type { IncrementalParseOptions, TextChange } from "./types.ts";
 
+type IncrementalThresholdOptions = Required<
+  Pick<IncrementalParseOptions, "maxChangedChars" | "maxChangedRatio" | "maxChangedLines">
+>;
+
 export const DEFAULT_INCREMENTAL_OPTIONS = {
   maxChangedChars: 4096,
   maxChangedRatio: 0.2,
   maxChangedLines: 120,
-} satisfies Required<IncrementalParseOptions>;
+} satisfies IncrementalThresholdOptions;
 
 export function simpleDiff(oldText: string, newText: string): TextChange | null {
   if (oldText === newText) {

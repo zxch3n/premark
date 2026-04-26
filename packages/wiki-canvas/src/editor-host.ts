@@ -84,10 +84,19 @@ export interface PremarkCanvasEditorHost {
   readonly context: CanvasRenderingContext2D;
   render(options?: BrowserInputHostRenderOptions): PremarkCanvasEditorHostRenderState;
   dispose(): void;
+  resize(size: PremarkCanvasEditorHostSize): void;
   scrollTo(scrollTop: number): void;
   pointForSourceRange(from: number, to: number): { x: number; y: number };
   pointForText(text: string, edge?: "start" | "end"): { x: number; y: number };
   fragmentForText(text: string): EditableFragment;
+}
+
+export interface PremarkCanvasEditorHostSize {
+  readonly width?: number;
+  readonly height?: number;
+  readonly viewportHeight?: number;
+  readonly overscanY?: number;
+  readonly scrollTop?: number;
 }
 
 const DEFAULT_CONTENT_PADDING = 28;
@@ -104,10 +113,16 @@ class PremarkCanvasEditorHostImpl implements PremarkCanvasEditorHost {
   private readonly inputHost;
   private readonly cleanups: Array<() => void> = [];
   private readonly contentPadding: number;
-  private readonly viewportHeight: number;
-  private readonly overscanY: number;
+  private width: number;
+  private height: number;
+  private viewportHeight: number;
+  private overscanY: number;
   private activeEditableIndex: EditableLayoutIndex;
   private lastSnapshot: PremarkEditorRenderSnapshot | null = null;
+  private readonly requestImageRepaint = () => {
+    if (!this.options.canvas.isConnected) return;
+    this.render({ syncBridgeValue: false });
+  };
 
   constructor(private readonly options: PremarkCanvasEditorHostOptions) {
     const ctx = options.canvas.getContext("2d");
@@ -116,8 +131,10 @@ class PremarkCanvasEditorHostImpl implements PremarkCanvasEditorHost {
     }
     this.context = ctx;
     this.contentPadding = options.contentPadding ?? DEFAULT_CONTENT_PADDING;
+    this.width = options.width;
+    this.height = options.height;
     this.viewportHeight =
-      options.viewportHeight ?? Math.max(0, options.height - this.contentPadding * 2);
+      options.viewportHeight ?? Math.max(0, this.height - this.contentPadding * 2);
     this.overscanY = options.overscanY ?? this.viewportHeight;
     this.activeEditableIndex = options.editor.editableIndex;
 
@@ -159,8 +176,8 @@ class PremarkCanvasEditorHostImpl implements PremarkCanvasEditorHost {
       snapshot,
       geometry,
       editableIndex: snapshot.editableIndex,
-      width: this.options.width,
-      height: this.options.height,
+      width: this.width,
+      height: this.height,
       contentPadding: this.contentPadding,
     };
 
@@ -184,6 +201,32 @@ class PremarkCanvasEditorHostImpl implements PremarkCanvasEditorHost {
     for (const cleanup of this.cleanups.splice(0)) {
       cleanup();
     }
+  }
+
+  resize(size: PremarkCanvasEditorHostSize): void {
+    const nextWidth = Math.max(1, size.width ?? this.width);
+    const nextHeight = Math.max(1, size.height ?? this.height);
+    const nextViewportHeight =
+      size.viewportHeight ?? Math.max(0, nextHeight - this.contentPadding * 2);
+    const nextOverscanY = size.overscanY ?? nextViewportHeight;
+
+    if (nextWidth !== this.width) {
+      this.options.controller.resize(Math.max(0, nextWidth - this.contentPadding * 2));
+    }
+
+    this.width = nextWidth;
+    this.height = nextHeight;
+    this.viewportHeight = Math.max(0, nextViewportHeight);
+    this.overscanY = Math.max(0, nextOverscanY);
+
+    const snapshot = this.options.controller.renderSnapshot();
+    const maxScrollTop = Math.max(0, snapshot.layout.totalHeight - this.viewportHeight);
+    this.options.controller.setViewport({
+      scrollTop: Math.min(maxScrollTop, Math.max(0, size.scrollTop ?? snapshot.viewport.scrollTop)),
+      height: this.viewportHeight,
+      overscanY: this.overscanY,
+    });
+    this.applyPixelRatio();
   }
 
   scrollTo(scrollTop: number): void {
@@ -232,7 +275,7 @@ class PremarkCanvasEditorHostImpl implements PremarkCanvasEditorHost {
   private drawDocument(state: PremarkCanvasEditorHostRenderState): void {
     const paint = this.options.paint;
     const drawDocument = paint?.drawDocument ?? drawTile;
-    drawDocument(this.context, state.snapshot.layout, this.options.width, this.options.height, {
+    drawDocument(this.context, state.snapshot.layout, this.width, this.height, {
       title: paint?.title,
       titleBarHeight: paint?.titleBarHeight,
       cardRadius: paint?.cardRadius ?? 0,
@@ -245,15 +288,16 @@ class PremarkCanvasEditorHostImpl implements PremarkCanvasEditorHost {
       compositionRects: state.snapshot.compositionRects,
       compositionColor: paint?.compositionColor ?? paint?.caretColor ?? "#7dd3ae",
       palette: paint?.palette ?? darkTilePalette,
+      requestRepaint: this.requestImageRepaint,
     });
   }
 
   private applyPixelRatio(): void {
     const ratio = this.pixelRatio();
-    this.options.canvas.style.width = `${this.options.width}px`;
-    this.options.canvas.style.height = `${this.options.height}px`;
-    const pixelWidth = Math.round(this.options.width * ratio);
-    const pixelHeight = Math.round(this.options.height * ratio);
+    this.options.canvas.style.width = `${this.width}px`;
+    this.options.canvas.style.height = `${this.height}px`;
+    const pixelWidth = Math.round(this.width * ratio);
+    const pixelHeight = Math.round(this.height * ratio);
     if (this.options.canvas.width !== pixelWidth) {
       this.options.canvas.width = pixelWidth;
     }
