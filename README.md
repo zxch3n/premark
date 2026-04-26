@@ -16,6 +16,9 @@ It is designed for cases where you need more than "turn Markdown into HTML":
 - `@pretext-md/layout`: headless layout engine that produces line-level layout IR
 - `@pretext-md/highlight`: Prism-based syntax highlighting
 - `@pretext-md/html-renderer`: Layout IR to HTML + CSS
+- `@pretext-md/editor`: native rendered Markdown editor core
+- `@pretext-md/wiki-canvas`: canvas editor host and large-canvas Markdown viewer
+- `@pretext-md/workspace`: tiled workspace/search engine for large Markdown sets
 
 The repo also includes:
 
@@ -94,6 +97,131 @@ const { html, css } = renderToHtml(layout, {
 ```
 
 The renderer returns a ready-to-embed HTML string and CSS string. The layout is already computed, so no client-side re-measurement is required.
+
+## Native Rendered Markdown Editor
+
+The editor path is built around rendered Markdown, not a CodeMirror overlay. Markdown source offsets are the source of truth, and the rendered view is a projection over that source. This lets DOM, Canvas, selection geometry, IME composition, and remote edits share the same document model.
+
+### Core controller
+
+```ts
+import {
+  createInMemoryEditorDocumentState,
+  createPremarkEditorController,
+  LocalUndoManager,
+} from "@pretext-md/editor";
+
+const editor = createInMemoryEditorDocumentState(markdown, 720, {
+  fontTheme: "modern",
+  highlighter,
+});
+const undoManager = new LocalUndoManager();
+const controller = createPremarkEditorController({ state: editor, undoManager });
+
+controller.setCaret(0);
+controller.replaceSelection("Hello ");
+
+const snapshot = controller.renderSnapshot();
+console.log(snapshot.layout.totalHeight);
+console.log(snapshot.selection);
+```
+
+Important controller methods:
+
+- `markdown()`: read the current Markdown source
+- `setMarkdown(markdown, options)`: replace the document
+- `setCaret(offset)` / `setSelection(anchor, head)`: move the source selection
+- `replaceSelection(text)` / `applyEdit(operation, options)`: apply local edits
+- `applyRemotePatch({ origin, actorId, changes })`: apply remote or AI patches without adding them to local undo history
+- `undo()` / `redo()`: run local undo history
+- `resize(width)` / `setViewport(options)`: rebuild layout geometry for a new width or viewport
+- `renderSnapshot()`: produce the current layout, editable source map, selection rects input, active Markdown controls, composition view, and dirty rect metadata
+
+### DOM editor host
+
+Use the DOM host when you want normal HTML rendering with native browser input routed through a hidden textarea.
+
+```ts
+import { createPremarkDomEditorHost, renderToHtml } from "@pretext-md/html-renderer";
+
+const host = createPremarkDomEditorHost({
+  editor,
+  controller,
+  undoManager,
+  surface: document.querySelector("[data-editor-surface]")!,
+  overlay: document.querySelector("[data-editor-overlay]")!,
+  inputBridge: document.querySelector("[data-input-bridge]")!,
+  contentInset: { x: 28, y: 28 },
+  renderMarkdown(snapshot) {
+    return renderToHtml(snapshot.layout, {
+      codeThemeCss: highlighter.getThemeCss("dark"),
+    });
+  },
+});
+
+host.render();
+```
+
+The DOM host owns pointer selection, keyboard input, clipboard, IME composition, hidden textarea positioning, caret overlay, selection overlay, and composition overlay. The app supplies the actual elements and can customize overlay class names or overlay renderers.
+
+### Canvas editor host
+
+Use the Canvas host when the rendered Markdown is painted into a canvas surface, for example inside a huge workspace or tile view.
+
+```ts
+import { createPremarkCanvasEditorHost, darkTilePalette } from "@pretext-md/wiki-canvas";
+
+const host = createPremarkCanvasEditorHost({
+  editor,
+  controller,
+  undoManager,
+  canvas: document.querySelector("canvas")!,
+  inputBridge: document.querySelector("[data-input-bridge]")!,
+  width: 780,
+  height: 480,
+  contentPadding: 28,
+  paint: {
+    palette: darkTilePalette,
+    selectionColor: "rgba(52, 139, 99, 0.34)",
+    caretColor: "#7dd3ae",
+    compositionColor: "#7dd3ae",
+  },
+});
+
+host.render();
+```
+
+The Canvas host handles device-pixel-ratio scaling, hit testing, wheel scrolling, textarea positioning, selection/caret painting, composition painting, and image repaint callbacks. It also exposes `resize()`, `scrollTo()`, `pointForSourceRange()`, and `fragmentForText()` for host integration and tests.
+
+### Remote and AI edits
+
+Remote collaborators and AI streaming should use explicit source patches:
+
+```ts
+controller.applyRemotePatch({
+  origin: "ai",
+  actorId: "assistant",
+  changes: [{ from: offset, to: offset, insert: " streamed text" }],
+});
+
+host.render({ syncBridgeValue: false });
+```
+
+Remote patches transform the local selection and composition state through source offsets. They do not enter the local undo stack.
+
+### Editing invariants
+
+- Source offsets are authoritative for caret, selection, hit testing, and rendering.
+- Grapheme clusters are the smallest editable text boundary.
+- Source-mode editing preserves every `\n` as a visual line advance.
+- Leading and repeated spaces remain editable source text.
+- Markdown control characters become visible when the caret is inside or adjacent to the range they affect.
+- Tables and images render as plain Markdown source while the caret is inside their source lines; otherwise they render normally.
+
+Interactive examples are available in Storybook:
+
+- `Editing/Premark Native Editor`
+- `Editing/Premark Canvas Native Editor`
 
 ## Streaming Layout
 
@@ -222,6 +350,7 @@ The examples under [`examples/markdown`](./examples/markdown) are the best conci
 - `vp run storybook`: launch Storybook
 - `vp run storybook:build`: build Storybook
 - `vp run benchmark:incremental`: run incremental parser/layout benchmark
+- `vp run benchmark:native-editor`: run native editor layout/editing benchmark
 - `vp run render:examples`: render bundled Markdown examples to PNG
 
 ## Project Layout
@@ -232,6 +361,9 @@ packages/
   layout/         Headless layout engine and streaming delta logic
   highlight/      Prism integration
   html-renderer/  HTML + CSS renderer
+  editor/         Native rendered Markdown editor core
+  wiki-canvas/    Canvas editor host and large-canvas viewer
+  workspace/      Tiled workspace/search engine
 apps/
   playground/     Local playground app
 examples/
